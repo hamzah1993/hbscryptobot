@@ -158,26 +158,28 @@ model TradingSubPosition {
 }
 
 model TradingOrder {
-  id               String          @id @default(uuid())
-  userId           String
-  positionId       String
-  exchangeOrderId  String?
-  clientOrderId    String          @unique
-  side             OrderSide
-  type             OrderType
-  status           OrderStatus     @default(PENDING)
-  level            Int             @default(1)
-  independent      Boolean         @default(false)
-  quantity         Decimal         @db.Decimal(28, 12)
-  price            Decimal?        @db.Decimal(28, 12)
-  filledQuantity   Decimal         @default(0) @db.Decimal(28, 12)
-  quoteAmount      Decimal         @default(0) @db.Decimal(28, 8)
-  averageFillPrice Decimal?        @db.Decimal(28, 12)
-  errorMessage     String?
-  position         TradingPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
-  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id                       String          @id @default(uuid())
+  userId                   String
+  positionId               String
+  exchangeOrderId          String?
+  clientOrderId            String          @unique
+  side                     OrderSide
+  type                     OrderType
+  status                   OrderStatus     @default(PENDING)
+  level                    Int             @default(1)
+  independent              Boolean         @default(false)
+  quantity                 Decimal         @db.Decimal(28, 12)
+  price                    Decimal?        @db.Decimal(28, 12)
+  filledQuantity           Decimal         @default(0) @db.Decimal(28, 12)
+  quoteAmount              Decimal         @default(0) @db.Decimal(28, 8)
+  averageFillPrice         Decimal?        @db.Decimal(28, 12)
+  accountedFilledQuantity  Decimal         @default(0) @db.Decimal(28, 12)
+  accountedQuoteAmount     Decimal         @default(0) @db.Decimal(28, 8)
+  errorMessage             String?
+  position                 TradingPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  user                     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
 
   @@index([positionId, status])
   @@index([userId, createdAt])
