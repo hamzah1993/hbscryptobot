@@ -20,6 +20,7 @@ type BinanceOrderResponse = {
   status?: string;
   executedQty?: string;
   cummulativeQuoteQty?: string;
+  price?: string;
   fills?: BinanceOrderFill[];
 };
 
@@ -170,6 +171,45 @@ export class TestnetStrategyExecutionService {
       savedOrder,
       exchangeOrder,
     };
+  }
+
+  async syncOrder(userId: string, tradingOrderId: string) {
+    const order = await this.prisma.tradingOrder.findFirst({
+      where: { id: tradingOrderId, userId },
+      include: { position: { include: { strategy: true } } },
+    });
+    if (!order) throw new NotFoundException('Trading order not found');
+    if (!order.exchangeOrderId) {
+      throw new BadRequestException('Trading order does not have a Binance exchange order ID');
+    }
+    if (order.position.strategy.paperTrading || order.position.strategy.environment !== 'TESTNET') {
+      throw new BadRequestException('Only Binance testnet orders can be synchronized');
+    }
+
+    const exchangeOrder = (await this.testnetOrders.getOrder(
+      userId,
+      order.position.symbol,
+      order.exchangeOrderId,
+    )) as BinanceOrderResponse;
+
+    const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
+    const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
+    const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
+    const status = this.mapOrderStatus(exchangeOrder.status);
+
+    const updatedOrder = await this.prisma.tradingOrder.update({
+      where: { id: order.id },
+      data: {
+        status,
+        filledQuantity: executedQuantity,
+        quoteAmount,
+        price: averageFillPrice || Number(exchangeOrder.price ?? 0) || null,
+        averageFillPrice: averageFillPrice || null,
+      },
+      include: { position: true },
+    });
+
+    return { updatedOrder, exchangeOrder };
   }
 
   private calculateAverageFillPrice(
