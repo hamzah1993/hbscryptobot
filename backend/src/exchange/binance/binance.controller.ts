@@ -7,6 +7,16 @@ import { BinanceService, type BinanceEnvironment } from './binance.service';
 
 type AuthenticatedRequest = Request & { user: { sub: string } };
 
+type BinanceAccountBalance = {
+  asset?: string;
+  free?: string;
+  locked?: string;
+};
+
+type BinanceAccountResponse = {
+  balances?: BinanceAccountBalance[];
+};
+
 @Controller('exchange/binance')
 @UseGuards(JwtAuthGuard)
 export class BinanceController {
@@ -26,6 +36,43 @@ export class BinanceController {
     @Query('environment') environment: BinanceEnvironment = 'testnet',
   ) {
     return this.binance.getTickerPrice(symbol, environment);
+  }
+
+  @Get('testnet/balances')
+  async getTestnetBalances(@Req() request: AuthenticatedRequest) {
+    const credential = await this.credentials.getBinance(
+      request.user.sub,
+      ExchangeEnvironment.TESTNET,
+    );
+    const account = (await this.binance.getAccount(
+      credential.apiKey,
+      credential.apiSecret,
+      'testnet',
+    )) as BinanceAccountResponse;
+
+    const balances = (account.balances ?? [])
+      .map((balance) => {
+        const available = Number(balance.free ?? 0);
+        const locked = Number(balance.locked ?? 0);
+        const total = available + locked;
+
+        return {
+          asset: balance.asset ?? '',
+          available,
+          locked,
+          total,
+        };
+      })
+      .filter((balance) => balance.asset && balance.total > 0)
+      .sort((left, right) => right.total - left.total || left.asset.localeCompare(right.asset));
+
+    return {
+      exchange: 'BINANCE' as const,
+      environment: 'TESTNET' as const,
+      balances,
+      assetCount: balances.length,
+      fetchedAt: new Date().toISOString(),
+    };
   }
 
   @Post('account/test')
