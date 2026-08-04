@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
 import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
+import { TestnetActionTimelinePanel } from '../components/TestnetActionTimelinePanel';
 import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
 import { TestnetPositionsPanel } from '../components/TestnetPositionsPanel';
 import {
@@ -58,7 +59,8 @@ export function DashboardPage() {
       !token ||
       activeNav === 'Exchange accounts' ||
       activeNav === 'Trade history' ||
-      activeNav === 'Positions'
+      activeNav === 'Positions' ||
+      activeNav === 'Strategies'
     ) return;
     let cancelled = false;
 
@@ -153,14 +155,17 @@ export function DashboardPage() {
   const secondaryPage =
     activeNav === 'Exchange accounts' ||
     activeNav === 'Trade history' ||
-    activeNav === 'Positions';
+    activeNav === 'Positions' ||
+    activeNav === 'Strategies';
   const pageTitle = activeNav === 'Exchange accounts'
     ? 'Exchange accounts'
     : activeNav === 'Trade history'
       ? 'Testnet orders'
       : activeNav === 'Positions'
         ? 'Testnet positions'
-        : 'Trading dashboard';
+        : activeNav === 'Strategies'
+          ? 'Strategy action timeline'
+          : 'Trading dashboard';
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
@@ -220,6 +225,8 @@ export function DashboardPage() {
             <TestnetOrdersPanel token={token} />
           ) : activeNav === 'Positions' && token ? (
             <TestnetPositionsPanel token={token} />
+          ) : activeNav === 'Strategies' && token ? (
+            <TestnetActionTimelinePanel token={token} />
           ) : (
             <>
               {error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
