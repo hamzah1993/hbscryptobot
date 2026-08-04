@@ -3,7 +3,14 @@ import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
-export type TestnetStrategyRunnerAction = 'OPEN' | 'DCA' | 'TAKE_PROFIT' | 'HOLD' | 'SKIP' | 'ERROR';
+export type TestnetStrategyRunnerAction =
+  | 'OPEN'
+  | 'DCA'
+  | 'INDEPENDENT_ENTRY'
+  | 'TAKE_PROFIT'
+  | 'HOLD'
+  | 'SKIP'
+  | 'ERROR';
 
 export type TestnetStrategyRunnerResult = {
   strategyId: string;
@@ -180,12 +187,18 @@ export class TestnetStrategyRunnerService {
       }
 
       const quantity = quoteAmount / quote.price;
-      const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:dca:${nextLevel}`;
+      const independentFromLevel = Number(strategy.independentFromLevel);
+      const independent = nextLevel >= independentFromLevel;
+      const actionType = independent ? 'INDEPENDENT_ENTRY' : 'DCA_ENTRY';
+      const actionKey = independent
+        ? `strategy:${strategy.id}:position:${openPosition.id}:independent-entry:${nextLevel}`
+        : `strategy:${strategy.id}:position:${openPosition.id}:dca:${nextLevel}`;
+
       const execution = await this.testnetExecution.executeMarketOrder(userId, {
         strategyId: strategy.id,
         side: 'BUY',
         quantity,
-        actionType: 'DCA_ENTRY',
+        actionType,
         actionKey,
         level: nextLevel,
         triggerPrice: nextDcaPrice,
@@ -195,11 +208,15 @@ export class TestnetStrategyRunnerService {
       return {
         strategyId: strategy.id,
         symbol: strategy.symbol,
-        action: execution.duplicate ? 'SKIP' : 'DCA',
+        action: execution.duplicate ? 'SKIP' : independent ? 'INDEPENDENT_ENTRY' : 'DCA',
         price: quote.price,
         quantity,
         positionId: openPosition.id,
-        message: execution.duplicate ? 'DCA action was already claimed' : undefined,
+        message: execution.duplicate
+          ? independent
+            ? 'Independent entry action was already claimed'
+            : 'DCA action was already claimed'
+          : undefined,
       };
     } catch (error) {
       return {
