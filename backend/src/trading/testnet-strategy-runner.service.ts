@@ -3,7 +3,7 @@ import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
-export type TestnetStrategyRunnerAction = 'OPEN' | 'DCA' | 'HOLD' | 'SKIP' | 'ERROR';
+export type TestnetStrategyRunnerAction = 'OPEN' | 'DCA' | 'TAKE_PROFIT' | 'HOLD' | 'SKIP' | 'ERROR';
 
 export type TestnetStrategyRunnerResult = {
   strategyId: string;
@@ -100,6 +100,38 @@ export class TestnetStrategyRunnerService {
         };
       }
 
+      const totalQuantity = Number(openPosition.totalQuantity);
+      const takeProfitPrice = Number(openPosition.takeProfitPrice ?? 0);
+      if (
+        Number.isFinite(totalQuantity) &&
+        totalQuantity > 0 &&
+        Number.isFinite(takeProfitPrice) &&
+        takeProfitPrice > 0 &&
+        quote.price >= takeProfitPrice
+      ) {
+        const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:parent-exit`;
+        const execution = await this.testnetExecution.executeMarketOrder(userId, {
+          strategyId: strategy.id,
+          side: 'SELL',
+          quantity: totalQuantity,
+          actionType: 'PARENT_EXIT',
+          actionKey,
+          level: Math.max(Number(openPosition.dcaCount) + 1, 1),
+          triggerPrice: takeProfitPrice,
+          allowRunningStrategy: true,
+        });
+
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: execution.duplicate ? 'SKIP' : 'TAKE_PROFIT',
+          price: quote.price,
+          quantity: totalQuantity,
+          positionId: openPosition.id,
+          message: execution.duplicate ? 'Take-profit action was already claimed' : undefined,
+        };
+      }
+
       const dcaCount = Number(openPosition.dcaCount);
       const maxDcaOrders = Number(strategy.maxDcaOrders);
       const nextLevel = dcaCount + 2;
@@ -123,7 +155,7 @@ export class TestnetStrategyRunnerService {
           action: 'HOLD',
           price: quote.price,
           positionId: openPosition.id,
-          message: 'Next DCA trigger has not been reached',
+          message: 'No testnet exit or DCA trigger has been reached',
         };
       }
 
