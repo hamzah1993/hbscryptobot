@@ -22,6 +22,7 @@ import {
 const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Notifications', 'Exchange accounts', 'Trade history'];
 const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
 const notificationToastStorageKey = 'hbs-notifications-last-toast-at';
+const browserNotificationStorageKey = 'hbs-browser-notifications-enabled';
 
 function money(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -48,6 +49,9 @@ export function DashboardPage() {
   const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [toastNotifications, setToastNotifications] = useState<OperationalNotification[]>([]);
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(
+    () => window.localStorage.getItem(browserNotificationStorageKey) === 'true',
+  );
   const initializedNotificationPolling = useRef(false);
 
   function loadPositions() {
@@ -109,6 +113,20 @@ export function DashboardPage() {
               }
               return merged.slice(-3);
             });
+
+            if (
+              browserNotificationsEnabled &&
+              'Notification' in window &&
+              window.Notification.permission === 'granted' &&
+              document.visibilityState !== 'visible'
+            ) {
+              for (const notification of freshOperationalAlerts) {
+                new window.Notification(`HBS Trading · ${notification.severity}`, {
+                  body: notification.message,
+                  tag: notification.id,
+                });
+              }
+            }
           }
         } else {
           initializedNotificationPolling.current = true;
@@ -128,13 +146,21 @@ export function DashboardPage() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [token]);
+  }, [token, browserNotificationsEnabled]);
 
   useEffect(() => {
     if (activeNav !== 'Notifications') return;
     window.localStorage.setItem(notificationSeenStorageKey, String(Date.now()));
     setUnreadNotifications(0);
   }, [activeNav]);
+
+  async function enableBrowserNotifications() {
+    if (!('Notification' in window)) return;
+    const permission = await window.Notification.requestPermission();
+    const enabled = permission === 'granted';
+    setBrowserNotificationsEnabled(enabled);
+    window.localStorage.setItem(browserNotificationStorageKey, String(enabled));
+  }
 
   useEffect(() => {
     if (
@@ -349,6 +375,15 @@ export function DashboardPage() {
               <h2 className="mt-1 text-3xl font-semibold tracking-tight">{pageTitle}</h2>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              {'Notification' in window && !browserNotificationsEnabled && (
+                <button
+                  type="button"
+                  onClick={() => void enableBrowserNotifications()}
+                  className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20"
+                >
+                  Enable browser alerts
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
