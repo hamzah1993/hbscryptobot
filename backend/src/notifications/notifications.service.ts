@@ -192,6 +192,32 @@ export class NotificationsService {
     }
   }
 
+  private async persistWebhookMetricsSnapshot(): Promise<void> {
+    try {
+      await this.prisma.notificationWebhookMetricsSnapshot.create({
+        data: {
+          attempted: this.webhookMetrics.attempted,
+          delivered: this.webhookMetrics.delivered,
+          failed: this.webhookMetrics.failed,
+          retried: this.webhookMetrics.retried,
+          lastAttemptAt: this.webhookMetrics.lastAttemptAt
+            ? new Date(this.webhookMetrics.lastAttemptAt)
+            : undefined,
+          lastSuccessAt: this.webhookMetrics.lastSuccessAt
+            ? new Date(this.webhookMetrics.lastSuccessAt)
+            : undefined,
+          lastFailureAt: this.webhookMetrics.lastFailureAt
+            ? new Date(this.webhookMetrics.lastFailureAt)
+            : undefined,
+          lastStatusCode: this.webhookMetrics.lastStatusCode,
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown webhook metrics persistence error';
+      this.logger.warn(`Notification webhook metrics snapshot persistence failed: ${message}`);
+    }
+  }
+
   private parseSeverity(value?: string): NotificationSeverity {
     const normalized = value?.trim().toUpperCase();
     if (normalized === 'INFO' || normalized === 'WARNING' || normalized === 'CRITICAL') {
@@ -270,6 +296,7 @@ export class NotificationsService {
         if (response.ok) {
           this.webhookMetrics.delivered += 1;
           this.webhookMetrics.lastSuccessAt = new Date().toISOString();
+          void this.persistWebhookMetricsSnapshot();
           return;
         }
 
@@ -280,6 +307,7 @@ export class NotificationsService {
         if (!retryable || attempt === this.webhookMaxAttempts) {
           this.webhookMetrics.failed += 1;
           this.webhookMetrics.lastFailureAt = new Date().toISOString();
+          void this.persistWebhookMetricsSnapshot();
           return;
         }
       } catch (error: unknown) {
@@ -291,6 +319,7 @@ export class NotificationsService {
         if (attempt === this.webhookMaxAttempts) {
           this.webhookMetrics.failed += 1;
           this.webhookMetrics.lastFailureAt = new Date().toISOString();
+          void this.persistWebhookMetricsSnapshot();
           return;
         }
       }
