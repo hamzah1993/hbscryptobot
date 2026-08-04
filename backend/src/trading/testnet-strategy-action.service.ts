@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type ClaimTestnetStrategyActionInput = {
@@ -15,7 +16,10 @@ export type ClaimTestnetStrategyActionInput = {
 
 @Injectable()
 export class TestnetStrategyActionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async claim(userId: string, input: ClaimTestnetStrategyActionInput) {
     if (!input.idempotencyKey.trim()) {
@@ -136,13 +140,43 @@ export class TestnetStrategyActionService {
 
   async markFailed(actionId: string, error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown testnet strategy action failure';
-    return this.prisma.strategyAction.update({
+    const action = await this.prisma.strategyAction.update({
       where: { id: actionId },
       data: {
         status: 'FAILED',
         errorMessage: message.slice(0, 2000),
       },
+      select: {
+        id: true,
+        userId: true,
+        strategyId: true,
+        positionId: true,
+        orderId: true,
+        type: true,
+        side: true,
+        level: true,
+        actionKey: true,
+      },
     });
+
+    this.notifications.publish({
+      event: 'TESTNET_STRATEGY_ACTION_FAILED',
+      message: `Testnet strategy action ${action.type} failed.`,
+      severity: 'CRITICAL',
+      userId: action.userId,
+      strategyId: action.strategyId,
+      positionId: action.positionId ?? undefined,
+      orderId: action.orderId ?? undefined,
+      metadata: {
+        actionId: action.id,
+        actionKey: action.actionKey,
+        side: action.side,
+        level: action.level,
+        error: message.slice(0, 2000),
+      },
+    });
+
+    return action;
   }
 
   listRecoverable(limit = 100) {
