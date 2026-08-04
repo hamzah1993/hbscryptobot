@@ -34,6 +34,8 @@ export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
 export type BinanceStreamEnvironment = 'testnet' | 'live';
 export type ExchangeEnvironment = 'TESTNET' | 'LIVE';
 export type TestnetOrderStatus = 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'REJECTED' | 'CANCELLED';
+export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
+export type TestnetActionStatus = 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
 
 export type ExchangeCredentialSummary = {
   id: string;
@@ -126,8 +128,8 @@ export type TestnetOrder = {
   } | null;
   strategyAction: {
     id: string;
-    type: 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
-    status: 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
+    type: TestnetActionType;
+    status: TestnetActionStatus;
     actionKey: string;
     triggerPrice: string | null;
     createdAt: string;
@@ -176,6 +178,50 @@ export type TestnetPosition = {
     createdAt: string;
     updatedAt: string;
   }>;
+};
+
+export type TestnetAction = {
+  id: string;
+  userId: string;
+  strategyId: string;
+  positionId: string | null;
+  subPositionId: string | null;
+  orderId: string | null;
+  actionKey: string;
+  type: TestnetActionType;
+  status: TestnetActionStatus;
+  level: number | null;
+  independent: boolean;
+  side: 'BUY' | 'SELL';
+  quantity: string | null;
+  quoteAmount: string | null;
+  triggerPrice: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  strategy: Pick<TradingStrategy, 'id' | 'name' | 'symbol' | 'status' | 'environment' | 'paperTrading'>;
+  position: {
+    id: string;
+    symbol: string;
+    status: TradingPosition['status'];
+  } | null;
+  subPosition: {
+    id: string;
+    level: number;
+    status: 'OPEN' | 'CLOSED';
+  } | null;
+  order: {
+    id: string;
+    exchangeOrderId: string | null;
+    clientOrderId: string;
+    status: TestnetOrderStatus;
+    filledQuantity: string;
+    quoteAmount: string;
+    averageFillPrice: string | null;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
 };
 
 export type StreamedMarketPrice = {
@@ -267,6 +313,10 @@ export const api = {
     }),
   listTestnetPositions: (token: string, limit = 100) =>
     request<TestnetPosition[]>(`/strategies/testnet-positions?limit=${encodeURIComponent(String(limit))}`, {
+      headers: authHeaders(token),
+    }),
+  listTestnetActions: (token: string, limit = 100) =>
+    request<TestnetAction[]>(`/strategies/testnet-actions?limit=${encodeURIComponent(String(limit))}`, {
       headers: authHeaders(token),
     }),
   listExchangeCredentials: (token: string) =>
