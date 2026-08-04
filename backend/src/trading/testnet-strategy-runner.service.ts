@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { RedisLockService } from '../redis/redis-lock.service';
+import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 export type TestnetStrategyRunnerAction =
@@ -29,6 +29,7 @@ const TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS = 30_000;
 
 @Injectable()
 export class TestnetStrategyRunnerService {
+  private readonly logger = new Logger(TestnetStrategyRunnerService.name);
   private readonly runningStrategies = new Set<string>();
 
   constructor(
@@ -80,22 +81,23 @@ export class TestnetStrategyRunnerService {
     }
 
     this.runningStrategies.add(strategy.id);
-    const lock = await this.redisLock.acquire(
-      `hbs:lock:testnet-strategy:${strategy.id}`,
-      TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS,
-    );
-
-    if (!lock) {
-      this.runningStrategies.delete(strategy.id);
-      return {
-        strategyId: strategy.id,
-        symbol: strategy.symbol,
-        action: 'SKIP',
-        message: 'Strategy tick is already running on another instance',
-      };
-    }
+    let lock: RedisLock | null = null;
 
     try {
+      lock = await this.redisLock.acquire(
+        `hbs:lock:testnet-strategy:${strategy.id}`,
+        TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS,
+      );
+
+      if (!lock) {
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: 'SKIP',
+          message: 'Strategy tick is already running on another instance',
+        };
+      }
+
       const quote = await this.marketData.getQuote(strategy.symbol, 'testnet');
       if (!Number.isFinite(quote.price) || quote.price <= 0) {
         throw new Error('Unable to calculate testnet quantity from the market price');
@@ -292,7 +294,17 @@ export class TestnetStrategyRunnerService {
         message: error instanceof Error ? error.message : 'Testnet strategy tick failed',
       };
     } finally {
-      await this.redisLock.release(lock);
+      if (lock) {
+        try {
+          await this.redisLock.release(lock);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to release the Testnet strategy lock for ${strategy.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
       this.runningStrategies.delete(strategy.id);
     }
   }
