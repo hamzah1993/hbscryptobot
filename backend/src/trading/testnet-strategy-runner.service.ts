@@ -25,7 +25,17 @@ export type TestnetStrategyRunnerResult = {
   message?: string;
 };
 
-const TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS = 30_000;
+const DEFAULT_TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS = 30_000;
+
+const getLockTtlMilliseconds = (): number => {
+  const value = Number.parseInt(
+    process.env.TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS ?? '',
+    10,
+  );
+  return Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS;
+};
 
 @Injectable()
 export class TestnetStrategyRunnerService {
@@ -86,7 +96,7 @@ export class TestnetStrategyRunnerService {
     try {
       lock = await this.redisLock.acquire(
         `hbs:lock:testnet-strategy:${strategy.id}`,
-        TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS,
+        getLockTtlMilliseconds(),
       );
 
       if (!lock) {
