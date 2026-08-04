@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { ScheduleModule } from '@nestjs/schedule';
 import type { SignOptions } from 'jsonwebtoken';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
@@ -16,6 +17,7 @@ const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expire
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET,

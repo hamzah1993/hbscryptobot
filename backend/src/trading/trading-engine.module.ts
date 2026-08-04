@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MarketDataModule } from '../market/market-data.module';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
+import { PaperStrategySchedulerService } from './paper-strategy-scheduler.service';
 import { PaperTradingController } from './paper-trading.controller';
 import { PaperTradingService } from './paper-trading.service';
 import { RiskBudgetService } from './risk-budget.service';
@@ -18,6 +19,7 @@ import { TradingEngineService } from './trading-engine.service';
     PaperTradingService,
     StrategyService,
     PaperStrategyRunnerService,
+    PaperStrategySchedulerService,
   ],
   exports: [
     RiskBudgetService,
