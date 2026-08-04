@@ -8,6 +8,7 @@ type PrismaMock = {
   operationalNotification: {
     create: jest.Mock;
     findMany: jest.Mock;
+    deleteMany: jest.Mock;
   };
 };
 
@@ -23,11 +24,13 @@ describe('NotificationsService webhook delivery', () => {
     delete process.env.NOTIFICATION_WEBHOOK_SECRET;
     delete process.env.NOTIFICATION_WEBHOOK_MIN_SEVERITY;
     delete process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS;
+    delete process.env.NOTIFICATION_RETENTION_DAYS;
     global.fetch = jest.fn();
     prisma = {
       operationalNotification: {
         create: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
   });
@@ -211,5 +214,32 @@ describe('NotificationsService webhook delivery', () => {
       userId: 'user-1',
       metadata: { source: 'memory' },
     });
+  });
+
+  it('deletes notifications older than the configured retention period', async () => {
+    process.env.NOTIFICATION_RETENTION_DAYS = '14';
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-08-04T12:00:00.000Z').getTime());
+    prisma.operationalNotification.deleteMany.mockResolvedValue({ count: 7 });
+    const service = createService();
+
+    const deleted = await service.cleanupExpired();
+
+    expect(prisma.operationalNotification.deleteMany).toHaveBeenCalledWith({
+      where: { createdAt: { lt: new Date('2026-07-21T12:00:00.000Z') } },
+    });
+    expect(deleted).toBe(7);
+  });
+
+  it('uses the default retention period and tolerates cleanup failures', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-08-04T12:00:00.000Z').getTime());
+    prisma.operationalNotification.deleteMany.mockRejectedValue(new Error('Database unavailable'));
+    const service = createService();
+
+    const deleted = await service.cleanupExpired();
+
+    expect(prisma.operationalNotification.deleteMany).toHaveBeenCalledWith({
+      where: { createdAt: { lt: new Date('2026-07-05T12:00:00.000Z') } },
+    });
+    expect(deleted).toBe(0);
   });
 });
