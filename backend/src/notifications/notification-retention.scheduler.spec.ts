@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import type { RedisLockService } from '../redis/redis-lock.service';
 import { NotificationRetentionScheduler } from './notification-retention.scheduler';
 import type { NotificationsService } from './notifications.service';
 
@@ -11,20 +12,31 @@ describe('NotificationRetentionScheduler', () => {
         .mockResolvedValue(metricsSnapshotsDeleted),
     }) as unknown as NotificationsService;
 
+  const createRedisLock = (acquired = true) =>
+    ({
+      acquire: jest
+        .fn()
+        .mockResolvedValue(acquired ? { key: 'retention-lock', token: 'token' } : null),
+      release: jest.fn().mockResolvedValue(true),
+    }) as unknown as RedisLockService;
+
   it('runs both retention cleanup operations', async () => {
     const notifications = createNotifications();
-    const scheduler = new NotificationRetentionScheduler(notifications);
+    const redisLock = createRedisLock();
+    const scheduler = new NotificationRetentionScheduler(notifications, redisLock);
 
     await scheduler.cleanupExpiredNotifications();
 
     expect(notifications.cleanupExpired).toHaveBeenCalledTimes(1);
     expect(notifications.cleanupExpiredWebhookMetricsSnapshots).toHaveBeenCalledTimes(1);
+    expect(redisLock.release).toHaveBeenCalledTimes(1);
   });
 
   it('logs separate deletion counts for notifications and webhook metrics snapshots', async () => {
     const notifications = createNotifications(12, 4);
+    const redisLock = createRedisLock();
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
-    const scheduler = new NotificationRetentionScheduler(notifications);
+    const scheduler = new NotificationRetentionScheduler(notifications, redisLock);
 
     await scheduler.cleanupExpiredNotifications();
 
@@ -36,11 +48,24 @@ describe('NotificationRetentionScheduler', () => {
 
   it('does not log deletion messages when no records are removed', async () => {
     const notifications = createNotifications();
+    const redisLock = createRedisLock();
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
-    const scheduler = new NotificationRetentionScheduler(notifications);
+    const scheduler = new NotificationRetentionScheduler(notifications, redisLock);
 
     await scheduler.cleanupExpiredNotifications();
 
     expect(log).not.toHaveBeenCalled();
+  });
+
+  it('skips cleanup when another process owns the retention lock', async () => {
+    const notifications = createNotifications();
+    const redisLock = createRedisLock(false);
+    const scheduler = new NotificationRetentionScheduler(notifications, redisLock);
+
+    await scheduler.cleanupExpiredNotifications();
+
+    expect(notifications.cleanupExpired).not.toHaveBeenCalled();
+    expect(notifications.cleanupExpiredWebhookMetricsSnapshots).not.toHaveBeenCalled();
+    expect(redisLock.release).not.toHaveBeenCalled();
   });
 });
