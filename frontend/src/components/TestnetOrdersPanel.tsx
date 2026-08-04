@@ -199,7 +199,7 @@ export function TestnetOrdersPanel({ token }: Props) {
                       <td className="px-4 py-4 text-right">{order.averageFillPrice ? formatNumber(order.averageFillPrice) : '—'}</td>
                       <td className="px-4 py-4 text-right">{formatNumber(order.quoteAmount)}</td>
                       <td className="px-4 py-4">
-                        <p className="text-xs font-medium text-slate-300">{order.strategyAction?.type?.replaceAll('_', ' ') ?? 'Manual order'}</p>
+                        <p className="text-xs font-medium text-slate-300">{order.strategyAction?.type?.replace(/_/g, ' ') ?? 'Manual order'}</p>
                         <p className="mt-1 text-xs text-slate-500">{order.strategyAction?.status ?? 'No action record'}</p>
                         {order.strategyAction?.triggerPrice && <p className="mt-1 text-xs text-cyan-300">Trigger {formatNumber(order.strategyAction.triggerPrice)}</p>}
                       </td>
