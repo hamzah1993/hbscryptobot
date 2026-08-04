@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisLockService } from '../redis/redis-lock.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
+
+const TESTNET_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-strategy-scheduler';
+const TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS = 30_000;
 
 @Injectable()
 export class TestnetStrategySchedulerService {
@@ -11,6 +15,7 @@ export class TestnetStrategySchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly runner: TestnetStrategyRunnerService,
+    private readonly redisLock: RedisLockService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
@@ -18,6 +23,16 @@ export class TestnetStrategySchedulerService {
     if (this.running) return;
 
     this.running = true;
+    const lock = await this.redisLock.acquire(
+      TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
+      TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS,
+    );
+
+    if (!lock) {
+      this.running = false;
+      return;
+    }
+
     try {
       const users = await this.prisma.tradingStrategy.findMany({
         where: {
@@ -51,6 +66,7 @@ export class TestnetStrategySchedulerService {
         error instanceof Error ? error.stack : String(error),
       );
     } finally {
+      await this.redisLock.release(lock);
       this.running = false;
     }
   }
