@@ -249,6 +249,24 @@ model StrategyAction {
   @@index([subPositionId, status])
 }
 
+model HistoricalCandle {
+  id        String       @id @default(uuid())
+  exchange  ExchangeName @default(BINANCE)
+  symbol    String
+  interval  String
+  openTime  DateTime
+  closeTime DateTime
+  open      Decimal      @db.Decimal(28, 12)
+  high      Decimal      @db.Decimal(28, 12)
+  low       Decimal      @db.Decimal(28, 12)
+  close     Decimal      @db.Decimal(28, 12)
+  volume    Decimal      @db.Decimal(36, 12)
+  createdAt DateTime     @default(now())
+
+  @@unique([exchange, symbol, interval, openTime])
+  @@index([symbol, interval, openTime])
+}
+
 model OperationalNotification {
   id         String               @id @default(uuid())
   userId     String
