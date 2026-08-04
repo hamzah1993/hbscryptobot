@@ -9,6 +9,7 @@ import { RiskBudgetService } from './risk-budget.service';
 import { StrategyController } from './strategy.controller';
 import { StrategyService } from './strategy.service';
 import { TestnetOrderSyncSchedulerService } from './testnet-order-sync-scheduler.service';
+import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 import { TradingEngineController } from './trading-engine.controller';
 import { TradingEngineService } from './trading-engine.service';
@@ -25,6 +26,7 @@ import { TradingEngineService } from './trading-engine.service';
     PaperStrategySchedulerService,
     TestnetStrategyExecutionService,
     TestnetOrderSyncSchedulerService,
+    TestnetStrategyActionService,
   ],
   exports: [
     RiskBudgetService,
@@ -33,6 +35,7 @@ import { TradingEngineService } from './trading-engine.service';
     StrategyService,
     PaperStrategyRunnerService,
     TestnetStrategyExecutionService,
+    TestnetStrategyActionService,
   ],
 })
 export class TradingEngineModule {}
