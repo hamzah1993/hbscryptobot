@@ -6,7 +6,14 @@ import { TestnetStrategyActionService } from './testnet-strategy-action.service'
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 const TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-order-sync-scheduler';
-const TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS = 30_000;
+const DEFAULT_TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS = 30_000;
+
+const getLockTtlMilliseconds = (): number => {
+  const value = Number.parseInt(process.env.TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS ?? '', 10);
+  return Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS;
+};
 
 @Injectable()
 export class TestnetOrderSyncSchedulerService {
@@ -30,7 +37,7 @@ export class TestnetOrderSyncSchedulerService {
     try {
       lock = await this.redisLock.acquire(
         TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY,
-        TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS,
+        getLockTtlMilliseconds(),
       );
 
       if (!lock) return;
