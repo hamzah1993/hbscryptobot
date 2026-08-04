@@ -38,6 +38,59 @@ export class TestnetStrategyExecutionService {
     private readonly strategyActions: TestnetStrategyActionService,
   ) {}
 
+  async listOrders(userId: string, limit = 100) {
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+
+    return this.prisma.tradingOrder.findMany({
+      where: {
+        userId,
+        position: {
+          strategy: {
+            environment: 'TESTNET',
+            paperTrading: false,
+          },
+        },
+      },
+      include: {
+        position: {
+          select: {
+            id: true,
+            symbol: true,
+            status: true,
+            strategy: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                environment: true,
+              },
+            },
+          },
+        },
+        subPosition: {
+          select: {
+            id: true,
+            level: true,
+            status: true,
+          },
+        },
+        strategyAction: {
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            actionKey: true,
+            triggerPrice: true,
+            createdAt: true,
+            completedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: safeLimit,
+    });
+  }
+
   async executeMarketOrder(userId: string, input: ExecuteTestnetStrategyInput) {
     if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
       throw new BadRequestException('Quantity must be a positive number');
@@ -531,17 +584,22 @@ export class TestnetStrategyExecutionService {
       });
     });
 
-    if (order.strategyAction && status === 'FILLED') {
-      await this.strategyActions.markCompleted(order.strategyAction.id);
+    if (order.strategyAction) {
+      if (status === 'FILLED') {
+        await this.strategyActions.markCompleted(order.strategyAction.id);
+      } else if (status === 'REJECTED' || status === 'CANCELED') {
+        await this.strategyActions.markFailed(
+          order.strategyAction.id,
+          new Error(`Binance order ended with status ${status}`),
+        );
+      }
     }
 
     return {
-      updatedOrder,
+      tradingOrder: updatedOrder,
       exchangeOrder,
-      reconciliation: {
-        deltaQuantity,
-        deltaQuoteAmount,
-      },
+      deltaQuantity,
+      deltaQuoteAmount,
     };
   }
 
@@ -582,14 +640,14 @@ export class TestnetStrategyExecutionService {
     if (executedQuantity > 0 && quoteAmount > 0) return quoteAmount / executedQuantity;
 
     const fills = order.fills ?? [];
-    const fillQuantity = fills.reduce((sum, fill) => sum + Number(fill.qty ?? 0), 0);
-    if (fillQuantity <= 0) return 0;
-
-    const fillQuote = fills.reduce(
-      (sum, fill) => sum + Number(fill.price ?? 0) * Number(fill.qty ?? 0),
+    const totalQuantity = fills.reduce((sum, fill) => sum + Number(fill.qty ?? 0), 0);
+    const totalQuote = fills.reduce(
+      (sum, fill) => sum + Number(fill.qty ?? 0) * Number(fill.price ?? 0),
       0,
     );
-    return fillQuote / fillQuantity;
+    if (totalQuantity > 0 && totalQuote > 0) return totalQuote / totalQuantity;
+
+    return Number(order.price ?? 0);
   }
 
   private mapOrderStatus(status?: string) {
@@ -598,17 +656,13 @@ export class TestnetStrategyExecutionService {
         return 'FILLED' as const;
       case 'PARTIALLY_FILLED':
         return 'PARTIALLY_FILLED' as const;
-      case 'CANCELED':
-      case 'CANCELLED':
-      case 'EXPIRED':
-        return 'CANCELLED' as const;
       case 'REJECTED':
+      case 'EXPIRED':
         return 'REJECTED' as const;
-      case 'NEW':
-      case 'PENDING_NEW':
-        return 'PENDING' as const;
+      case 'CANCELED':
+        return 'CANCELED' as const;
       default:
-        return 'FAILED' as const;
+        return 'PENDING' as const;
     }
   }
 }
