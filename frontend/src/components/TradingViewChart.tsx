@@ -4,10 +4,12 @@ import {
   ColorType,
   LineStyle,
   createChart,
+  createSeriesMarkers,
   type CandlestickData,
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
+  type SeriesMarker,
   type Time,
 } from 'lightweight-charts';
 
@@ -25,9 +27,17 @@ export type TradingViewPriceLevel = {
   kind?: 'ENTRY' | 'DCA' | 'TAKE_PROFIT' | 'INDEPENDENT_ENTRY' | 'INDEPENDENT_TAKE_PROFIT';
 };
 
+export type TradingViewOrderMarker = {
+  time: Time;
+  side: 'BUY' | 'SELL';
+  label: string;
+  kind?: 'ENTRY' | 'DCA' | 'TAKE_PROFIT' | 'INDEPENDENT_ENTRY' | 'INDEPENDENT_TAKE_PROFIT';
+};
+
 type Props = {
   data: TradingViewCandle[];
   priceLevels?: TradingViewPriceLevel[];
+  orderMarkers?: TradingViewOrderMarker[];
   height?: number;
   loading?: boolean;
   emptyMessage?: string;
@@ -48,9 +58,18 @@ const priceLevelStyle = (kind: TradingViewPriceLevel['kind']) => {
   }
 };
 
+const orderMarkerStyle = (marker: TradingViewOrderMarker): SeriesMarker<Time> => ({
+  time: marker.time,
+  position: marker.side === 'BUY' ? 'belowBar' : 'aboveBar',
+  shape: marker.side === 'BUY' ? 'arrowUp' : 'arrowDown',
+  color: marker.side === 'BUY' ? '#22d3ee' : '#fb7185',
+  text: marker.label,
+});
+
 export function TradingViewChart({
   data,
   priceLevels = [],
+  orderMarkers = [],
   height = 420,
   loading = false,
   emptyMessage = 'No market candles are available yet.',
@@ -148,6 +167,19 @@ export function TradingViewChart({
         });
       });
   }, [priceLevels]);
+
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    const validMarkers = orderMarkers
+      .filter((marker) => marker.label.trim().length > 0)
+      .map(orderMarkerStyle)
+      .sort((left, right) => Number(left.time) - Number(right.time));
+
+    const markerApi = createSeriesMarkers(series, validMarkers);
+    return () => markerApi.setMarkers([]);
+  }, [orderMarkers]);
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#07111f]">
