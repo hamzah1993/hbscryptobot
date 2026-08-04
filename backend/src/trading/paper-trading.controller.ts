@@ -42,4 +42,13 @@ export class PaperTradingController {
   ) {
     return this.paper.closePosition(request.user.sub, positionId, body.marketPrice);
   }
+
+  @Post('positions/:positionId/tick')
+  processPrice(
+    @Req() request: AuthenticatedRequest,
+    @Param('positionId') positionId: string,
+    @Body() body: { marketPrice: number },
+  ) {
+    return this.paper.processPrice(request.user.sub, positionId, body.marketPrice);
+  }
 }
