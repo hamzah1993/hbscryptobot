@@ -6,7 +6,7 @@ A full-stack cryptocurrency trading platform focused on safe paper trading, Bina
 
 ## Current implementation status
 
-The platform has completed the core paper-trading milestone and the main Binance Spot Testnet workflow through the emergency-stop safety milestone.
+The platform has completed the core paper-trading milestone and the main Binance Spot Testnet workflow through notification persistence and operational-alert retention.
 
 ### Completed capabilities
 
@@ -21,6 +21,10 @@ The platform has completed the core paper-trading milestone and the main Binance
 - Binance WebSocket market-price streaming
 - Testnet orders, positions, account status, and strategy-action dashboard panels
 - Testnet emergency stop with unresolved-order cancellation attempts
+- TradingView charting with live candle updates and Testnet order/position markers
+- Operational notifications with dashboard history, unread badge, toast alerts, browser alerts, and sound preferences
+- Signed notification webhooks with retry handling, delivery metrics, persistence, restart restoration, and retention cleanup
+- Persistent operational-notification history with configurable retention and scheduled cleanup
 - GitHub Actions validation for backend, frontend, Prisma, and Docker
 
 ## Architecture
@@ -131,6 +135,34 @@ Important limitations:
 - Individual exchange cancellation failures are reported without aborting the remaining cancellation attempts.
 - Live Binance cancellation remains disabled.
 
+## Notifications and operational alerts
+
+Operational events are published through a shared notification service and surfaced through the authenticated dashboard.
+
+Current notification capabilities include:
+
+- Persistent user-scoped history in PostgreSQL
+- In-memory fallback if history reads fail
+- INFO, WARNING, and CRITICAL severities
+- Dashboard history panel, unread badge, toast alerts, browser notifications, and optional sound
+- Configurable notification webhook URL, minimum severity, HMAC signing, timeout, and retries
+- Delivery metrics for attempts, successes, failures, retries, timestamps, and latest HTTP status
+- Persistent webhook-metrics snapshots restored after backend restart
+- Scheduled cleanup for operational notifications and metrics snapshots
+
+Relevant environment variables:
+
+```env
+NOTIFICATION_RETENTION_DAYS=30
+NOTIFICATION_WEBHOOK_URL=
+NOTIFICATION_WEBHOOK_SECRET=
+NOTIFICATION_WEBHOOK_MIN_SEVERITY=WARNING
+NOTIFICATION_WEBHOOK_MAX_ATTEMPTS=3
+NOTIFICATION_WEBHOOK_METRICS_RETENTION_DAYS=30
+```
+
+Retention values are bounded to 1–365 days. Webhook delivery and notification persistence failures are logged but do not block trading execution.
+
 ## Dashboard
 
 The responsive dashboard currently includes:
@@ -138,10 +170,12 @@ The responsive dashboard currently includes:
 - Overview and paper-position analytics
 - Strategy controls
 - Live public market stream status
+- TradingView market chart with live candles and Testnet markers
 - Exchange Accounts page
 - Binance Testnet Orders table
 - Binance Testnet Positions panel
 - Strategy Action Timeline
+- Operational notification history and webhook delivery metrics
 - Testnet emergency-stop confirmation and result feedback
 
 The interface clearly separates paper, Testnet, and live-public-data behavior. Live execution is not presented as enabled.
@@ -157,6 +191,7 @@ hbstrading/
 │       ├── credentials/        Encrypted exchange credentials
 │       ├── exchange/binance/   Binance REST and Testnet order services
 │       ├── market/             REST cache and WebSocket market data
+│       ├── notifications/      Operational alerts, webhooks, metrics, retention
 │       ├── prisma/             Prisma service
 │       └── trading/            Strategies, runners, positions, actions, safety
 ├── frontend/
@@ -317,6 +352,13 @@ GET  /api/strategies/testnet-actions
 POST /api/strategies/testnet-emergency-stop
 ```
 
+### Notifications
+
+```text
+GET /api/notifications
+GET /api/notifications/webhook-metrics
+```
+
 ### Exchange credentials and connection checks
 
 ```text
@@ -346,7 +388,7 @@ GitHub Actions validates:
 - Prisma client generation
 - Prisma schema validation
 - Database schema application against a service database
-- Backend build
+- Backend build and Jest tests
 - Frontend build
 - Docker Compose configuration
 - Docker image builds
@@ -355,22 +397,24 @@ A workflow that stalls before repository checkout or during service-container in
 
 ## Security guidance
 
-- Never commit `.env` files, API keys, or encryption keys.
+- Never commit `.env` files, API keys, encryption keys, webhook secrets, or private webhook URLs.
 - Create Binance keys without withdrawal permission.
 - Use separate credentials for Testnet and Live.
 - Keep live execution disabled until explicit production safeguards are completed and reviewed.
 - Use strong, unique database and JWT secrets.
 - Back up `EXCHANGE_CREDENTIALS_KEY` securely; encrypted credentials cannot be recovered without it.
 - Test emergency-stop behavior using Binance Spot Testnet only.
+- Validate webhook signatures and timestamps in downstream receivers.
 
 ## Known limitations
 
 - Live-money order execution is disabled.
 - Open positions are not automatically liquidated by emergency stop.
 - Bybit and OKX are not integrated.
-- TradingView charting and webhook integration are not implemented yet.
 - Backtesting is not implemented.
 - Telegram and email alerts are not implemented.
+- Notification writes and webhook metric snapshots are fire-and-forget, so an abrupt process crash can lose an in-flight write.
+- Webhook retries are process-local; there is no durable delivery queue yet.
 - Production rate limiting, distributed locks, monitoring, backups, and operational runbooks still require hardening.
 - The platform is not ready for unattended production trading.
 
@@ -388,19 +432,20 @@ A workflow that stalls before repository checkout or during service-container in
 - WebSocket market streaming
 - Testnet orders, positions, and action timeline UI
 - Emergency-stop control and unresolved Testnet-order cancellation
+- TradingView chart and Testnet chart markers
+- Operational notifications, browser alerts, and dashboard history
+- Signed notification webhooks with retries and delivery metrics
+- Persistent notification history and webhook metrics with retention cleanup
 
 ### Next
 
-1. Emergency-stop audit history and additional reliability tests
-2. Per-strategy Testnet controls and safety feedback
-3. TradingView chart foundation
-4. Entry, DCA, take-profit, and independent-level chart markers
-5. Reliability, rate limiting, distributed locking, and recovery hardening
-6. Notifications and operational alerts
-7. Backtesting and analytics
-8. Deployment, monitoring, backups, and administrator documentation
-9. Live execution safeguards and explicit production approval workflow
-10. Bybit and OKX integrations
+1. Reliability, rate limiting, distributed locking, and recovery hardening
+2. Durable webhook delivery queue and delivery-attempt history
+3. Backtesting and analytics
+4. Deployment, monitoring, backups, and administrator documentation
+5. User manual and operational runbook
+6. Live execution safeguards and explicit production approval workflow
+7. Bybit and OKX integrations
 
 ## Disclaimer
 
