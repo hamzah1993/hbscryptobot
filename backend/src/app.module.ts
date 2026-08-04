@@ -16,8 +16,17 @@ import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
 
 const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expiresIn'];
-const throttleTtlMilliseconds = 60_000;
-const throttleLimit = 120;
+
+const parsePositiveInteger = (value: string | undefined, fallback: number): number => {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const throttleTtlMilliseconds = parsePositiveInteger(
+  process.env.API_RATE_LIMIT_TTL_MS,
+  60_000,
+);
+const throttleLimit = parsePositiveInteger(process.env.API_RATE_LIMIT_MAX_REQUESTS, 120);
 
 @Module({
   imports: [
