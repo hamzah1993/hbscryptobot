@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 
@@ -38,6 +38,7 @@ export class NotificationsService {
   private readonly recent: StoredOperationalNotification[] = [];
   private readonly maxRecent = 500;
   private readonly webhookUrl = process.env.NOTIFICATION_WEBHOOK_URL?.trim();
+  private readonly webhookSecret = process.env.NOTIFICATION_WEBHOOK_SECRET?.trim();
   private readonly webhookMinimumSeverity = this.parseSeverity(
     process.env.NOTIFICATION_WEBHOOK_MIN_SEVERITY,
   );
@@ -123,14 +124,24 @@ export class NotificationsService {
       orderId: notification.orderId,
       metadata: notification.metadata ? { ...notification.metadata } : undefined,
     };
+    const body = JSON.stringify(payload);
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      'x-hbs-webhook-timestamp': timestamp,
+    };
+
+    if (this.webhookSecret) {
+      headers['x-hbs-webhook-signature'] = `sha256=${createHmac('sha256', this.webhookSecret)
+        .update(`${timestamp}.${body}`)
+        .digest('hex')}`;
+    }
 
     try {
       const response = await fetch(this.webhookUrl, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers,
+        body,
         signal: AbortSignal.timeout(5_000),
       });
 
