@@ -12,21 +12,12 @@ import { ExchangeCredentialsModule } from './exchange/credentials/exchange-crede
 import { MarketDataModule } from './market/market-data.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { getGlobalRateLimitConfiguration } from './rate-limit.config';
 import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
 
 const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expiresIn'];
-
-const parsePositiveInteger = (value: string | undefined, fallback: number): number => {
-  const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const throttleTtlMilliseconds = parsePositiveInteger(
-  process.env.API_RATE_LIMIT_TTL_MS,
-  60_000,
-);
-const throttleLimit = parsePositiveInteger(process.env.API_RATE_LIMIT_MAX_REQUESTS, 120);
+const globalRateLimit = getGlobalRateLimitConfiguration();
 
 @Module({
   imports: [
@@ -34,8 +25,8 @@ const throttleLimit = parsePositiveInteger(process.env.API_RATE_LIMIT_MAX_REQUES
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {
-        ttl: throttleTtlMilliseconds,
-        limit: throttleLimit,
+        ttl: globalRateLimit.ttlMilliseconds,
+        limit: globalRateLimit.maxRequests,
       },
     ]),
     JwtModule.register({
