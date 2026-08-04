@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { RedisLockService } from '../redis/redis-lock.service';
+import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { NotificationsService } from './notifications.service';
 
 const NOTIFICATION_RETENTION_SCHEDULER_LOCK_KEY = 'hbs:lock:notification-retention-scheduler';
@@ -17,14 +17,16 @@ export class NotificationRetentionScheduler {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupExpiredNotifications(): Promise<void> {
-    const lock = await this.redisLock.acquire(
-      NOTIFICATION_RETENTION_SCHEDULER_LOCK_KEY,
-      NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS,
-    );
-
-    if (!lock) return;
+    let lock: RedisLock | null = null;
 
     try {
+      lock = await this.redisLock.acquire(
+        NOTIFICATION_RETENTION_SCHEDULER_LOCK_KEY,
+        NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS,
+      );
+
+      if (!lock) return;
+
       const [notificationsDeleted, metricsSnapshotsDeleted] = await Promise.all([
         this.notifications.cleanupExpired(),
         this.notifications.cleanupExpiredWebhookMetricsSnapshots(),
@@ -38,8 +40,23 @@ export class NotificationRetentionScheduler {
           `Deleted ${metricsSnapshotsDeleted} expired notification webhook metrics snapshot(s)`,
         );
       }
+    } catch (error) {
+      this.logger.error(
+        'Scheduled notification retention cleanup failed',
+        error instanceof Error ? error.stack : String(error),
+      );
     } finally {
-      await this.redisLock.release(lock);
+      if (lock) {
+        try {
+          await this.redisLock.release(lock);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to release the notification retention scheduler lock: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
     }
   }
 }
