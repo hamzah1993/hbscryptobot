@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { BinanceService, type BinanceEnvironment } from '../exchange/binance/binance.service';
+import {
+  BinanceService,
+  type BinanceEnvironment,
+  type BinanceKlineInterval,
+} from '../exchange/binance/binance.service';
 
 export type MarketQuote = {
   symbol: string;
@@ -7,6 +11,16 @@ export type MarketQuote = {
   environment: BinanceEnvironment;
   fetchedAt: string;
   source: 'binance' | 'cache';
+};
+
+export type MarketCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  closeTime: number;
 };
 
 type CachedQuote = Omit<MarketQuote, 'source'> & { expiresAt: number };
@@ -62,6 +76,45 @@ export class MarketDataService {
       environment: quote.environment,
       fetchedAt: quote.fetchedAt,
       source: 'binance',
+    };
+  }
+
+  async getCandles(
+    symbol: string,
+    interval: BinanceKlineInterval = '5m',
+    limit = 200,
+    environment: BinanceEnvironment = 'live',
+  ) {
+    const normalized = this.normalizeSymbol(symbol);
+    const klines = await this.binance.getKlines(normalized, interval, limit, environment);
+
+    const candles = klines.map((kline): MarketCandle => {
+      const candle = {
+        time: Math.floor(kline.openTime / 1000),
+        open: Number(kline.open),
+        high: Number(kline.high),
+        low: Number(kline.low),
+        close: Number(kline.close),
+        volume: Number(kline.volume),
+        closeTime: kline.closeTime,
+      };
+
+      if (
+        !Number.isInteger(candle.time) ||
+        ![candle.open, candle.high, candle.low, candle.close, candle.volume, candle.closeTime]
+          .every(Number.isFinite)
+      ) {
+        throw new Error('Binance returned invalid market candle data');
+      }
+
+      return candle;
+    });
+
+    return {
+      symbol: normalized,
+      interval,
+      environment,
+      candles,
     };
   }
 
