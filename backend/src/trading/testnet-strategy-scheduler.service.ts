@@ -5,7 +5,14 @@ import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
 
 const TESTNET_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-strategy-scheduler';
-const TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS = 30_000;
+const DEFAULT_TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS = 30_000;
+
+const getLockTtlMilliseconds = (): number => {
+  const value = Number.parseInt(process.env.TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS ?? '', 10);
+  return Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS;
+};
 
 @Injectable()
 export class TestnetStrategySchedulerService {
@@ -28,7 +35,7 @@ export class TestnetStrategySchedulerService {
     try {
       lock = await this.redisLock.acquire(
         TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
-        TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS,
+        getLockTtlMilliseconds(),
       );
 
       if (!lock) return;
