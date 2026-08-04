@@ -46,6 +46,14 @@ export class StrategyController {
     });
   }
 
+  @Post('testnet-orders/:tradingOrderId/sync')
+  syncTestnetOrder(
+    @Req() request: AuthenticatedRequest,
+    @Param('tradingOrderId') tradingOrderId: string,
+  ) {
+    return this.testnetExecution.syncOrder(request.user.sub, tradingOrderId);
+  }
+
   @Patch(':strategyId')
   update(
     @Req() request: AuthenticatedRequest,
