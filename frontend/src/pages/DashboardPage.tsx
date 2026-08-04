@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
+import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
 import {
   api,
   type BinanceStreamEnvironment,
@@ -200,6 +201,8 @@ export function DashboardPage() {
               </article>
             ))}
           </section>
+
+          <PortfolioAnalytics positions={positions} loading={loading} />
 
           <section className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-400/[0.09] via-white/[0.03] to-violet-400/[0.08] p-5 sm:p-6">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
