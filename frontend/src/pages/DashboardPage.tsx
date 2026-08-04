@@ -240,7 +240,7 @@ export function DashboardPage() {
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
               <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-5 md:col-span-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{streamStatus?.symbol ?? marketSymbol || 'Market'}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{(streamStatus?.symbol ?? marketSymbol) || 'Market'}</p>
                 <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
                   <div>
                     <p className="text-4xl font-semibold tracking-tight sm:text-5xl">
