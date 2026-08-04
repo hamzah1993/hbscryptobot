@@ -40,14 +40,14 @@ export class TestnetStrategyActionService {
       if (!position) throw new BadRequestException('Strategy position not found');
     }
 
-    const existing = await this.prisma.testnetStrategyAction.findUnique({
+    const existing = await this.prisma.strategyAction.findUnique({
       where: { idempotencyKey: input.idempotencyKey },
     });
 
     if (existing) return { action: existing, claimed: false };
 
     try {
-      const action = await this.prisma.testnetStrategyAction.create({
+      const action = await this.prisma.strategyAction.create({
         data: {
           userId,
           strategyId: strategy.id,
@@ -65,7 +65,7 @@ export class TestnetStrategyActionService {
 
       return { action, claimed: true };
     } catch (error: unknown) {
-      const raced = await this.prisma.testnetStrategyAction.findUnique({
+      const raced = await this.prisma.strategyAction.findUnique({
         where: { idempotencyKey: input.idempotencyKey },
       });
       if (raced) return { action: raced, claimed: false };
@@ -74,7 +74,7 @@ export class TestnetStrategyActionService {
   }
 
   async markSubmitted(actionId: string, tradingOrderId: string) {
-    return this.prisma.testnetStrategyAction.update({
+    return this.prisma.strategyAction.update({
       where: { id: actionId },
       data: {
         status: 'SUBMITTED',
@@ -85,7 +85,7 @@ export class TestnetStrategyActionService {
   }
 
   async markCompleted(actionId: string) {
-    return this.prisma.testnetStrategyAction.update({
+    return this.prisma.strategyAction.update({
       where: { id: actionId },
       data: {
         status: 'COMPLETED',
@@ -97,7 +97,7 @@ export class TestnetStrategyActionService {
 
   async markFailed(actionId: string, error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown testnet strategy action failure';
-    return this.prisma.testnetStrategyAction.update({
+    return this.prisma.strategyAction.update({
       where: { id: actionId },
       data: {
         status: 'FAILED',
@@ -107,7 +107,7 @@ export class TestnetStrategyActionService {
   }
 
   listRecoverable(limit = 100) {
-    return this.prisma.testnetStrategyAction.findMany({
+    return this.prisma.strategyAction.findMany({
       where: { status: { in: ['PENDING', 'SUBMITTED'] } },
       include: { strategy: true, position: true, tradingOrder: true },
       orderBy: { createdAt: 'asc' },
