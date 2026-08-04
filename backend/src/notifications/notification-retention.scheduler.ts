@@ -4,7 +4,17 @@ import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { NotificationsService } from './notifications.service';
 
 const NOTIFICATION_RETENTION_SCHEDULER_LOCK_KEY = 'hbs:lock:notification-retention-scheduler';
-const NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS = 5 * 60_000;
+const DEFAULT_NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS = 5 * 60_000;
+
+const getLockTtlMilliseconds = (): number => {
+  const value = Number.parseInt(
+    process.env.NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS ?? '',
+    10,
+  );
+  return Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS;
+};
 
 @Injectable()
 export class NotificationRetentionScheduler {
@@ -22,7 +32,7 @@ export class NotificationRetentionScheduler {
     try {
       lock = await this.redisLock.acquire(
         NOTIFICATION_RETENTION_SCHEDULER_LOCK_KEY,
-        NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS,
+        getLockTtlMilliseconds(),
       );
 
       if (!lock) return;
