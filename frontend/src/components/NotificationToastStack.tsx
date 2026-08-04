@@ -1,8 +1,15 @@
+import { useEffect } from 'react';
 import type { OperationalNotification } from '../lib/api';
 
 type Props = {
   notifications: OperationalNotification[];
   onDismiss: (id: string) => void;
+};
+
+const autoDismissMilliseconds: Record<OperationalNotification['severity'], number> = {
+  INFO: 6_000,
+  WARNING: 10_000,
+  CRITICAL: 15_000,
 };
 
 function severityClasses(severity: OperationalNotification['severity']) {
@@ -17,6 +24,15 @@ function severityClasses(severity: OperationalNotification['severity']) {
 }
 
 export function NotificationToastStack({ notifications, onDismiss }: Props) {
+  useEffect(() => {
+    const timers = notifications.map((notification) => window.setTimeout(
+      () => onDismiss(notification.id),
+      autoDismissMilliseconds[notification.severity],
+    ));
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [notifications, onDismiss]);
+
   if (notifications.length === 0) return null;
 
   return (
