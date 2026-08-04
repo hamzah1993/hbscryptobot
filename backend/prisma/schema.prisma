@@ -74,19 +74,26 @@ enum StrategyActionStatus {
   CANCELLED
 }
 
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
 model User {
-  id                  String               @id @default(uuid())
-  email               String               @unique
+  id                  String                    @id @default(uuid())
+  email               String                    @unique
   passwordHash        String
   fullName            String
-  role                UserRole             @default(USER)
+  role                UserRole                  @default(USER)
   exchangeCredentials ExchangeCredential[]
   strategies          TradingStrategy[]
   positions           TradingPosition[]
   orders              TradingOrder[]
   strategyActions     StrategyAction[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  notifications       OperationalNotification[]
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
 }
 
 model ExchangeCredential {
@@ -240,4 +247,21 @@ model StrategyAction {
   @@index([userId, createdAt])
   @@index([positionId, status])
   @@index([subPositionId, status])
+}
+
+model OperationalNotification {
+  id         String               @id @default(uuid())
+  userId     String
+  event      String
+  message    String
+  severity   NotificationSeverity
+  strategyId String?
+  positionId String?
+  orderId    String?
+  metadata   Json?
+  createdAt  DateTime             @default(now())
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([severity, createdAt])
 }
