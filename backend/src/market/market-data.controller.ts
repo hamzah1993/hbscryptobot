@@ -1,6 +1,9 @@
 import { Controller, Delete, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import type { BinanceEnvironment } from '../exchange/binance/binance.service';
+import type {
+  BinanceEnvironment,
+  BinanceKlineInterval,
+} from '../exchange/binance/binance.service';
 import {
   BinanceWebsocketMarketDataService,
   type BinanceStreamEnvironment,
@@ -22,6 +25,21 @@ export class MarketDataController {
     @Query('refresh') refresh = 'false',
   ) {
     return this.marketData.getQuote(symbol, environment, refresh === 'true');
+  }
+
+  @Get('candles')
+  getCandles(
+    @Query('symbol') symbol = 'BTCUSDT',
+    @Query('interval') interval: BinanceKlineInterval = '5m',
+    @Query('limit') limit = '200',
+    @Query('environment') environment: BinanceEnvironment = 'live',
+  ) {
+    return this.marketData.getCandles(
+      symbol,
+      interval,
+      Number(limit),
+      environment,
+    );
   }
 
   @Get('cache')
