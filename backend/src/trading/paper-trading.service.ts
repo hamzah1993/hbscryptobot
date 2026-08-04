@@ -33,15 +33,7 @@ export class PaperTradingService {
     });
     if (existing) throw new BadRequestException('Strategy already has an open position');
 
-    const plan = this.riskBudget.buildPlan({
-      riskBudgetQuote: Number(strategy.riskBudgetQuote),
-      baseOrderQuote: Number(strategy.baseOrderQuote),
-      maxDcaOrders: strategy.maxDcaOrders,
-      dcaStepPercent: Number(strategy.dcaStepPercent),
-      dcaMultiplier: Number(strategy.dcaMultiplier),
-      takeProfitPercent: Number(strategy.takeProfitPercent),
-      independentFromLevel: strategy.independentFromLevel,
-    });
+    const plan = this.buildPlan(strategy);
     const base = plan[0];
     const quantity = base.quoteAmount / input.marketPrice;
     const nextDcaPrice = plan[1]
@@ -92,25 +84,84 @@ export class PaperTradingService {
   async addDca(userId: string, input: AddPaperDcaInput) {
     if (input.marketPrice <= 0) throw new BadRequestException('Market price must be positive');
 
-    const position = await this.prisma.tradingPosition.findFirst({
-      where: { id: input.positionId, userId, status: 'OPEN' },
-      include: { strategy: true, orders: true },
-    });
-    if (!position) throw new NotFoundException('Open paper position not found');
-    if (!position.strategy.paperTrading) throw new BadRequestException('Strategy is not in paper mode');
+    const position = await this.getOpenPosition(userId, input.positionId);
     if (position.nextDcaPrice && input.marketPrice > Number(position.nextDcaPrice)) {
       throw new BadRequestException('Market price has not reached the next DCA trigger');
     }
 
-    const plan = this.riskBudget.buildPlan({
-      riskBudgetQuote: Number(position.strategy.riskBudgetQuote),
-      baseOrderQuote: Number(position.strategy.baseOrderQuote),
-      maxDcaOrders: position.strategy.maxDcaOrders,
-      dcaStepPercent: Number(position.strategy.dcaStepPercent),
-      dcaMultiplier: Number(position.strategy.dcaMultiplier),
-      takeProfitPercent: Number(position.strategy.takeProfitPercent),
-      independentFromLevel: position.strategy.independentFromLevel,
+    return this.executeDca(position, input.marketPrice);
+  }
+
+  async closePosition(userId: string, positionId: string, marketPrice: number) {
+    if (marketPrice <= 0) throw new BadRequestException('Market price must be positive');
+
+    const position = await this.getOpenPosition(userId, positionId);
+    return this.executeClose(position, marketPrice);
+  }
+
+  async processPrice(userId: string, positionId: string, marketPrice: number) {
+    if (marketPrice <= 0) throw new BadRequestException('Market price must be positive');
+
+    const position = await this.getOpenPosition(userId, positionId);
+    const takeProfitPrice = position.takeProfitPrice ? Number(position.takeProfitPrice) : null;
+    const nextDcaPrice = position.nextDcaPrice ? Number(position.nextDcaPrice) : null;
+
+    if (takeProfitPrice !== null && marketPrice >= takeProfitPrice) {
+      return { action: 'TAKE_PROFIT', position: await this.executeClose(position, marketPrice) };
+    }
+
+    if (nextDcaPrice !== null && marketPrice <= nextDcaPrice) {
+      return { action: 'DCA', position: await this.executeDca(position, marketPrice) };
+    }
+
+    return {
+      action: 'HOLD',
+      position,
+      unrealizedPnlQuote:
+        Number(position.totalQuantity) * marketPrice - Number(position.totalCostQuote),
+    };
+  }
+
+  async listPositions(userId: string) {
+    return this.prisma.tradingPosition.findMany({
+      where: { userId },
+      include: { strategy: true, orders: { orderBy: { createdAt: 'asc' } } },
+      orderBy: { openedAt: 'desc' },
     });
+  }
+
+  private async getOpenPosition(userId: string, positionId: string) {
+    const position = await this.prisma.tradingPosition.findFirst({
+      where: { id: positionId, userId, status: 'OPEN' },
+      include: { strategy: true, orders: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!position) throw new NotFoundException('Open paper position not found');
+    if (!position.strategy.paperTrading) throw new BadRequestException('Strategy is not in paper mode');
+    return position;
+  }
+
+  private buildPlan(strategy: {
+    riskBudgetQuote: unknown;
+    baseOrderQuote: unknown;
+    maxDcaOrders: number;
+    dcaStepPercent: unknown;
+    dcaMultiplier: unknown;
+    takeProfitPercent: unknown;
+    independentFromLevel: number;
+  }) {
+    return this.riskBudget.buildPlan({
+      riskBudgetQuote: Number(strategy.riskBudgetQuote),
+      baseOrderQuote: Number(strategy.baseOrderQuote),
+      maxDcaOrders: strategy.maxDcaOrders,
+      dcaStepPercent: Number(strategy.dcaStepPercent),
+      dcaMultiplier: Number(strategy.dcaMultiplier),
+      takeProfitPercent: Number(strategy.takeProfitPercent),
+      independentFromLevel: strategy.independentFromLevel,
+    });
+  }
+
+  private async executeDca(position: any, marketPrice: number) {
+    const plan = this.buildPlan(position.strategy);
     const nextLevel = position.dcaCount + 2;
     const allocation = plan.find((level) => level.level === nextLevel);
     if (!allocation) throw new BadRequestException('No further DCA allocation is available');
@@ -122,22 +173,22 @@ export class PaperTradingService {
       Number(position.strategy.riskBudgetQuote),
     );
 
-    const quantity = allocation.quoteAmount / input.marketPrice;
+    const quantity = allocation.quoteAmount / marketPrice;
     const totalQuantity = Number(position.totalQuantity) + quantity;
     const totalCostQuote = alreadyAllocated + allocation.quoteAmount;
     const averageEntryPrice = totalCostQuote / totalQuantity;
     const following = plan.find((level) => level.level === nextLevel + 1);
+    const baseEntryPrice = Number(position.orders[0]?.averageFillPrice ?? marketPrice);
     const nextDcaPrice = following
-      ? Number(position.orders[0]?.averageFillPrice ?? input.marketPrice) *
-        (1 - following.triggerDropPercent / 100)
+      ? baseEntryPrice * (1 - following.triggerDropPercent / 100)
       : null;
-    const takeProfitPrice = averageEntryPrice *
-      (1 + Number(position.strategy.takeProfitPercent) / 100);
+    const takeProfitPrice =
+      averageEntryPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
         data: {
-          userId,
+          userId: position.userId,
           positionId: position.id,
           clientOrderId: `paper-${randomUUID()}`,
           side: 'BUY',
@@ -146,10 +197,10 @@ export class PaperTradingService {
           level: nextLevel,
           independent: allocation.independent,
           quantity,
-          price: input.marketPrice,
+          price: marketPrice,
           filledQuantity: quantity,
           quoteAmount: allocation.quoteAmount,
-          averageFillPrice: input.marketPrice,
+          averageFillPrice: marketPrice,
         },
       });
 
@@ -172,16 +223,7 @@ export class PaperTradingService {
     });
   }
 
-  async closePosition(userId: string, positionId: string, marketPrice: number) {
-    if (marketPrice <= 0) throw new BadRequestException('Market price must be positive');
-
-    const position = await this.prisma.tradingPosition.findFirst({
-      where: { id: positionId, userId, status: 'OPEN' },
-      include: { strategy: true },
-    });
-    if (!position) throw new NotFoundException('Open paper position not found');
-    if (!position.strategy.paperTrading) throw new BadRequestException('Strategy is not in paper mode');
-
+  private async executeClose(position: any, marketPrice: number) {
     const quantity = Number(position.totalQuantity);
     const proceeds = quantity * marketPrice;
     const realizedPnlQuote = proceeds - Number(position.totalCostQuote);
@@ -189,7 +231,7 @@ export class PaperTradingService {
     return this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
         data: {
-          userId,
+          userId: position.userId,
           positionId: position.id,
           clientOrderId: `paper-${randomUUID()}`,
           side: 'SELL',
@@ -220,14 +262,6 @@ export class PaperTradingService {
         where: { id: position.id },
         include: { orders: { orderBy: { createdAt: 'asc' } }, strategy: true },
       });
-    });
-  }
-
-  async listPositions(userId: string) {
-    return this.prisma.tradingPosition.findMany({
-      where: { userId },
-      include: { strategy: true, orders: { orderBy: { createdAt: 'asc' } } },
-      orderBy: { openedAt: 'desc' },
     });
   }
 }
