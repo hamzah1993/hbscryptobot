@@ -1,22 +1,30 @@
 import { RedisLockService } from './redis-lock.service';
 
-const clients: any[] = [];
+type MockRedisClient = {
+  isOpen: boolean;
+  on: jest.Mock;
+  connect: jest.Mock<Promise<MockRedisClient>, []>;
+  set: jest.Mock;
+  eval: jest.Mock;
+  quit: jest.Mock<Promise<void>, []>;
+};
+
+const clients: MockRedisClient[] = [];
 
 jest.mock('redis', () => ({
   createClient: jest.fn(() => {
-    const client = {
-      isOpen: false,
-      on: jest.fn(),
-      connect: jest.fn(async function () {
-        client.isOpen = true;
-        return client;
-      }),
-      set: jest.fn(),
-      eval: jest.fn(),
-      quit: jest.fn(async () => {
-        client.isOpen = false;
-      }),
-    };
+    const client = {} as MockRedisClient;
+    client.isOpen = false;
+    client.on = jest.fn();
+    client.connect = jest.fn(async (): Promise<MockRedisClient> => {
+      client.isOpen = true;
+      return client;
+    });
+    client.set = jest.fn();
+    client.eval = jest.fn();
+    client.quit = jest.fn(async (): Promise<void> => {
+      client.isOpen = false;
+    });
     clients.push(client);
     return client;
   }),
