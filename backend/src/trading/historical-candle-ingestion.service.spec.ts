@@ -80,13 +80,13 @@ describe('HistoricalCandleIngestionService', () => {
     });
   });
 
-  it('preserves an explicitly supplied exchange', async () => {
+  it('preserves the explicitly supplied Binance exchange', async () => {
     const { service, historicalCandle } = createService();
     const openTime = new Date('2026-08-01T00:00:00.000Z');
 
     await service.upsertMany([
       {
-        exchange: ExchangeName.BYBIT,
+        exchange: ExchangeName.BINANCE,
         symbol: 'ETHUSDT',
         interval: '1h',
         openTime,
@@ -103,7 +103,7 @@ describe('HistoricalCandleIngestionService', () => {
       expect.objectContaining({
         where: {
           exchange_symbol_interval_openTime: {
-            exchange: ExchangeName.BYBIT,
+            exchange: ExchangeName.BINANCE,
             symbol: 'ETHUSDT',
             interval: '1h',
             openTime,
