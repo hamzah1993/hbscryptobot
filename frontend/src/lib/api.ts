@@ -33,6 +33,7 @@ export type TradingSubPosition = {
 export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
 export type BinanceStreamEnvironment = 'testnet' | 'live';
 export type ExchangeEnvironment = 'TESTNET' | 'LIVE';
+export type TestnetOrderStatus = 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'REJECTED' | 'CANCELLED';
 
 export type ExchangeCredentialSummary = {
   id: string;
@@ -92,6 +93,53 @@ export type TradingPosition = {
   strategy: TradingStrategy;
   orders: TradingOrder[];
   subPositions: TradingSubPosition[];
+};
+
+export type TestnetOrder = {
+  id: string;
+  positionId: string;
+  subPositionId: string | null;
+  exchangeOrderId: string | null;
+  clientOrderId: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT';
+  status: TestnetOrderStatus;
+  level: number;
+  independent: boolean;
+  quantity: string;
+  price: string | null;
+  filledQuantity: string;
+  quoteAmount: string;
+  averageFillPrice: string | null;
+  createdAt: string;
+  updatedAt: string;
+  position: {
+    id: string;
+    symbol: string;
+    status: TradingPosition['status'];
+    strategy: Pick<TradingStrategy, 'id' | 'name' | 'status' | 'environment' | 'paperTrading'>;
+  };
+  subPosition: {
+    id: string;
+    level: number;
+    status: 'OPEN' | 'CLOSED';
+  } | null;
+  strategyAction: {
+    id: string;
+    type: 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
+    status: 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
+    actionKey: string;
+    triggerPrice: string | null;
+    createdAt: string;
+    completedAt: string | null;
+  } | null;
+};
+
+export type TestnetOrderSyncResponse = {
+  tradingOrder: TestnetOrder;
+  exchangeOrder: unknown;
+  deltaQuantity: number;
+  deltaQuoteAmount: number;
 };
 
 export type StreamedMarketPrice = {
@@ -171,6 +219,15 @@ export const api = {
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify({ status }),
+    }),
+  listTestnetOrders: (token: string, limit = 100) =>
+    request<TestnetOrder[]>(`/strategies/testnet-orders?limit=${encodeURIComponent(String(limit))}`, {
+      headers: authHeaders(token),
+    }),
+  syncTestnetOrder: (token: string, tradingOrderId: string) =>
+    request<TestnetOrderSyncResponse>(`/strategies/testnet-orders/${tradingOrderId}/sync`, {
+      method: 'POST',
+      headers: authHeaders(token),
     }),
   listExchangeCredentials: (token: string) =>
     request<ExchangeCredentialSummary[]>('/exchange/credentials', { headers: authHeaders(token) }),
