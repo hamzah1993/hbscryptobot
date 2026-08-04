@@ -57,6 +57,11 @@ export type BinanceKline = {
   closeTime: number;
 };
 
+export type BinanceKlineQuery = {
+  startTime?: number;
+  endTime?: number;
+};
+
 @Injectable()
 export class BinanceService {
   constructor(private readonly config: ConfigService) {}
@@ -86,6 +91,7 @@ export class BinanceService {
     interval: BinanceKlineInterval = '5m',
     limit = 200,
     environment: BinanceEnvironment = 'live',
+    query: BinanceKlineQuery = {},
   ): Promise<BinanceKline[]> {
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
@@ -93,11 +99,31 @@ export class BinanceService {
       throw new BadRequestException('Kline limit must be an integer between 1 and 1000');
     }
 
+    for (const [name, value] of Object.entries(query)) {
+      if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+        throw new BadRequestException(`${name} must be a non-negative integer timestamp`);
+      }
+    }
+    if (
+      query.startTime !== undefined &&
+      query.endTime !== undefined &&
+      query.startTime > query.endTime
+    ) {
+      throw new BadRequestException('Kline startTime cannot be after endTime');
+    }
+
     const search = new URLSearchParams({
       symbol: normalized,
       interval,
       limit: String(limit),
     });
+    if (query.startTime !== undefined) {
+      search.set('startTime', String(query.startTime));
+    }
+    if (query.endTime !== undefined) {
+      search.set('endTime', String(query.endTime));
+    }
+
     const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/klines?${search.toString()}`);
     const body = await response.json();
     if (!response.ok) {
