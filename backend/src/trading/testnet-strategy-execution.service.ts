@@ -49,6 +49,18 @@ export class TestnetStrategyExecutionService {
       throw new BadRequestException('Strategy must be PAUSED for a controlled testnet order');
     }
 
+    const openPosition = await this.prisma.tradingPosition.findFirst({
+      where: { strategyId: strategy.id, userId, status: 'OPEN' },
+      orderBy: { openedAt: 'desc' },
+    });
+
+    if (input.side === 'SELL') {
+      if (!openPosition) throw new BadRequestException('No open testnet position is available to sell');
+      if (input.quantity > Number(openPosition.totalQuantity)) {
+        throw new BadRequestException('Sell quantity exceeds the open testnet position quantity');
+      }
+    }
+
     const clientOrderId = `hbs-testnet-${randomUUID()}`;
     const exchangeOrder = (await this.testnetOrders.placeMarketOrder(userId, {
       symbol: strategy.symbol,
@@ -63,29 +75,70 @@ export class TestnetStrategyExecutionService {
     const status = this.mapOrderStatus(exchangeOrder.status);
 
     const savedOrder = await this.prisma.$transaction(async (tx) => {
-      let position = await tx.tradingPosition.findFirst({
-        where: { strategyId: strategy.id, userId, status: 'OPEN' },
-        orderBy: { openedAt: 'desc' },
-      });
+      let position = openPosition;
 
-      if (!position) {
+      if (!position && input.side === 'BUY') {
         position = await tx.tradingPosition.create({
           data: {
             userId,
             strategyId: strategy.id,
             symbol: strategy.symbol,
-            status: input.side === 'BUY' ? 'OPEN' : 'CLOSED',
-            totalQuantity: input.side === 'BUY' ? executedQuantity : 0,
-            totalCostQuote: input.side === 'BUY' ? quoteAmount : 0,
-            averageEntryPrice: input.side === 'BUY' ? averageFillPrice : 0,
+            status: 'OPEN',
+            totalQuantity: executedQuantity,
+            totalCostQuote: quoteAmount,
+            averageEntryPrice: averageFillPrice,
             realizedPnlQuote: 0,
             dcaCount: 0,
-            closedAt: input.side === 'SELL' ? new Date() : null,
+          },
+        });
+      } else if (position && input.side === 'BUY') {
+        const previousQuantity = Number(position.totalQuantity);
+        const previousCost = Number(position.totalCostQuote);
+        const totalQuantity = previousQuantity + executedQuantity;
+        const totalCostQuote = previousCost + quoteAmount;
+        const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
+
+        position = await tx.tradingPosition.update({
+          where: { id: position.id },
+          data: {
+            totalQuantity,
+            totalCostQuote,
+            averageEntryPrice,
+            dcaCount: position.dcaCount + 1,
+          },
+        });
+      } else if (position && input.side === 'SELL') {
+        const previousQuantity = Number(position.totalQuantity);
+        const previousCost = Number(position.totalCostQuote);
+        const soldQuantity = Math.min(executedQuantity, previousQuantity);
+        const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
+        const proceeds = quoteAmount > 0 ? quoteAmount : soldQuantity * averageFillPrice;
+        const realizedPnlQuote = Number(position.realizedPnlQuote) + proceeds - allocatedCost;
+        const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
+        const remainingCost = Math.max(previousCost - allocatedCost, 0);
+        const closed = remainingQuantity <= 1e-12;
+
+        position = await tx.tradingPosition.update({
+          where: { id: position.id },
+          data: {
+            status: closed ? 'CLOSED' : 'OPEN',
+            totalQuantity: closed ? 0 : remainingQuantity,
+            totalCostQuote: closed ? 0 : remainingCost,
+            averageEntryPrice: closed ? 0 : remainingCost / remainingQuantity,
+            realizedPnlQuote,
+            closedAt: closed ? new Date() : null,
+            nextDcaPrice: closed ? null : position.nextDcaPrice,
+            takeProfitPrice: closed ? null : position.takeProfitPrice,
           },
         });
       }
 
-      const level = (await tx.tradingOrder.count({ where: { positionId: position.id, side: 'BUY' } })) + 1;
+      if (!position) throw new BadRequestException('Unable to resolve a testnet trading position');
+
+      const level =
+        input.side === 'BUY'
+          ? (await tx.tradingOrder.count({ where: { positionId: position.id, side: 'BUY' } })) + 1
+          : Math.max(position.dcaCount + 1, 1);
 
       return tx.tradingOrder.create({
         data: {
