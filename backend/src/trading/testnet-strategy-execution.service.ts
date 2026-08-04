@@ -518,9 +518,8 @@ export class TestnetStrategyExecutionService {
       case 'CANCELLED':
         return 'CANCELLED' as const;
       case 'REJECTED':
-        return 'REJECTED' as const;
       case 'EXPIRED':
-        return 'EXPIRED' as const;
+        return 'REJECTED' as const;
       case 'NEW':
       default:
         return 'PENDING' as const;
@@ -561,18 +560,16 @@ export class TestnetStrategyExecutionService {
     averageEntryPrice: number,
     dcaCount: number,
   ) {
-    if (quantity <= 0 || costQuote <= 0 || averageEntryPrice <= 0) {
-      return { nextDcaPrice: null, takeProfitPrice: null };
-    }
-
     const dcaStepPercent = Number(strategy.dcaStepPercent);
     const dcaMultiplier = Number(strategy.dcaMultiplier);
     const takeProfitPercent = Number(strategy.takeProfitPercent);
-    const nextStepPercent = dcaStepPercent * Math.pow(dcaMultiplier, dcaCount);
+    const nextStepMultiplier = Math.pow(dcaMultiplier, dcaCount);
+    const nextDcaPrice = averageEntryPrice * (1 - (dcaStepPercent * nextStepMultiplier) / 100);
+    const takeProfitPrice = averageEntryPrice * (1 + takeProfitPercent / 100);
 
     return {
-      nextDcaPrice: averageEntryPrice * (1 - nextStepPercent / 100),
-      takeProfitPrice: averageEntryPrice * (1 + takeProfitPercent / 100),
+      nextDcaPrice: quantity > 0 && costQuote > 0 ? nextDcaPrice : null,
+      takeProfitPrice: quantity > 0 && costQuote > 0 ? takeProfitPrice : null,
     };
   }
 }
