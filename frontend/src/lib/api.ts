@@ -52,6 +52,20 @@ export type BinanceKlineInterval =
 export type TestnetOrderStatus = 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'REJECTED' | 'CANCELLED';
 export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 export type TestnetActionStatus = 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
+export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
+
+export type OperationalNotification = {
+  id: string;
+  event: string;
+  message: string;
+  severity: NotificationSeverity;
+  userId?: string;
+  strategyId?: string;
+  positionId?: string;
+  orderId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+};
 
 export type ExchangeCredentialSummary = {
   id: string;
@@ -341,6 +355,10 @@ export const api = {
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify({ status }),
+    }),
+  listNotifications: (token: string, limit = 100) =>
+    request<OperationalNotification[]>(`/strategies/notifications?limit=${encodeURIComponent(String(limit))}`, {
+      headers: authHeaders(token),
     }),
   listTestnetOrders: (token: string, limit = 100) =>
     request<TestnetOrder[]>(`/strategies/testnet-orders?limit=${encodeURIComponent(String(limit))}`, {
