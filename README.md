@@ -1,31 +1,58 @@
 # HBS Trading Platform
 
-A full-stack cryptocurrency trading platform focused on safe paper trading, Binance Spot Testnet execution, configurable DCA strategies, and Royal Q-style independent sub-positions.
+A full-stack cryptocurrency trading platform focused on safe paper trading, Binance Spot Testnet execution, configurable DCA strategies, Royal Q-style independent sub-positions, operational reliability, and backtesting foundations.
 
 > **Safety status:** Live-money order execution is disabled. The platform currently supports paper trading, public Binance market data, and controlled Binance Spot Testnet execution only.
 
-## Current implementation status
+## Current project status
 
-The platform has completed the core paper-trading milestone and the main Binance Spot Testnet workflow through notification persistence and operational-alert retention.
+**Latest completed numbered feature commit:** 118  
+**Current milestone:** Backtesting and analytics foundation  
+**Estimated overall completion:** approximately 85–87%
 
-### Completed capabilities
+The core paper-trading and Binance Spot Testnet workflows are implemented. API throttling, Redis-backed distributed locking, scheduler recovery, notification persistence, and configurable lock TTLs are also in place. Historical candle storage, ingestion, and the first Binance importer foundation have now been added.
 
-- User registration, login, JWT authentication, and protected APIs
-- Encrypted Binance credential storage with separate Testnet and Live records
-- Paper-trading positions, DCA, take profit, and strategy scheduling
-- Binance Spot Testnet market-order execution
-- Persistent Testnet orders, positions, fills, and strategy actions
-- Royal Q-style independent sub-position entries and exits
-- Dynamic DCA recovery logic
-- Automatic Testnet strategy runner and scheduler
+### Milestone progress
+
+| Milestone | Status | Progress |
+|---|---:|---:|
+| Platform foundation and authentication | Complete | 100% |
+| Paper-trading engine | Complete | 100% |
+| DCA and fixed risk-budget logic | Complete | 100% |
+| Royal Q-style independent sub-positions | Complete | 100% |
+| Binance Spot Testnet execution | Complete | 100% |
+| Dashboard, charting, and Testnet markers | Complete | 95–100% |
+| Notifications and webhook reliability | Complete | 100% |
+| API rate limiting | Complete | 100% |
+| Distributed locking and scheduler recovery | Complete | 95–100% |
+| Backtesting and analytics | In progress | 15–20% |
+| Deployment, monitoring, and backups | Upcoming | 20–30% |
+| Live-execution safeguards | Future | Not started |
+| Bybit and OKX integration | Future | Not started |
+
+## Completed capabilities
+
+- User registration, login, JWT authentication, protected APIs, and route-specific throttling
+- Encrypted Binance credentials with separate Testnet and Live records
+- Paper positions, DCA, take profit, realized P&L, and automatic strategy scheduling
+- Binance Spot Testnet market-order execution and reconciliation
+- Persistent Testnet orders, positions, fills, and idempotent strategy actions
+- Royal Q-style independent entries and independent take-profit exits
+- Fixed quote-currency risk budgets instead of whole-account balance sizing
+- Automatic Testnet strategy and order-sync schedulers
+- Redis-backed scheduler and per-strategy distributed locks
+- Token-protected atomic lock release and lock-expiry recovery
+- Configurable Redis lock TTLs with safe fallbacks
 - Binance WebSocket market-price streaming
-- Testnet orders, positions, account status, and strategy-action dashboard panels
-- Testnet emergency stop with unresolved-order cancellation attempts
-- TradingView charting with live candle updates and Testnet order/position markers
-- Operational notifications with dashboard history, unread badge, toast alerts, browser alerts, and sound preferences
-- Signed notification webhooks with retry handling, delivery metrics, persistence, restart restoration, and retention cleanup
-- Persistent operational-notification history with configurable retention and scheduled cleanup
-- GitHub Actions validation for backend, frontend, Prisma, and Docker
+- TradingView charting with live candles and Testnet markers
+- Testnet orders, positions, account status, and action-timeline panels
+- Testnet emergency stop and unresolved-order cancellation attempts
+- Persistent operational notifications and webhook metrics
+- Signed webhook delivery with retries, restart restoration, and retention cleanup
+- Historical candle Prisma model
+- Historical candle batch ingestion and deduplicating upserts
+- Binance historical candle importer service foundation
+- GitHub Actions validation for backend, frontend, Prisma, tests, and Docker
 
 ## Architecture
 
@@ -36,18 +63,16 @@ React + Vite + Tailwind frontend
       NestJS REST API
        |      |      |
        |      |      +--> Binance Spot REST / WebSocket
-       |      +---------> Redis
+       |      +---------> Redis distributed locks
        +----------------> PostgreSQL via Prisma
 ```
-
-### Technology stack
 
 | Layer | Technology |
 |---|---|
 | Backend | NestJS, TypeScript |
 | Frontend | React, Vite, Tailwind CSS |
 | Database | PostgreSQL, Prisma ORM |
-| Cache and infrastructure | Redis, Docker Compose |
+| Cache and coordination | Redis |
 | Authentication | JWT, Argon2 |
 | Exchange | Binance Spot REST and WebSocket APIs |
 | CI | GitHub Actions |
@@ -56,28 +81,29 @@ React + Vite + Tailwind frontend
 
 ### Paper trading
 
-Paper strategies simulate entries, DCA orders, average-price changes, take-profit exits, and realized P&L without sending exchange orders.
+Paper strategies simulate initial entries, DCA orders, average-price changes, parent take-profit exits, independent sub-position exits, and realized P&L without sending exchange orders.
 
 ### Binance Spot Testnet
 
-Testnet strategies can place controlled Binance Spot Testnet market orders using encrypted user credentials. Testnet execution supports:
+Testnet strategies can place controlled Binance Spot Testnet market orders using encrypted user credentials. Supported execution includes:
 
 - Initial entries
-- Parent-position DCA entries
+- Parent DCA entries
 - Parent take-profit exits
-- Independent entries from the configured DCA level
+- Independent entries from the configured level
 - Independent take-profit exits
 - Persistent order and fill reconciliation
 - Idempotent strategy actions
-- Automatic scheduler execution
+- Automatic scheduled execution
+- Multi-instance execution protection through Redis locks
 
 ### Live trading
 
-Live Binance public market data may be viewed, but live order placement and live order cancellation are explicitly disabled.
+Live Binance public market data and historical candles may be read, but live order placement and cancellation are explicitly disabled.
 
 ## DCA and independent sub-position model
 
-Each strategy has a fixed quote-currency risk budget rather than using the entire exchange account balance.
+Each strategy uses a fixed quote-currency risk budget.
 
 Configurable strategy fields include:
 
@@ -90,67 +116,74 @@ Configurable strategy fields include:
 - Exchange environment
 - Paper or Testnet mode
 
-Before the independent threshold, DCA entries update the parent position's quantity, cost, average entry, next DCA trigger, and take-profit trigger.
+Before the independent threshold, DCA entries update the parent position. From the configured independent level onward, new entries are tracked as separate sub-positions with their own quantity, cost, entry price, take-profit price, status, and realized P&L.
 
-From the configured independent level onward, qualifying entries are represented as separate sub-positions. Each independent sub-position tracks its own quantity, cost, entry price, take-profit price, status, and realized P&L.
+## Reliability and distributed locking
 
-## Testnet strategy action lifecycle
+Redis locks protect:
 
-Automatic Testnet decisions are persisted as idempotent strategy actions. Supported action types are:
+- Testnet strategy scheduler ticks
+- Testnet order synchronization
+- Paper-strategy scheduler ticks
+- Notification-retention cleanup
+- Individual Testnet strategy execution
 
-```text
-INITIAL_ENTRY
-DCA_ENTRY
-INDEPENDENT_ENTRY
-PARENT_EXIT
-INDEPENDENT_EXIT
+The lock service uses:
+
+- `SET NX PX` acquisition
+- Unique ownership tokens
+- Atomic compare-and-delete release
+- Expiry-based crash recovery
+- Graceful handling of acquisition and release failures
+
+Relevant environment variables:
+
+```env
+REDIS_URL=redis://redis:6379
+TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS=30000
+TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS=30000
+PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS=30000
+NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS=300000
+TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS=30000
 ```
 
-Action statuses are:
+## API rate limiting
 
-```text
-PENDING
-SUBMITTED
-COMPLETED
-FAILED
+```env
+API_RATE_LIMIT_TTL_MS=60000
+API_RATE_LIMIT_MAX_REQUESTS=120
+AUTH_RATE_LIMIT_TTL_MS=60000
+AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS=5
+AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS=10
 ```
 
-The action timeline links strategy decisions to positions, sub-positions, Binance order IDs, fill quantities, average fill prices, trigger prices, timestamps, and errors.
+Invalid, zero, or negative values fall back to safe defaults.
 
-## Emergency stop
+## Historical candle and backtesting foundation
 
-The authenticated Testnet emergency stop:
+The current data foundation includes:
 
-1. Changes all running or paused non-paper Testnet strategies to `STOPPED`.
-2. Marks pending Testnet strategy actions as failed with an emergency-stop reason.
-3. Finds local Testnet orders in `PENDING` or `PARTIALLY_FILLED` state.
-4. Attempts to cancel each corresponding Binance Spot Testnet order.
-5. Updates locally confirmed cancellations to `CANCELLED`.
-6. Returns a per-order cancellation result and summary counts.
+- `HistoricalCandle` Prisma model
+- Exchange, symbol, interval, OHLC, volume, open time, and close time
+- Unique exchange/symbol/interval/open-time constraint
+- Chronological query index
+- Batch ingestion through Prisma transactions
+- Upserts that update existing candle values instead of creating duplicates
+- Binance public-kline importer foundation supporting standard Binance intervals
 
-Important limitations:
-
-- It does not liquidate open positions.
-- It cannot reverse an order that Binance has already filled.
-- Individual exchange cancellation failures are reported without aborting the remaining cancellation attempts.
-- Live Binance cancellation remains disabled.
+The importer currently exists as a service foundation. Registration, API access, pagination, date-range importing, backtest execution, metrics, and dashboard reporting remain upcoming work.
 
 ## Notifications and operational alerts
-
-Operational events are published through a shared notification service and surfaced through the authenticated dashboard.
 
 Current notification capabilities include:
 
 - Persistent user-scoped history in PostgreSQL
-- In-memory fallback if history reads fail
 - INFO, WARNING, and CRITICAL severities
-- Dashboard history panel, unread badge, toast alerts, browser notifications, and optional sound
-- Configurable notification webhook URL, minimum severity, HMAC signing, timeout, and retries
-- Delivery metrics for attempts, successes, failures, retries, timestamps, and latest HTTP status
-- Persistent webhook-metrics snapshots restored after backend restart
-- Scheduled cleanup for operational notifications and metrics snapshots
-
-Relevant environment variables:
+- Dashboard history, unread badge, toast, browser alerts, and optional sound
+- Configurable webhook URL, minimum severity, HMAC signing, timeout, and retries
+- Delivery metrics for attempts, successes, failures, retries, timestamps, and HTTP status
+- Persistent metrics snapshots restored after restart
+- Scheduled retention cleanup protected by a Redis lock
 
 ```env
 NOTIFICATION_RETENTION_DAYS=30
@@ -161,25 +194,6 @@ NOTIFICATION_WEBHOOK_MAX_ATTEMPTS=3
 NOTIFICATION_WEBHOOK_METRICS_RETENTION_DAYS=30
 ```
 
-Retention values are bounded to 1–365 days. Webhook delivery and notification persistence failures are logged but do not block trading execution.
-
-## Dashboard
-
-The responsive dashboard currently includes:
-
-- Overview and paper-position analytics
-- Strategy controls
-- Live public market stream status
-- TradingView market chart with live candles and Testnet markers
-- Exchange Accounts page
-- Binance Testnet Orders table
-- Binance Testnet Positions panel
-- Strategy Action Timeline
-- Operational notification history and webhook delivery metrics
-- Testnet emergency-stop confirmation and result feedback
-
-The interface clearly separates paper, Testnet, and live-public-data behavior. Live execution is not presented as enabled.
-
 ## Repository structure
 
 ```text
@@ -188,19 +202,19 @@ hbstrading/
 │   ├── prisma/                 Prisma schema
 │   └── src/
 │       ├── auth/               Authentication and JWT guards
-│       ├── credentials/        Encrypted exchange credentials
-│       ├── exchange/binance/   Binance REST and Testnet order services
+│       ├── exchange/           Binance and credential services
 │       ├── market/             REST cache and WebSocket market data
-│       ├── notifications/      Operational alerts, webhooks, metrics, retention
+│       ├── notifications/      Alerts, webhooks, metrics, retention
 │       ├── prisma/             Prisma service
-│       └── trading/            Strategies, runners, positions, actions, safety
+│       ├── redis/              Distributed lock module and service
+│       └── trading/            Strategies, execution, candles, safety
 ├── frontend/
 │   └── src/
-│       ├── auth/               Authentication state
-│       ├── components/         Trading dashboard panels
-│       ├── lib/                Typed API client
-│       └── pages/              Dashboard and authentication pages
-├── .github/workflows/          GitHub Actions CI
+│       ├── auth/
+│       ├── components/
+│       ├── lib/
+│       └── pages/
+├── .github/workflows/
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
@@ -213,40 +227,14 @@ hbstrading/
 - Git
 - Docker Desktop, or Docker Engine with Docker Compose
 
-### 1. Clone the repository
-
 ```bash
 git clone https://github.com/hamzah1993/hbstrading.git
 cd hbstrading
-```
-
-### 2. Create the environment file
-
-```bash
 cp .env.example .env
-```
-
-Windows Command Prompt:
-
-```cmd
-copy .env.example .env
-```
-
-Generate a base64-encoded 32-byte credential-encryption key:
-
-```bash
 openssl rand -base64 32
 ```
 
-Set it in `.env`:
-
-```env
-EXCHANGE_CREDENTIALS_KEY=your_generated_base64_key
-```
-
-Replace all example secrets and passwords before using a shared or hosted environment.
-
-### 3. Start the stack
+Set the generated value as `EXCHANGE_CREDENTIALS_KEY`, replace all example secrets, then start the stack:
 
 ```bash
 docker compose up --build
@@ -260,27 +248,13 @@ Default services:
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
-### 4. Apply the Prisma schema
-
-In another terminal:
+Apply the Prisma schema:
 
 ```bash
 docker compose exec backend npx prisma db push
 docker compose exec backend npx prisma generate
 docker compose restart backend
 ```
-
-### 5. Register and configure Testnet
-
-1. Open `http://localhost:5173`.
-2. Register and sign in.
-3. Open **Exchange accounts**.
-4. Save Binance Spot Testnet API credentials.
-5. Test the connection.
-6. Create a strategy with environment `TESTNET` and paper trading disabled.
-7. Start with small Binance Testnet balances and quantities.
-
-Do not use production Binance credentials for Testnet.
 
 ## Local development
 
@@ -301,151 +275,188 @@ npm install
 npm run dev
 ```
 
-### Builds
+### Validation
 
 ```bash
-cd backend && npm run build
-cd ../frontend && npm run build
+cd backend
+npm run build
+npm test
+
+cd ../frontend
+npm run build
 ```
 
-## Main API endpoints
+## Main API areas
 
-All endpoints except registration, login, and health require a JWT bearer token.
-
-### Authentication
+All endpoints except registration, login, and health require JWT authentication.
 
 ```text
 POST /api/auth/register
 POST /api/auth/login
 GET  /api/users/me
-```
 
-### Strategy management
-
-```text
 GET    /api/strategies
 POST   /api/strategies
 PATCH  /api/strategies/:strategyId
 POST   /api/strategies/:strategyId/status
 DELETE /api/strategies/:strategyId
-```
 
-### Paper trading
-
-```text
 GET  /api/paper-trading/positions
-POST /api/paper-trading/positions/open
-POST /api/paper-trading/positions/:positionId/dca
-POST /api/paper-trading/positions/:positionId/tick
-POST /api/paper-trading/positions/:positionId/close
 POST /api/strategies/run-paper-tick
-```
 
-### Testnet trading and observability
-
-```text
-POST /api/strategies/:strategyId/testnet-order
 GET  /api/strategies/testnet-orders
-POST /api/strategies/testnet-orders/:tradingOrderId/sync
 GET  /api/strategies/testnet-positions
 GET  /api/strategies/testnet-actions
 POST /api/strategies/testnet-emergency-stop
-```
 
-### Notifications
-
-```text
 GET /api/notifications
 GET /api/notifications/webhook-metrics
+
+GET  /api/market-data/quote
+GET  /api/market-data/stream/status
+GET  /api/market-data/stream/price
 ```
 
-### Exchange credentials and connection checks
+No historical-candle import endpoint is exposed yet.
 
-```text
-GET    /api/exchange/credentials
-POST   /api/exchange/credentials/binance
-DELETE /api/exchange/credentials/binance/:environment
-POST   /api/exchange/binance/account/test
-```
+## Numbered roadmap
 
-### Market data
+### Current documentation commit
 
-```text
-GET    /api/market-data/quote
-GET    /api/market-data/cache
-DELETE /api/market-data/cache
-POST   /api/market-data/stream/subscribe
-DELETE /api/market-data/stream/subscribe
-GET    /api/market-data/stream/status
-GET    /api/market-data/stream/price
-```
+**Commit 119 — Refresh project status and numbered roadmap**
 
-## CI workflow
+- Align README with implemented Redis reliability work
+- Document the historical candle foundation
+- Correct outdated limitations and milestone status
+- Publish the next numbered delivery sequence
 
-GitHub Actions validates:
+### Historical data and backtesting
 
-- Backend dependency installation
-- Prisma client generation
-- Prisma schema validation
-- Database schema application against a service database
-- Backend build and Jest tests
-- Frontend build
-- Docker Compose configuration
-- Docker image builds
+**Commit 120 — Register Binance historical candle importer**
 
-A workflow that stalls before repository checkout or during service-container initialization may indicate a GitHub-hosted runner issue rather than a source-code failure.
+- Add the importer to `TradingEngineModule`
+- Export it for controller and scheduler use
 
-## Security guidance
+**Commit 121 — Test historical candle ingestion**
 
-- Never commit `.env` files, API keys, encryption keys, webhook secrets, or private webhook URLs.
-- Create Binance keys without withdrawal permission.
-- Use separate credentials for Testnet and Live.
-- Keep live execution disabled until explicit production safeguards are completed and reviewed.
-- Use strong, unique database and JWT secrets.
-- Back up `EXCHANGE_CREDENTIALS_KEY` securely; encrypted credentials cannot be recovered without it.
-- Test emergency-stop behavior using Binance Spot Testnet only.
-- Validate webhook signatures and timestamps in downstream receivers.
+- Symbol normalization
+- Decimal conversion
+- Transactional upserts
+- Duplicate-candle updates
+- Empty batch behavior
+
+**Commit 122 — Test Binance historical candle importer**
+
+- Request validation
+- Kline mapping
+- Live public-data environment
+- Import counts and error propagation
+
+**Commit 123 — Add authenticated candle import endpoint**
+
+- Manual symbol, interval, and limit import
+- Validation and structured result
+- No exchange credentials required for public data
+
+**Commit 124 — Add Binance kline pagination parameters**
+
+- Optional start and end time
+- Cursor-safe page retrieval
+- Maximum batch boundaries
+
+**Commit 125 — Add date-range historical importer**
+
+- Multi-page imports
+- Deduplication through existing upserts
+- Progress and imported-count reporting
+
+**Commit 126 — Add historical candle query service**
+
+- Chronological range queries
+- Symbol and interval filtering
+- Bounded result sizes
+
+**Commit 127 — Add backtest run data model**
+
+- Run status and configuration snapshot
+- Start/end range
+- Initial capital and strategy parameters
+- Summary result fields
+
+**Commit 128 — Add backtest execution engine foundation**
+
+- Deterministic candle-by-candle processing
+- Isolated state from paper and Testnet execution
+
+**Commit 129 — Simulate initial entries and parent DCA**
+
+**Commit 130 — Simulate independent sub-position entries and exits**
+
+**Commit 131 — Calculate realized and unrealized P&L**
+
+**Commit 132 — Calculate win rate and average trade duration**
+
+**Commit 133 — Calculate maximum drawdown and equity curve**
+
+**Commit 134 — Add backtest result API**
+
+**Commit 135 — Add backtest dashboard and charts**
+
+**Commit 136 — Add CSV export and run comparison**
+
+### Deployment and operations
+
+**Commits 137–145**
+
+- Health checks for PostgreSQL and Redis
+- Structured application metrics
+- Scheduler and stale-action monitoring
+- Database backup and restore procedures
+- Deployment documentation
+- Administrator runbook
+- Durable webhook delivery queue
+
+### Live-execution safeguards
+
+**Commits 146–154**
+
+- Explicit live-trading feature flag
+- User approval and confirmation workflow
+- Daily loss and exposure limits
+- Preflight balance, symbol, and permission checks
+- Live emergency controls
+- Audit logging and production-readiness checklist
+
+### Additional exchanges
+
+**Commit 155 onward**
+
+- Exchange adapter abstraction
+- Bybit integration
+- OKX integration
+- Cross-exchange normalization and testing
+
+The final roadmap is expected to reach approximately **160–175 numbered commits**, depending on the depth of analytics, production operations, and additional exchange support.
 
 ## Known limitations
 
-- Live-money order execution is disabled.
-- Open positions are not automatically liquidated by emergency stop.
+- Live-money execution remains disabled.
+- Historical candle importing currently has service foundations only; no public API, pagination, or scheduled importer exists yet.
+- Backtest execution and reporting are not implemented yet.
+- Emergency stop does not liquidate open positions.
 - Bybit and OKX are not integrated.
-- Backtesting is not implemented.
-- Telegram and email alerts are not implemented.
-- Notification writes and webhook metric snapshots are fire-and-forget, so an abrupt process crash can lose an in-flight write.
 - Webhook retries are process-local; there is no durable delivery queue yet.
-- Production rate limiting, distributed locks, monitoring, backups, and operational runbooks still require hardening.
+- Production monitoring, backup automation, and operational runbooks remain incomplete.
 - The platform is not ready for unattended production trading.
 
-## Roadmap
+## Security guidance
 
-### Completed
-
-- Platform foundation and authentication
-- Secure exchange credentials
-- Paper strategy engine and scheduler
-- Royal Q-style independent sub-positions
-- Dynamic DCA recovery
-- Binance Spot Testnet execution and reconciliation
-- Automatic Testnet strategy runner
-- WebSocket market streaming
-- Testnet orders, positions, and action timeline UI
-- Emergency-stop control and unresolved Testnet-order cancellation
-- TradingView chart and Testnet chart markers
-- Operational notifications, browser alerts, and dashboard history
-- Signed notification webhooks with retries and delivery metrics
-- Persistent notification history and webhook metrics with retention cleanup
-
-### Next
-
-1. Reliability, rate limiting, distributed locking, and recovery hardening
-2. Durable webhook delivery queue and delivery-attempt history
-3. Backtesting and analytics
-4. Deployment, monitoring, backups, and administrator documentation
-5. User manual and operational runbook
-6. Live execution safeguards and explicit production approval workflow
-7. Bybit and OKX integrations
+- Never commit `.env`, API keys, encryption keys, webhook secrets, or private URLs.
+- Create Binance API keys without withdrawal permission.
+- Use separate Testnet and Live credentials.
+- Keep live execution disabled until safeguards are completed and reviewed.
+- Back up `EXCHANGE_CREDENTIALS_KEY` securely.
+- Test all emergency and concurrency behavior on Binance Spot Testnet.
 
 ## Disclaimer
 
