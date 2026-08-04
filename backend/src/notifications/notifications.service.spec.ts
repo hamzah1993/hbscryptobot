@@ -124,6 +124,15 @@ describe('NotificationsService webhook delivery', () => {
       retried: 1,
       lastStatusCode: 204,
     });
+    expect(prisma.notificationWebhookMetricsSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        attempted: 2,
+        delivered: 1,
+        failed: 0,
+        retried: 1,
+        lastStatusCode: 204,
+      }),
+    });
   });
 
   it('does not retry non-retryable client errors', async () => {
@@ -135,6 +144,7 @@ describe('NotificationsService webhook delivery', () => {
     service.publish({ event: 'CLIENT_ERROR', message: 'Do not retry', severity: 'CRITICAL' });
     await Promise.resolve();
     await jest.runAllTimersAsync();
+    await Promise.resolve();
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(service.getWebhookMetrics()).toMatchObject({
@@ -143,6 +153,36 @@ describe('NotificationsService webhook delivery', () => {
       failed: 1,
       retried: 0,
       lastStatusCode: 400,
+    });
+    expect(prisma.notificationWebhookMetricsSnapshot.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        attempted: 1,
+        delivered: 0,
+        failed: 1,
+        retried: 0,
+        lastStatusCode: 400,
+      }),
+    });
+  });
+
+  it('does not let snapshot persistence failures reject webhook delivery', async () => {
+    process.env.NOTIFICATION_WEBHOOK_URL = 'https://example.test/webhook';
+    process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS = '1';
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, status: 202 } satisfies MockResponse);
+    prisma.notificationWebhookMetricsSnapshot.create.mockRejectedValue(
+      new Error('Database unavailable'),
+    );
+    const service = createService();
+
+    service.publish({ event: 'SNAPSHOT_FAILURE', message: 'Delivery still succeeds', severity: 'CRITICAL' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(service.getWebhookMetrics()).toMatchObject({
+      attempted: 1,
+      delivered: 1,
+      failed: 0,
+      lastStatusCode: 202,
     });
   });
 
