@@ -152,7 +152,7 @@ export function MarketChartPanel({ token }: Props) {
 
     return orders
       .filter((order) => order.status === 'FILLED')
-      .map((order) => {
+      .flatMap<TradingViewOrderMarker>((order) => {
         const eventTime = Date.parse(order.strategyAction?.completedAt ?? order.updatedAt);
         const candle = candles.reduce<MarketCandle | null>((closest, candidate) => {
           const candidateDistance = Math.abs(candidate.time * 1000 - eventTime);
@@ -161,16 +161,17 @@ export function MarketChartPanel({ token }: Props) {
           return candidateDistance < closestDistance ? candidate : closest;
         }, null);
 
-        if (!candle || candle.time < firstCandleTime || candle.time > lastCandleTime) return null;
+        if (!candle || candle.time < firstCandleTime || candle.time > lastCandleTime) return [];
 
-        return {
+        const kind = markerKind(order);
+        const marker: TradingViewOrderMarker = {
           time: candle.time as TradingViewOrderMarker['time'],
           side: order.side,
           label: markerLabel(order),
-          kind: markerKind(order),
         };
-      })
-      .filter((marker): marker is TradingViewOrderMarker => marker !== null);
+        if (kind) marker.kind = kind;
+        return [marker];
+      });
   }, [candles, orders]);
 
   const latest = candles.length > 0 ? candles[candles.length - 1] : undefined;
