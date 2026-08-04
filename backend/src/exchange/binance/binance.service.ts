@@ -82,6 +82,31 @@ export class BinanceService {
     return this.signedRequest('/api/v3/account', 'GET', {}, apiKey, apiSecret, environment);
   }
 
+  async getOrder(
+    symbol: string,
+    orderId: string,
+    apiKey: string,
+    apiSecret: string,
+    environment: BinanceEnvironment = 'testnet',
+  ) {
+    if (environment !== 'testnet') {
+      throw new BadRequestException('Live Binance order lookup is disabled');
+    }
+
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) throw new BadRequestException('Symbol is required');
+    if (!orderId.trim()) throw new BadRequestException('Exchange order ID is required');
+
+    return this.signedRequest(
+      '/api/v3/order',
+      'GET',
+      { symbol: normalized, orderId: orderId.trim() },
+      apiKey,
+      apiSecret,
+      environment,
+    );
+  }
+
   async testOrder(
     params: { symbol: string; side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT'; quantity: string; price?: string; timeInForce?: 'GTC' | 'IOC' | 'FOK' },
     apiKey: string,
