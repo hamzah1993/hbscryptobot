@@ -10,9 +10,18 @@ export class NotificationRetentionScheduler {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupExpiredNotifications(): Promise<void> {
-    const deleted = await this.notifications.cleanupExpired();
-    if (deleted > 0) {
-      this.logger.log(`Deleted ${deleted} expired operational notification(s)`);
+    const [notificationsDeleted, metricsSnapshotsDeleted] = await Promise.all([
+      this.notifications.cleanupExpired(),
+      this.notifications.cleanupExpiredWebhookMetricsSnapshots(),
+    ]);
+
+    if (notificationsDeleted > 0) {
+      this.logger.log(`Deleted ${notificationsDeleted} expired operational notification(s)`);
+    }
+    if (metricsSnapshotsDeleted > 0) {
+      this.logger.log(
+        `Deleted ${metricsSnapshotsDeleted} expired notification webhook metrics snapshot(s)`,
+      );
     }
   }
 }
