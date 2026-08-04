@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 
 interface AuthenticatedRequest extends Request {
@@ -10,7 +11,10 @@ interface AuthenticatedRequest extends Request {
 @Controller('strategies')
 @UseGuards(JwtAuthGuard)
 export class StrategyController {
-  constructor(private readonly strategies: StrategyService) {}
+  constructor(
+    private readonly strategies: StrategyService,
+    private readonly runner: PaperStrategyRunnerService,
+  ) {}
 
   @Get()
   list(@Req() request: AuthenticatedRequest) {
@@ -20,6 +24,11 @@ export class StrategyController {
   @Post()
   create(@Req() request: AuthenticatedRequest, @Body() body: StrategyInput) {
     return this.strategies.create(request.user.sub, body);
+  }
+
+  @Post('run-paper-tick')
+  runPaperTick(@Req() request: AuthenticatedRequest) {
+    return this.runner.runUserStrategies(request.user.sub);
   }
 
   @Patch(':strategyId')

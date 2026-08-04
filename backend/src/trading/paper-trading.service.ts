@@ -13,6 +13,14 @@ interface AddPaperDcaInput {
   marketPrice: number;
 }
 
+type PaperTickAction = 'DCA' | 'TAKE_PROFIT' | 'HOLD';
+
+type PaperTickResult = {
+  action: PaperTickAction;
+  position: Awaited<ReturnType<PaperTradingService['listPositions']>>[number] | null;
+  unrealizedPnlQuote?: number;
+};
+
 @Injectable()
 export class PaperTradingService {
   constructor(
@@ -99,7 +107,11 @@ export class PaperTradingService {
     return this.executeClose(position, marketPrice);
   }
 
-  async processPrice(userId: string, positionId: string, marketPrice: number) {
+  async processPrice(
+    userId: string,
+    positionId: string,
+    marketPrice: number,
+  ): Promise<PaperTickResult> {
     if (marketPrice <= 0) throw new BadRequestException('Market price must be positive');
 
     const position = await this.getOpenPosition(userId, positionId);
