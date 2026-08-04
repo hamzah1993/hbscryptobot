@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
 import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { MarketChartPanel } from '../components/MarketChartPanel';
 import { NotificationsPanel } from '../components/NotificationsPanel';
+import { NotificationToastStack } from '../components/NotificationToastStack';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
 import { TestnetActionTimelinePanel } from '../components/TestnetActionTimelinePanel';
 import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
@@ -12,6 +13,7 @@ import {
   api,
   type BinanceStreamEnvironment,
   type MarketStreamStatus,
+  type OperationalNotification,
   type StrategyStatus,
   type TestnetEmergencyStopResponse,
   type TradingPosition,
@@ -19,6 +21,7 @@ import {
 
 const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Notifications', 'Exchange accounts', 'Trade history'];
 const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
+const notificationToastStorageKey = 'hbs-notifications-last-toast-at';
 
 function money(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -44,6 +47,8 @@ export function DashboardPage() {
   const [emergencyStopResult, setEmergencyStopResult] = useState<TestnetEmergencyStopResponse | null>(null);
   const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [toastNotifications, setToastNotifications] = useState<OperationalNotification[]>([]);
+  const initializedNotificationPolling = useRef(false);
 
   function loadPositions() {
     if (!token) {
@@ -66,24 +71,59 @@ export function DashboardPage() {
   useEffect(() => {
     if (!token) {
       setUnreadNotifications(0);
+      setToastNotifications([]);
+      initializedNotificationPolling.current = false;
       return;
     }
 
     let cancelled = false;
-    const refreshUnread = async () => {
+    const refreshNotifications = async () => {
       try {
         const notifications = await api.listNotifications(token, 250);
         if (cancelled) return;
+
         const seenAt = Number(window.localStorage.getItem(notificationSeenStorageKey) ?? 0);
-        const unread = notifications.filter((notification) => new Date(notification.createdAt).getTime() > seenAt).length;
-        setUnreadNotifications(unread);
+        setUnreadNotifications(
+          notifications.filter((notification) => new Date(notification.createdAt).getTime() > seenAt).length,
+        );
+
+        const latestTimestamp = notifications.reduce(
+          (latest, notification) => Math.max(latest, new Date(notification.createdAt).getTime()),
+          0,
+        );
+        const lastToastAt = Number(window.localStorage.getItem(notificationToastStorageKey) ?? 0);
+
+        if (initializedNotificationPolling.current) {
+          const freshOperationalAlerts = notifications
+            .filter((notification) => (
+              notification.severity !== 'INFO' && new Date(notification.createdAt).getTime() > lastToastAt
+            ))
+            .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
+            .slice(-3);
+
+          if (freshOperationalAlerts.length > 0) {
+            setToastNotifications((current) => {
+              const merged = [...current];
+              for (const notification of freshOperationalAlerts) {
+                if (!merged.some((item) => item.id === notification.id)) merged.push(notification);
+              }
+              return merged.slice(-3);
+            });
+          }
+        } else {
+          initializedNotificationPolling.current = true;
+        }
+
+        if (latestTimestamp > lastToastAt) {
+          window.localStorage.setItem(notificationToastStorageKey, String(latestTimestamp));
+        }
       } catch {
         if (!cancelled) setUnreadNotifications(0);
       }
     };
 
-    void refreshUnread();
-    const interval = window.setInterval(() => void refreshUnread(), 15_000);
+    void refreshNotifications();
+    const interval = window.setInterval(() => void refreshNotifications(), 15_000);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
@@ -231,6 +271,11 @@ export function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
+      <NotificationToastStack
+        notifications={toastNotifications}
+        onDismiss={(id) => setToastNotifications((current) => current.filter((notification) => notification.id !== id))}
+      />
+
       {showCreateBot && token && (
         <CreateBotWizard
           token={token}
