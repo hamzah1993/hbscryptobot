@@ -144,6 +144,7 @@ export class TestnetStrategyExecutionService {
         const independentExit = actionType === 'INDEPENDENT_EXIT' && input.side === 'SELL';
 
         if (!position && input.side === 'BUY') {
+          const parentTriggers = this.calculateParentTriggers(strategy, executedQuantity, quoteAmount, averageFillPrice, 0);
           position = await tx.tradingPosition.create({
             data: {
               userId,
@@ -155,6 +156,8 @@ export class TestnetStrategyExecutionService {
               averageEntryPrice: independentEntry ? 0 : averageFillPrice,
               realizedPnlQuote: 0,
               dcaCount: 0,
+              nextDcaPrice: independentEntry ? null : parentTriggers.nextDcaPrice,
+              takeProfitPrice: independentEntry ? null : parentTriggers.takeProfitPrice,
             },
           });
         } else if (position && input.side === 'BUY' && !independentEntry && executedQuantity > 0) {
@@ -163,6 +166,14 @@ export class TestnetStrategyExecutionService {
           const totalQuantity = previousQuantity + executedQuantity;
           const totalCostQuote = previousCost + quoteAmount;
           const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
+          const dcaCount = position.dcaCount + 1;
+          const parentTriggers = this.calculateParentTriggers(
+            strategy,
+            totalQuantity,
+            totalCostQuote,
+            averageEntryPrice,
+            dcaCount,
+          );
 
           position = await tx.tradingPosition.update({
             where: { id: position.id },
@@ -170,7 +181,9 @@ export class TestnetStrategyExecutionService {
               totalQuantity,
               totalCostQuote,
               averageEntryPrice,
-              dcaCount: position.dcaCount + 1,
+              dcaCount,
+              nextDcaPrice: parentTriggers.nextDcaPrice,
+              takeProfitPrice: parentTriggers.takeProfitPrice,
             },
           });
         } else if (position && input.side === 'SELL' && !independentExit && executedQuantity > 0) {
@@ -183,6 +196,16 @@ export class TestnetStrategyExecutionService {
           const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
           const remainingCost = Math.max(previousCost - allocatedCost, 0);
           const closed = remainingQuantity <= 1e-12;
+          const remainingAverage = closed ? 0 : remainingCost / remainingQuantity;
+          const parentTriggers = closed
+            ? { nextDcaPrice: null, takeProfitPrice: null }
+            : this.calculateParentTriggers(
+                strategy,
+                remainingQuantity,
+                remainingCost,
+                remainingAverage,
+                position.dcaCount,
+              );
 
           position = await tx.tradingPosition.update({
             where: { id: position.id },
@@ -190,11 +213,11 @@ export class TestnetStrategyExecutionService {
               status: closed ? 'CLOSED' : 'OPEN',
               totalQuantity: closed ? 0 : remainingQuantity,
               totalCostQuote: closed ? 0 : remainingCost,
-              averageEntryPrice: closed ? 0 : remainingCost / remainingQuantity,
+              averageEntryPrice: remainingAverage,
               realizedPnlQuote,
               closedAt: closed ? new Date() : null,
-              nextDcaPrice: closed ? null : position.nextDcaPrice,
-              takeProfitPrice: closed ? null : position.takeProfitPrice,
+              nextDcaPrice: parentTriggers.nextDcaPrice,
+              takeProfitPrice: parentTriggers.takeProfitPrice,
             },
           });
         }
@@ -431,6 +454,15 @@ export class TestnetStrategyExecutionService {
           const previousCost = Number(currentPosition.totalCostQuote);
           const totalQuantity = previousQuantity + deltaQuantity;
           const totalCostQuote = previousCost + deltaQuoteAmount;
+          const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
+          const dcaCount = order.level > 1 ? Math.max(currentPosition.dcaCount, order.level - 1) : currentPosition.dcaCount;
+          const parentTriggers = this.calculateParentTriggers(
+            order.position.strategy,
+            totalQuantity,
+            totalCostQuote,
+            averageEntryPrice,
+            dcaCount,
+          );
 
           await tx.tradingPosition.update({
             where: { id: currentPosition.id },
@@ -438,7 +470,10 @@ export class TestnetStrategyExecutionService {
               status: 'OPEN',
               totalQuantity,
               totalCostQuote,
-              averageEntryPrice: totalQuantity > 0 ? totalCostQuote / totalQuantity : 0,
+              averageEntryPrice,
+              dcaCount,
+              nextDcaPrice: parentTriggers.nextDcaPrice,
+              takeProfitPrice: parentTriggers.takeProfitPrice,
               closedAt: null,
             },
           });
@@ -454,6 +489,16 @@ export class TestnetStrategyExecutionService {
           const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
           const remainingCost = Math.max(previousCost - allocatedCost, 0);
           const closed = remainingQuantity <= 1e-12;
+          const remainingAverage = closed ? 0 : remainingCost / remainingQuantity;
+          const parentTriggers = closed
+            ? { nextDcaPrice: null, takeProfitPrice: null }
+            : this.calculateParentTriggers(
+                order.position.strategy,
+                remainingQuantity,
+                remainingCost,
+                remainingAverage,
+                currentPosition.dcaCount,
+              );
 
           await tx.tradingPosition.update({
             where: { id: currentPosition.id },
@@ -461,11 +506,11 @@ export class TestnetStrategyExecutionService {
               status: closed ? 'CLOSED' : 'OPEN',
               totalQuantity: closed ? 0 : remainingQuantity,
               totalCostQuote: closed ? 0 : remainingCost,
-              averageEntryPrice: closed ? 0 : remainingCost / remainingQuantity,
+              averageEntryPrice: remainingAverage,
               realizedPnlQuote: Number(currentPosition.realizedPnlQuote) + proceeds - allocatedCost,
               closedAt: closed ? new Date() : null,
-              nextDcaPrice: closed ? null : currentPosition.nextDcaPrice,
-              takeProfitPrice: closed ? null : currentPosition.takeProfitPrice,
+              nextDcaPrice: parentTriggers.nextDcaPrice,
+              takeProfitPrice: parentTriggers.takeProfitPrice,
             },
           });
         }
@@ -498,6 +543,35 @@ export class TestnetStrategyExecutionService {
         deltaQuoteAmount,
       },
     };
+  }
+
+  private calculateParentTriggers(
+    strategy: {
+      dcaStepPercent: unknown;
+      takeProfitPercent: unknown;
+      maxDcaOrders: number;
+    },
+    quantity: number,
+    costQuote: number,
+    averageEntryPrice: number,
+    dcaCount: number,
+  ) {
+    const averagePrice = quantity > 0 && costQuote > 0 ? costQuote / quantity : averageEntryPrice;
+    const takeProfitPercent = Number(strategy.takeProfitPercent);
+    const dcaStepPercent = Number(strategy.dcaStepPercent);
+    const takeProfitPrice =
+      Number.isFinite(averagePrice) && averagePrice > 0 && Number.isFinite(takeProfitPercent)
+        ? averagePrice * (1 + takeProfitPercent / 100)
+        : null;
+    const nextDcaPrice =
+      dcaCount < Number(strategy.maxDcaOrders) &&
+      Number.isFinite(averagePrice) &&
+      averagePrice > 0 &&
+      Number.isFinite(dcaStepPercent)
+        ? averagePrice * (1 - dcaStepPercent / 100)
+        : null;
+
+    return { nextDcaPrice, takeProfitPrice };
   }
 
   private calculateAverageFillPrice(
