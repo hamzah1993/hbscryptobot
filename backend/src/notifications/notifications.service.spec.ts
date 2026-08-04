@@ -10,6 +10,10 @@ type PrismaMock = {
     findMany: jest.Mock;
     deleteMany: jest.Mock;
   };
+  notificationWebhookMetricsSnapshot: {
+    create: jest.Mock;
+    findFirst: jest.Mock;
+  };
 };
 
 describe('NotificationsService webhook delivery', () => {
@@ -31,6 +35,10 @@ describe('NotificationsService webhook delivery', () => {
         create: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      notificationWebhookMetricsSnapshot: {
+        create: jest.fn().mockResolvedValue({}),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
     };
   });
@@ -241,5 +249,60 @@ describe('NotificationsService webhook delivery', () => {
       where: { createdAt: { lt: new Date('2026-07-05T12:00:00.000Z') } },
     });
     expect(deleted).toBe(0);
+  });
+
+  it('restores webhook metrics from the latest persisted snapshot', async () => {
+    prisma.notificationWebhookMetricsSnapshot.findFirst.mockResolvedValue({
+      id: 'snapshot-1',
+      attempted: 9,
+      delivered: 6,
+      failed: 2,
+      retried: 3,
+      lastAttemptAt: new Date('2026-08-04T18:10:00.000Z'),
+      lastSuccessAt: new Date('2026-08-04T18:09:00.000Z'),
+      lastFailureAt: new Date('2026-08-04T18:08:00.000Z'),
+      lastStatusCode: 503,
+      recordedAt: new Date('2026-08-04T18:10:01.000Z'),
+    });
+    const service = createService();
+
+    await service.onModuleInit();
+
+    expect(prisma.notificationWebhookMetricsSnapshot.findFirst).toHaveBeenCalledWith({
+      orderBy: { recordedAt: 'desc' },
+    });
+    expect(service.getWebhookMetrics()).toEqual({
+      attempted: 9,
+      delivered: 6,
+      failed: 2,
+      retried: 3,
+      lastAttemptAt: '2026-08-04T18:10:00.000Z',
+      lastSuccessAt: '2026-08-04T18:09:00.000Z',
+      lastFailureAt: '2026-08-04T18:08:00.000Z',
+      lastStatusCode: 503,
+    });
+  });
+
+  it('keeps zeroed webhook metrics when no snapshot exists or restoration fails', async () => {
+    const serviceWithoutSnapshot = createService();
+    await serviceWithoutSnapshot.onModuleInit();
+    expect(serviceWithoutSnapshot.getWebhookMetrics()).toEqual({
+      attempted: 0,
+      delivered: 0,
+      failed: 0,
+      retried: 0,
+    });
+
+    prisma.notificationWebhookMetricsSnapshot.findFirst.mockRejectedValue(
+      new Error('Database unavailable'),
+    );
+    const serviceWithFailure = createService();
+    await expect(serviceWithFailure.onModuleInit()).resolves.toBeUndefined();
+    expect(serviceWithFailure.getWebhookMetrics()).toEqual({
+      attempted: 0,
+      delivered: 0,
+      failed: 0,
+      retried: 0,
+    });
   });
 });
