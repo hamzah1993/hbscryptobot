@@ -5,6 +5,7 @@ import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { MarketChartPanel } from '../components/MarketChartPanel';
 import { NotificationsPanel } from '../components/NotificationsPanel';
 import { NotificationToastStack } from '../components/NotificationToastStack';
+import { NotificationWebhookMetricsPanel } from '../components/NotificationWebhookMetricsPanel';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
 import { TestnetActionTimelinePanel } from '../components/TestnetActionTimelinePanel';
 import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
@@ -487,7 +488,10 @@ export function DashboardPage() {
           ) : activeNav === 'Strategies' && token ? (
             <TestnetActionTimelinePanel token={token} />
           ) : activeNav === 'Notifications' && token ? (
-            <NotificationsPanel token={token} />
+            <>
+              <NotificationWebhookMetricsPanel token={token} />
+              <NotificationsPanel token={token} />
+            </>
           ) : (
             <>
               {error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
