@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
@@ -20,11 +21,20 @@ export class StrategyController {
     private readonly testnetExecution: TestnetStrategyExecutionService,
     private readonly testnetTimeline: TestnetActionTimelineService,
     private readonly testnetEmergencyStop: TestnetEmergencyStopService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Get()
   list(@Req() request: AuthenticatedRequest) {
     return this.strategies.list(request.user.sub);
+  }
+
+  @Get('notifications')
+  listNotifications(
+    @Req() request: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    return this.notifications.listRecent(request.user.sub, Number(limit ?? 100));
   }
 
   @Get('testnet-orders')
