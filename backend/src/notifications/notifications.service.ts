@@ -32,6 +32,17 @@ type WebhookPayload = {
   metadata?: Record<string, unknown>;
 };
 
+export type NotificationWebhookMetrics = {
+  attempted: number;
+  delivered: number;
+  failed: number;
+  retried: number;
+  lastAttemptAt?: string;
+  lastSuccessAt?: string;
+  lastFailureAt?: string;
+  lastStatusCode?: number;
+};
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -45,6 +56,12 @@ export class NotificationsService {
   private readonly webhookMaxAttempts = this.parseWebhookMaxAttempts(
     process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS,
   );
+  private readonly webhookMetrics: NotificationWebhookMetrics = {
+    attempted: 0,
+    delivered: 0,
+    failed: 0,
+    retried: 0,
+  };
 
   publish(notification: OperationalNotification): void {
     const stored: StoredOperationalNotification = {
@@ -94,6 +111,10 @@ export class NotificationsService {
       }));
   }
 
+  getWebhookMetrics(): NotificationWebhookMetrics {
+    return { ...this.webhookMetrics };
+  }
+
   private parseSeverity(value?: string): NotificationSeverity {
     const normalized = value?.trim().toUpperCase();
     if (normalized === 'INFO' || normalized === 'WARNING' || normalized === 'CRITICAL') {
@@ -136,6 +157,11 @@ export class NotificationsService {
     const body = JSON.stringify(payload);
 
     for (let attempt = 1; attempt <= this.webhookMaxAttempts; attempt += 1) {
+      const attemptAt = new Date().toISOString();
+      this.webhookMetrics.attempted += 1;
+      this.webhookMetrics.lastAttemptAt = attemptAt;
+      if (attempt > 1) this.webhookMetrics.retried += 1;
+
       const timestamp = Math.floor(Date.now() / 1000).toString();
       const headers: Record<string, string> = {
         'content-type': 'application/json',
@@ -157,19 +183,33 @@ export class NotificationsService {
           signal: AbortSignal.timeout(5_000),
         });
 
-        if (response.ok) return;
+        this.webhookMetrics.lastStatusCode = response.status;
+        if (response.ok) {
+          this.webhookMetrics.delivered += 1;
+          this.webhookMetrics.lastSuccessAt = new Date().toISOString();
+          return;
+        }
 
         const retryable = response.status === 429 || response.status >= 500;
         this.logger.warn(
           `Notification webhook delivery failed with HTTP ${response.status} for ${notification.id} on attempt ${attempt}`,
         );
-        if (!retryable || attempt === this.webhookMaxAttempts) return;
+        if (!retryable || attempt === this.webhookMaxAttempts) {
+          this.webhookMetrics.failed += 1;
+          this.webhookMetrics.lastFailureAt = new Date().toISOString();
+          return;
+        }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown webhook delivery error';
+        this.webhookMetrics.lastStatusCode = undefined;
         this.logger.warn(
           `Notification webhook delivery failed for ${notification.id} on attempt ${attempt}: ${message}`,
         );
-        if (attempt === this.webhookMaxAttempts) return;
+        if (attempt === this.webhookMaxAttempts) {
+          this.webhookMetrics.failed += 1;
+          this.webhookMetrics.lastFailureAt = new Date().toISOString();
+          return;
+        }
       }
 
       await this.delay(500 * 2 ** (attempt - 1));
