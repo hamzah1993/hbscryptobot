@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 
@@ -36,6 +37,7 @@ export class TestnetStrategyExecutionService {
     private readonly prisma: PrismaService,
     private readonly testnetOrders: BinanceTestnetOrderService,
     private readonly strategyActions: TestnetStrategyActionService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async executeMarketOrder(userId: string, input: ExecuteTestnetStrategyInput) {
@@ -318,6 +320,33 @@ export class TestnetStrategyExecutionService {
         return order;
       });
 
+      this.notifications.publish({
+        event: status === 'FILLED' ? 'TESTNET_ORDER_FILLED' : 'TESTNET_ORDER_SUBMITTED',
+        message: status === 'FILLED'
+          ? `Testnet ${input.side} market order filled for ${strategy.symbol}.`
+          : `Testnet ${input.side} market order submitted for ${strategy.symbol}.`,
+        severity: 'INFO',
+        userId,
+        strategyId: strategy.id,
+        positionId: savedOrder.positionId,
+        orderId: savedOrder.id,
+        metadata: {
+          actionId: claimedActionId,
+          actionType: actionType ?? null,
+          clientOrderId: savedOrder.clientOrderId,
+          exchangeOrderId: savedOrder.exchangeOrderId,
+          symbol: strategy.symbol,
+          side: input.side,
+          status,
+          level: savedOrder.level,
+          independent: savedOrder.independent,
+          requestedQuantity: input.quantity,
+          filledQuantity: executedQuantity,
+          quoteAmount,
+          averageFillPrice: averageFillPrice || null,
+        },
+      });
+
       return {
         strategyId: strategy.id,
         symbol: strategy.symbol,
@@ -433,12 +462,13 @@ export class TestnetStrategyExecutionService {
       where: { id: tradingOrderId, userId },
       include: { position: { include: { strategy: true } }, strategyAction: true, subPosition: true },
     });
+
     if (!order) throw new NotFoundException('Trading order not found');
-    if (!order.exchangeOrderId) {
-      throw new BadRequestException('Trading order does not have a Binance exchange order ID');
-    }
     if (order.position.strategy.paperTrading || order.position.strategy.environment !== 'TESTNET') {
       throw new BadRequestException('Only Binance testnet orders can be synchronized');
+    }
+    if (!order.exchangeOrderId) {
+      throw new BadRequestException('Trading order does not have an exchange order identifier');
     }
 
     const exchangeOrder = (await this.testnetOrders.getOrder(
@@ -451,258 +481,98 @@ export class TestnetStrategyExecutionService {
     const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
     const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
     const status = this.mapOrderStatus(exchangeOrder.status);
-    const accountedFilledQuantity = Number(order.accountedFilledQuantity);
-    const accountedQuoteAmount = Number(order.accountedQuoteAmount);
-    const deltaQuantity = Math.max(executedQuantity - accountedFilledQuantity, 0);
-    const deltaQuoteAmount = Math.max(quoteAmount - accountedQuoteAmount, 0);
 
-    const updatedOrder = await this.prisma.$transaction(async (tx) => {
-      if (deltaQuantity > 0) {
-        const currentPosition = await tx.tradingPosition.findUnique({
-          where: { id: order.positionId },
-        });
-        if (!currentPosition) throw new NotFoundException('Trading position not found');
-
-        if (order.independent && order.side === 'BUY') {
-          const existing = order.subPositionId
-            ? await tx.tradingSubPosition.findUnique({ where: { id: order.subPositionId } })
-            : await tx.tradingSubPosition.findUnique({
-                where: { positionId_level: { positionId: order.positionId, level: order.level } },
-              });
-
-          const previousQuantity = Number(existing?.quantity ?? 0);
-          const previousCost = Number(existing?.costQuote ?? 0);
-          const totalQuantity = previousQuantity + deltaQuantity;
-          const totalCost = previousCost + deltaQuoteAmount;
-          const entryPrice = totalQuantity > 0 ? totalCost / totalQuantity : averageFillPrice;
-          const takeProfitPrice = entryPrice * (1 + Number(order.position.strategy.takeProfitPercent) / 100);
-
-          const subPosition = existing
-            ? await tx.tradingSubPosition.update({
-                where: { id: existing.id },
-                data: {
-                  status: 'OPEN',
-                  quantity: totalQuantity,
-                  costQuote: totalCost,
-                  entryPrice,
-                  takeProfitPrice,
-                  closedAt: null,
-                },
-              })
-            : await tx.tradingSubPosition.create({
-                data: {
-                  positionId: order.positionId,
-                  level: order.level,
-                  status: 'OPEN',
-                  quantity: deltaQuantity,
-                  costQuote: deltaQuoteAmount,
-                  entryPrice: averageFillPrice,
-                  takeProfitPrice,
-                },
-              });
-
-          if (order.subPositionId !== subPosition.id) {
-            await tx.tradingOrder.update({
-              where: { id: order.id },
-              data: { subPositionId: subPosition.id },
-            });
-          }
-          if (order.strategyAction && order.strategyAction.subPositionId !== subPosition.id) {
-            await tx.strategyAction.update({
-              where: { id: order.strategyAction.id },
-              data: { subPositionId: subPosition.id },
-            });
-          }
-        } else if (order.independent && order.side === 'SELL') {
-          const subPosition = order.subPositionId
-            ? await tx.tradingSubPosition.findUnique({ where: { id: order.subPositionId } })
-            : await tx.tradingSubPosition.findUnique({
-                where: { positionId_level: { positionId: order.positionId, level: order.level } },
-              });
-          if (!subPosition) throw new NotFoundException('Independent sub-position not found');
-
-          const previousQuantity = Number(subPosition.quantity);
-          const previousCost = Number(subPosition.costQuote);
-          const soldQuantity = Math.min(deltaQuantity, previousQuantity);
-          const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
-          const proceeds = deltaQuoteAmount > 0 ? deltaQuoteAmount : soldQuantity * averageFillPrice;
-          const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
-          const remainingCost = Math.max(previousCost - allocatedCost, 0);
-          const closed = remainingQuantity <= 1e-12;
-
-          await tx.tradingSubPosition.update({
-            where: { id: subPosition.id },
-            data: {
-              status: closed ? 'CLOSED' : 'OPEN',
-              quantity: closed ? 0 : remainingQuantity,
-              costQuote: closed ? 0 : remainingCost,
-              entryPrice: closed ? 0 : remainingCost / remainingQuantity,
-              realizedPnlQuote: Number(subPosition.realizedPnlQuote) + proceeds - allocatedCost,
-              closedAt: closed ? new Date() : null,
-            },
-          });
-        } else if (order.side === 'BUY') {
-          const previousQuantity = Number(currentPosition.totalQuantity);
-          const previousCost = Number(currentPosition.totalCostQuote);
-          const totalQuantity = previousQuantity + deltaQuantity;
-          const totalCostQuote = previousCost + deltaQuoteAmount;
-          const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
-          const dcaCount = order.level > 1 ? Math.max(currentPosition.dcaCount, order.level - 1) : currentPosition.dcaCount;
-          const parentTriggers = this.calculateParentTriggers(
-            order.position.strategy,
-            totalQuantity,
-            totalCostQuote,
-            averageEntryPrice,
-            dcaCount,
-          );
-
-          await tx.tradingPosition.update({
-            where: { id: currentPosition.id },
-            data: {
-              status: 'OPEN',
-              totalQuantity,
-              totalCostQuote,
-              averageEntryPrice,
-              dcaCount,
-              nextDcaPrice: parentTriggers.nextDcaPrice,
-              takeProfitPrice: parentTriggers.takeProfitPrice,
-              closedAt: null,
-            },
-          });
-        } else {
-          const previousQuantity = Number(currentPosition.totalQuantity);
-          const previousCost = Number(currentPosition.totalCostQuote);
-          const soldQuantity = Math.min(deltaQuantity, previousQuantity);
-          const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
-          const deltaAveragePrice = deltaQuantity > 0 && deltaQuoteAmount > 0
-            ? deltaQuoteAmount / deltaQuantity
-            : averageFillPrice;
-          const proceeds = deltaQuoteAmount > 0 ? deltaQuoteAmount : soldQuantity * deltaAveragePrice;
-          const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
-          const remainingCost = Math.max(previousCost - allocatedCost, 0);
-          const closed = remainingQuantity <= 1e-12;
-          const remainingAverage = closed ? 0 : remainingCost / remainingQuantity;
-          const parentTriggers = closed
-            ? { nextDcaPrice: null, takeProfitPrice: null }
-            : this.calculateParentTriggers(
-                order.position.strategy,
-                remainingQuantity,
-                remainingCost,
-                remainingAverage,
-                currentPosition.dcaCount,
-              );
-
-          await tx.tradingPosition.update({
-            where: { id: currentPosition.id },
-            data: {
-              status: closed ? 'CLOSED' : 'OPEN',
-              totalQuantity: closed ? 0 : remainingQuantity,
-              totalCostQuote: closed ? 0 : remainingCost,
-              averageEntryPrice: remainingAverage,
-              realizedPnlQuote: Number(currentPosition.realizedPnlQuote) + proceeds - allocatedCost,
-              closedAt: closed ? new Date() : null,
-              nextDcaPrice: parentTriggers.nextDcaPrice,
-              takeProfitPrice: parentTriggers.takeProfitPrice,
-            },
-          });
-        }
-      }
-
-      return tx.tradingOrder.update({
+    return this.prisma.$transaction(async (tx) => {
+      const updatedOrder = await tx.tradingOrder.update({
         where: { id: order.id },
         data: {
           status,
           filledQuantity: executedQuantity,
           quoteAmount,
-          accountedFilledQuantity: Math.max(accountedFilledQuantity, executedQuantity),
-          accountedQuoteAmount: Math.max(accountedQuoteAmount, quoteAmount),
-          price: averageFillPrice || Number(exchangeOrder.price ?? 0) || null,
           averageFillPrice: averageFillPrice || null,
+          price: averageFillPrice || order.price,
         },
-        include: { position: true, subPosition: true },
       });
-    });
 
-    if (order.strategyAction) {
-      if (status === 'FILLED') {
-        await this.strategyActions.markCompleted(order.strategyAction.id);
-      } else if (status === 'REJECTED' || status === 'CANCELLED') {
-        await this.strategyActions.markFailed(
-          order.strategyAction.id,
-          new Error(`Binance order ended with status ${status}`),
-        );
+      if (order.strategyAction) {
+        await tx.strategyAction.update({
+          where: { id: order.strategyAction.id },
+          data: {
+            status: status === 'FILLED' ? 'COMPLETED' : 'SUBMITTED',
+            completedAt: status === 'FILLED' ? new Date() : null,
+          },
+        });
       }
+
+      return { tradingOrder: updatedOrder, exchangeOrder };
+    });
+  }
+
+  private mapOrderStatus(status?: string) {
+    switch (status?.toUpperCase()) {
+      case 'FILLED':
+        return 'FILLED' as const;
+      case 'PARTIALLY_FILLED':
+        return 'PARTIALLY_FILLED' as const;
+      case 'CANCELED':
+      case 'CANCELLED':
+        return 'CANCELLED' as const;
+      case 'REJECTED':
+        return 'REJECTED' as const;
+      case 'EXPIRED':
+        return 'EXPIRED' as const;
+      case 'NEW':
+      default:
+        return 'PENDING' as const;
+    }
+  }
+
+  private calculateAverageFillPrice(order: BinanceOrderResponse, executedQuantity: number, quoteAmount: number) {
+    if (executedQuantity > 0 && quoteAmount > 0) return quoteAmount / executedQuantity;
+
+    if (order.fills?.length) {
+      const totals = order.fills.reduce(
+        (result, fill) => {
+          const price = Number(fill.price ?? 0);
+          const quantity = Number(fill.qty ?? 0);
+          if (!Number.isFinite(price) || !Number.isFinite(quantity)) return result;
+          return {
+            quantity: result.quantity + quantity,
+            quote: result.quote + price * quantity,
+          };
+        },
+        { quantity: 0, quote: 0 },
+      );
+      if (totals.quantity > 0) return totals.quote / totals.quantity;
     }
 
-    return {
-      tradingOrder: updatedOrder,
-      exchangeOrder,
-      deltaQuantity,
-      deltaQuoteAmount,
-    };
+    const fallbackPrice = Number(order.price ?? 0);
+    return Number.isFinite(fallbackPrice) ? fallbackPrice : 0;
   }
 
   private calculateParentTriggers(
     strategy: {
       dcaStepPercent: unknown;
+      dcaMultiplier: unknown;
       takeProfitPercent: unknown;
-      maxDcaOrders: number;
     },
     quantity: number,
     costQuote: number,
     averageEntryPrice: number,
     dcaCount: number,
   ) {
-    const averagePrice = quantity > 0 && costQuote > 0 ? costQuote / quantity : averageEntryPrice;
-    const takeProfitPercent = Number(strategy.takeProfitPercent);
-    const dcaStepPercent = Number(strategy.dcaStepPercent);
-    const takeProfitPrice =
-      Number.isFinite(averagePrice) && averagePrice > 0 && Number.isFinite(takeProfitPercent)
-        ? averagePrice * (1 + takeProfitPercent / 100)
-        : null;
-    const nextDcaPrice =
-      dcaCount < Number(strategy.maxDcaOrders) &&
-      Number.isFinite(averagePrice) &&
-      averagePrice > 0 &&
-      Number.isFinite(dcaStepPercent)
-        ? averagePrice * (1 - dcaStepPercent / 100)
-        : null;
-
-    return { nextDcaPrice, takeProfitPrice };
-  }
-
-  private calculateAverageFillPrice(
-    order: BinanceOrderResponse,
-    executedQuantity: number,
-    quoteAmount: number,
-  ) {
-    if (executedQuantity > 0 && quoteAmount > 0) return quoteAmount / executedQuantity;
-
-    const fills = order.fills ?? [];
-    const totalQuantity = fills.reduce((sum, fill) => sum + Number(fill.qty ?? 0), 0);
-    const totalQuote = fills.reduce(
-      (sum, fill) => sum + Number(fill.qty ?? 0) * Number(fill.price ?? 0),
-      0,
-    );
-    if (totalQuantity > 0 && totalQuote > 0) return totalQuote / totalQuantity;
-
-    return Number(order.price ?? 0);
-  }
-
-  private mapOrderStatus(status?: string) {
-    switch (status) {
-      case 'FILLED':
-        return 'FILLED' as const;
-      case 'PARTIALLY_FILLED':
-        return 'PARTIALLY_FILLED' as const;
-      case 'REJECTED':
-      case 'EXPIRED':
-        return 'REJECTED' as const;
-      case 'CANCELED':
-      case 'CANCELLED':
-        return 'CANCELLED' as const;
-      default:
-        return 'PENDING' as const;
+    if (quantity <= 0 || costQuote <= 0 || averageEntryPrice <= 0) {
+      return { nextDcaPrice: null, takeProfitPrice: null };
     }
+
+    const dcaStepPercent = Number(strategy.dcaStepPercent);
+    const dcaMultiplier = Number(strategy.dcaMultiplier);
+    const takeProfitPercent = Number(strategy.takeProfitPercent);
+    const nextStepPercent = dcaStepPercent * Math.pow(dcaMultiplier, dcaCount);
+
+    return {
+      nextDcaPrice: averageEntryPrice * (1 - nextStepPercent / 100),
+      takeProfitPrice: averageEntryPrice * (1 + takeProfitPercent / 100),
+    };
   }
 }
