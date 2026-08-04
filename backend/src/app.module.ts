@@ -13,6 +13,7 @@ import { MarketDataModule } from './market/market-data.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { getGlobalRateLimitConfiguration } from './rate-limit.config';
+import { RedisLockModule } from './redis/redis-lock.module';
 import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
 
@@ -35,6 +36,7 @@ const globalRateLimit = getGlobalRateLimitConfiguration();
       signOptions: { expiresIn: jwtExpiresIn },
     }),
     PrismaModule,
+    RedisLockModule,
     NotificationsModule,
     AuthModule,
     UsersModule,
