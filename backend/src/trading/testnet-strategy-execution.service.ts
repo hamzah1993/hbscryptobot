@@ -38,59 +38,6 @@ export class TestnetStrategyExecutionService {
     private readonly strategyActions: TestnetStrategyActionService,
   ) {}
 
-  async listOrders(userId: string, limit = 100) {
-    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
-
-    return this.prisma.tradingOrder.findMany({
-      where: {
-        userId,
-        position: {
-          strategy: {
-            environment: 'TESTNET',
-            paperTrading: false,
-          },
-        },
-      },
-      include: {
-        position: {
-          select: {
-            id: true,
-            symbol: true,
-            status: true,
-            strategy: {
-              select: {
-                id: true,
-                name: true,
-                status: true,
-                environment: true,
-              },
-            },
-          },
-        },
-        subPosition: {
-          select: {
-            id: true,
-            level: true,
-            status: true,
-          },
-        },
-        strategyAction: {
-          select: {
-            id: true,
-            type: true,
-            status: true,
-            actionKey: true,
-            triggerPrice: true,
-            createdAt: true,
-            completedAt: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: safeLimit,
-    });
-  }
-
   async executeMarketOrder(userId: string, input: ExecuteTestnetStrategyInput) {
     if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
       throw new BadRequestException('Quantity must be a positive number');
@@ -389,6 +336,58 @@ export class TestnetStrategyExecutionService {
     }
   }
 
+  async listOrders(userId: string, limit = 100) {
+    return this.prisma.tradingOrder.findMany({
+      where: {
+        userId,
+        position: {
+          strategy: {
+            environment: 'TESTNET',
+            paperTrading: false,
+          },
+        },
+      },
+      include: {
+        position: {
+          select: {
+            id: true,
+            symbol: true,
+            status: true,
+            strategy: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                environment: true,
+                paperTrading: true,
+              },
+            },
+          },
+        },
+        subPosition: {
+          select: {
+            id: true,
+            level: true,
+            status: true,
+          },
+        },
+        strategyAction: {
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            actionKey: true,
+            triggerPrice: true,
+            createdAt: true,
+            completedAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(Math.max(limit, 1), 500),
+    });
+  }
+
   async syncOrder(userId: string, tradingOrderId: string) {
     const order = await this.prisma.tradingOrder.findFirst({
       where: { id: tradingOrderId, userId },
@@ -587,7 +586,7 @@ export class TestnetStrategyExecutionService {
     if (order.strategyAction) {
       if (status === 'FILLED') {
         await this.strategyActions.markCompleted(order.strategyAction.id);
-      } else if (status === 'REJECTED' || status === 'CANCELED') {
+      } else if (status === 'REJECTED' || status === 'CANCELLED') {
         await this.strategyActions.markFailed(
           order.strategyAction.id,
           new Error(`Binance order ended with status ${status}`),
@@ -660,7 +659,8 @@ export class TestnetStrategyExecutionService {
       case 'EXPIRED':
         return 'REJECTED' as const;
       case 'CANCELED':
-        return 'CANCELED' as const;
+      case 'CANCELLED':
+        return 'CANCELLED' as const;
       default:
         return 'PENDING' as const;
     }
