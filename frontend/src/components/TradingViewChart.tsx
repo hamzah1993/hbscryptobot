@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -78,6 +78,9 @@ export function TradingViewChart({
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  const [showLevels, setShowLevels] = useState(true);
+  const [showMarkers, setShowMarkers] = useState(true);
+  const [autoFit, setAutoFit] = useState(true);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -145,50 +148,104 @@ export function TradingViewChart({
     if (!series || !chart) return;
 
     series.setData(data as CandlestickData<Time>[]);
-    if (data.length > 0) chart.timeScale().fitContent();
-  }, [data]);
+    if (data.length > 0 && autoFit) chart.timeScale().fitContent();
+  }, [data, autoFit]);
 
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
 
     priceLinesRef.current.forEach((line) => series.removePriceLine(line));
-    priceLinesRef.current = priceLevels
-      .filter((level) => Number.isFinite(level.value) && level.value > 0)
-      .map((level) => {
-        const style = priceLevelStyle(level.kind);
-        return series.createPriceLine({
-          price: level.value,
-          title: level.label,
-          color: style.color,
-          lineStyle: style.lineStyle,
-          lineWidth: 1,
-          axisLabelVisible: true,
-        });
-      });
-  }, [priceLevels]);
+    priceLinesRef.current = showLevels
+      ? priceLevels
+          .filter((level) => Number.isFinite(level.value) && level.value > 0)
+          .map((level) => {
+            const style = priceLevelStyle(level.kind);
+            return series.createPriceLine({
+              price: level.value,
+              title: level.label,
+              color: style.color,
+              lineStyle: style.lineStyle,
+              lineWidth: 1,
+              axisLabelVisible: true,
+            });
+          })
+      : [];
+  }, [priceLevels, showLevels]);
 
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
 
-    const validMarkers = orderMarkers
-      .filter((marker) => marker.label.trim().length > 0)
-      .map(orderMarkerStyle)
-      .sort((left, right) => Number(left.time) - Number(right.time));
+    const validMarkers = showMarkers
+      ? orderMarkers
+          .filter((marker) => marker.label.trim().length > 0)
+          .map(orderMarkerStyle)
+          .sort((left, right) => Number(left.time) - Number(right.time))
+      : [];
 
     const markerApi = createSeriesMarkers(series, validMarkers);
     return () => markerApi.setMarkers([]);
-  }, [orderMarkers]);
+  }, [orderMarkers, showMarkers]);
+
+  const resetView = () => {
+    const chart = chartRef.current;
+    if (!chart || data.length === 0) return;
+    chart.timeScale().fitContent();
+    setAutoFit(true);
+  };
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#07111f]">
-      <div ref={containerRef} className="w-full" style={{ height }} aria-label="TradingView candlestick chart" />
-      {(loading || data.length === 0) && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#07111f]/75 px-6 text-center text-sm text-slate-400 backdrop-blur-[1px]">
-          {loading ? 'Loading market candles…' : emptyMessage}
+    <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#07111f]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <span>{data.length} candles</span>
+          <span>·</span>
+          <span>{priceLevels.length} levels</span>
+          <span>·</span>
+          <span>{orderMarkers.length} markers</span>
         </div>
-      )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowLevels((current) => !current)}
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.08]"
+          >
+            {showLevels ? 'Hide levels' : 'Show levels'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowMarkers((current) => !current)}
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.08]"
+          >
+            {showMarkers ? 'Hide markers' : 'Show markers'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAutoFit((current) => !current)}
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-slate-300 hover:bg-white/[0.08]"
+          >
+            Auto-fit: {autoFit ? 'On' : 'Off'}
+          </button>
+          <button
+            type="button"
+            onClick={resetView}
+            disabled={data.length === 0}
+            className="rounded-lg bg-cyan-400 px-3 py-1.5 text-xs font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reset view
+          </button>
+        </div>
+      </div>
+
+      <div className="relative">
+        <div ref={containerRef} className="w-full" style={{ height }} aria-label="TradingView candlestick chart" />
+        {(loading || data.length === 0) && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#07111f]/75 px-6 text-center text-sm text-slate-400 backdrop-blur-[1px]">
+            {loading ? 'Loading market candles…' : emptyMessage}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
