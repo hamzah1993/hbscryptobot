@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
+import { CreateBotWizard } from '../components/CreateBotWizard';
 import { api, type TradingPosition } from '../lib/api';
 
 const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Exchange accounts', 'Trade history'];
@@ -15,8 +16,9 @@ export function DashboardPage() {
   const [positions, setPositions] = useState<TradingPosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCreateBot, setShowCreateBot] = useState(false);
 
-  useEffect(() => {
+  function loadPositions() {
     if (!token) {
       setLoading(false);
       return;
@@ -28,6 +30,10 @@ export function DashboardPage() {
       .then(setPositions)
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load positions'))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadPositions();
   }, [token]);
 
   const openPositions = positions.filter((position) => position.status === 'OPEN');
@@ -49,6 +55,17 @@ export function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
+      {showCreateBot && token && (
+        <CreateBotWizard
+          token={token}
+          onClose={() => setShowCreateBot(false)}
+          onCreated={() => {
+            setShowCreateBot(false);
+            loadPositions();
+          }}
+        />
+      )}
+
       <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
         <aside className="border-b border-white/10 bg-[#0a1728] px-5 py-5 lg:min-h-screen lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between lg:block">
@@ -79,7 +96,7 @@ export function DashboardPage() {
                 <button onClick={() => setMode('paper')} className={`rounded-lg px-3 py-2 text-sm ${mode === 'paper' ? 'bg-cyan-400 text-slate-950' : 'text-slate-400'}`}>Paper</button>
                 <button onClick={() => setMode('live')} className={`rounded-lg px-3 py-2 text-sm ${mode === 'live' ? 'bg-rose-400 text-slate-950' : 'text-slate-400'}`}>Live</button>
               </div>
-              <button className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create bot</button>
+              <button onClick={() => setShowCreateBot(true)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create bot</button>
               <button onClick={logout} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-sm font-semibold">{initials}</button>
             </div>
           </header>
@@ -97,15 +114,21 @@ export function DashboardPage() {
           </section>
 
           <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
-            <div>
-              <h3 className="text-lg font-semibold">Paper trading positions</h3>
-              <p className="mt-1 text-sm text-slate-400">Live data from the trading database</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Paper trading positions</h3>
+                <p className="mt-1 text-sm text-slate-400">Live data from the trading database</p>
+              </div>
+              <button onClick={() => setShowCreateBot(true)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-200">New paper bot</button>
             </div>
 
             {loading ? (
               <div className="mt-6 rounded-xl border border-dashed border-white/10 p-10 text-center text-slate-400">Loading positions…</div>
             ) : positions.length === 0 ? (
-              <div className="mt-6 rounded-xl border border-dashed border-white/10 p-10 text-center text-slate-400">No paper positions yet. Create a strategy and open a simulated trade.</div>
+              <div className="mt-6 rounded-xl border border-dashed border-white/10 p-10 text-center text-slate-400">
+                <p>No paper positions yet.</p>
+                <button onClick={() => setShowCreateBot(true)} className="mt-4 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create your first bot</button>
+              </div>
             ) : (
               <div className="mt-5 overflow-x-auto">
                 <table className="w-full min-w-[840px] text-left text-sm">
