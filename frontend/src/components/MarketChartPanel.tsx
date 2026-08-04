@@ -4,11 +4,13 @@ import {
   type BinanceKlineInterval,
   type BinanceStreamEnvironment,
   type MarketCandle,
+  type TestnetOrder,
   type TestnetPosition,
 } from '../lib/api';
 import {
   TradingViewChart,
   type TradingViewCandle,
+  type TradingViewOrderMarker,
   type TradingViewPriceLevel,
 } from './TradingViewChart';
 
@@ -18,12 +20,46 @@ type Props = {
 
 const intervals: BinanceKlineInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
+const markerKind = (order: TestnetOrder): TradingViewOrderMarker['kind'] => {
+  switch (order.strategyAction?.type) {
+    case 'DCA_ENTRY':
+      return 'DCA';
+    case 'PARENT_EXIT':
+      return 'TAKE_PROFIT';
+    case 'INDEPENDENT_ENTRY':
+      return 'INDEPENDENT_ENTRY';
+    case 'INDEPENDENT_EXIT':
+      return 'INDEPENDENT_TAKE_PROFIT';
+    case 'INITIAL_ENTRY':
+    default:
+      return 'ENTRY';
+  }
+};
+
+const markerLabel = (order: TestnetOrder) => {
+  switch (order.strategyAction?.type) {
+    case 'DCA_ENTRY':
+      return `DCA #${order.level}`;
+    case 'PARENT_EXIT':
+      return 'Parent TP';
+    case 'INDEPENDENT_ENTRY':
+      return `Independent #${order.level} entry`;
+    case 'INDEPENDENT_EXIT':
+      return `Independent #${order.level} TP`;
+    case 'INITIAL_ENTRY':
+      return 'Initial entry';
+    default:
+      return `${order.side} #${order.level}`;
+  }
+};
+
 export function MarketChartPanel({ token }: Props) {
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [interval, setInterval] = useState<BinanceKlineInterval>('5m');
   const [environment, setEnvironment] = useState<BinanceStreamEnvironment>('live');
   const [candles, setCandles] = useState<MarketCandle[]>([]);
   const [positions, setPositions] = useState<TestnetPosition[]>([]);
+  const [orders, setOrders] = useState<TestnetOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -35,6 +71,7 @@ export function MarketChartPanel({ token }: Props) {
     if (!normalizedSymbol) {
       setCandles([]);
       setPositions([]);
+      setOrders([]);
       setError('Enter a market symbol.');
       setLoading(false);
       return;
@@ -46,17 +83,20 @@ export function MarketChartPanel({ token }: Props) {
     Promise.all([
       api.getMarketCandles(token, normalizedSymbol, interval, 300, environment),
       environment === 'testnet' ? api.listTestnetPositions(token, 100) : Promise.resolve([]),
+      environment === 'testnet' ? api.listTestnetOrders(token, 300) : Promise.resolve([]),
     ])
-      .then(([response, testnetPositions]) => {
+      .then(([response, testnetPositions, testnetOrders]) => {
         if (!cancelled) {
           setCandles(response.candles);
           setPositions(testnetPositions.filter((position) => position.symbol === normalizedSymbol));
+          setOrders(testnetOrders.filter((order) => order.position.symbol === normalizedSymbol));
         }
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
           setCandles([]);
           setPositions([]);
+          setOrders([]);
           setError(reason instanceof Error ? reason.message : 'Unable to load market candles');
         }
       })
@@ -103,6 +143,36 @@ export function MarketChartPanel({ token }: Props) {
 
     return levels.filter((level) => Number.isFinite(level.value) && level.value > 0);
   }), [positions]);
+
+  const orderMarkers = useMemo<TradingViewOrderMarker[]>(() => {
+    if (candles.length === 0) return [];
+
+    const firstCandleTime = candles[0].time;
+    const lastCandleTime = candles[candles.length - 1].time;
+
+    return orders
+      .filter((order) => order.status === 'FILLED')
+      .flatMap<TradingViewOrderMarker>((order) => {
+        const eventTime = Date.parse(order.strategyAction?.completedAt ?? order.updatedAt);
+        const candle = candles.reduce<MarketCandle | null>((closest, candidate) => {
+          const candidateDistance = Math.abs(candidate.time * 1000 - eventTime);
+          if (!closest) return candidate;
+          const closestDistance = Math.abs(closest.time * 1000 - eventTime);
+          return candidateDistance < closestDistance ? candidate : closest;
+        }, null);
+
+        if (!candle || candle.time < firstCandleTime || candle.time > lastCandleTime) return [];
+
+        const kind = markerKind(order);
+        const marker: TradingViewOrderMarker = {
+          time: candle.time as TradingViewOrderMarker['time'],
+          side: order.side,
+          label: markerLabel(order),
+        };
+        if (kind) marker.kind = kind;
+        return [marker];
+      });
+  }, [candles, orders]);
 
   const latest = candles.length > 0 ? candles[candles.length - 1] : undefined;
 
@@ -167,6 +237,7 @@ export function MarketChartPanel({ token }: Props) {
         <TradingViewChart
           data={chartData}
           priceLevels={environment === 'testnet' ? positionLevels : []}
+          orderMarkers={environment === 'testnet' ? orderMarkers : []}
           loading={loading}
           emptyMessage={error ? 'Market candles could not be loaded.' : 'No candles returned for this market.'}
         />
@@ -181,6 +252,9 @@ export function MarketChartPanel({ token }: Props) {
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Close</dt><dd>{latest ? latest.close.toLocaleString() : '—'}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Volume</dt><dd>{latest ? latest.volume.toLocaleString() : '—'}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Candles</dt><dd>{candles.length}</dd></div>
+            {environment === 'testnet' && (
+              <div className="flex justify-between gap-3"><dt className="text-slate-500">Order markers</dt><dd>{orderMarkers.length}</dd></div>
+            )}
           </dl>
 
           {environment === 'testnet' && (
