@@ -37,6 +37,11 @@ export class StrategyController {
     return this.notifications.listRecent(request.user.sub, Number(limit ?? 100));
   }
 
+  @Get('notifications/webhook-metrics')
+  getNotificationWebhookMetrics() {
+    return this.notifications.getWebhookMetrics();
+  }
+
   @Get('testnet-orders')
   listTestnetOrders(
     @Req() request: AuthenticatedRequest,
