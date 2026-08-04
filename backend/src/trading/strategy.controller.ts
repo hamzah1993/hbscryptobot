@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
+import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 interface AuthenticatedRequest extends Request {
@@ -18,6 +19,7 @@ export class StrategyController {
     private readonly runner: PaperStrategyRunnerService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
     private readonly testnetTimeline: TestnetActionTimelineService,
+    private readonly testnetEmergencyStop: TestnetEmergencyStopService,
   ) {}
 
   @Get()
@@ -47,6 +49,11 @@ export class StrategyController {
     @Query('limit') limit?: string,
   ) {
     return this.testnetTimeline.list(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Post('testnet-emergency-stop')
+  stopTestnetStrategies(@Req() request: AuthenticatedRequest) {
+    return this.testnetEmergencyStop.stopUserStrategies(request.user.sub);
   }
 
   @Post()
