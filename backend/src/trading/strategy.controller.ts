@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
+import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 interface AuthenticatedRequest extends Request {
   user: { sub: string };
@@ -14,6 +15,7 @@ export class StrategyController {
   constructor(
     private readonly strategies: StrategyService,
     private readonly runner: PaperStrategyRunnerService,
+    private readonly testnetExecution: TestnetStrategyExecutionService,
   ) {}
 
   @Get()
@@ -29,6 +31,19 @@ export class StrategyController {
   @Post('run-paper-tick')
   runPaperTick(@Req() request: AuthenticatedRequest) {
     return this.runner.runUserStrategies(request.user.sub);
+  }
+
+  @Post(':strategyId/testnet-order')
+  executeTestnetOrder(
+    @Req() request: AuthenticatedRequest,
+    @Param('strategyId') strategyId: string,
+    @Body() body: { side: 'BUY' | 'SELL'; quantity: number },
+  ) {
+    return this.testnetExecution.executeMarketOrder(request.user.sub, {
+      strategyId,
+      side: body.side,
+      quantity: body.quantity,
+    });
   }
 
   @Patch(':strategyId')
