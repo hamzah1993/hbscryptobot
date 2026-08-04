@@ -31,6 +31,7 @@ export type TradingSubPosition = {
 };
 
 export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
+export type BinanceStreamEnvironment = 'testnet' | 'live';
 
 export type TradingStrategy = {
   id: string;
@@ -71,12 +72,12 @@ export type StreamedMarketPrice = {
   price: number;
   eventTime: number;
   receivedAt: number;
-  environment: 'testnet' | 'live';
+  environment: BinanceStreamEnvironment;
 };
 
 export type MarketStreamStatus = {
   symbol: string;
-  environment: 'testnet' | 'live';
+  environment: BinanceStreamEnvironment;
   subscribed: boolean;
   connected: boolean;
   reconnectAttempts: number;
@@ -142,21 +143,21 @@ export const api = {
       headers: authHeaders(token),
       body: JSON.stringify({ status }),
     }),
-  subscribeMarketStream: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+  subscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<MarketStreamStatus>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
       method: 'POST',
       headers: authHeaders(token),
     }),
-  unsubscribeMarketStream: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+  unsubscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<{ unsubscribed: boolean }>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
       method: 'DELETE',
       headers: authHeaders(token),
     }),
-  getMarketStreamStatus: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+  getMarketStreamStatus: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<MarketStreamStatus>(`/market-data/stream/status?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
       headers: authHeaders(token),
     }),
-  getStreamedMarketPrice: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+  getStreamedMarketPrice: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<StreamedMarketPrice | null>(`/market-data/stream/price?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
       headers: authHeaders(token),
     }),

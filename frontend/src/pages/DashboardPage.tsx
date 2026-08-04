@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
-import { api, type StrategyStatus, type TradingPosition } from '../lib/api';
+import {
+  api,
+  type BinanceStreamEnvironment,
+  type MarketStreamStatus,
+  type StrategyStatus,
+  type TradingPosition,
+} from '../lib/api';
 
 const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Exchange accounts', 'Trade history'];
 
@@ -19,6 +25,11 @@ export function DashboardPage() {
   const [showCreateBot, setShowCreateBot] = useState(false);
   const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
   const [updatingStrategyId, setUpdatingStrategyId] = useState<string | null>(null);
+  const [marketSymbol, setMarketSymbol] = useState('BTCUSDT');
+  const [marketEnvironment, setMarketEnvironment] = useState<BinanceStreamEnvironment>('testnet');
+  const [streamStatus, setStreamStatus] = useState<MarketStreamStatus | null>(null);
+  const [streamBusy, setStreamBusy] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   function loadPositions() {
     if (!token) {
@@ -38,6 +49,32 @@ export function DashboardPage() {
     loadPositions();
   }, [token]);
 
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const status = await api.getMarketStreamStatus(token, marketSymbol, marketEnvironment);
+        if (!cancelled) {
+          setStreamStatus(status);
+          setStreamError(null);
+        }
+      } catch (reason: unknown) {
+        if (!cancelled) {
+          setStreamError(reason instanceof Error ? reason.message : 'Unable to load market stream status');
+        }
+      }
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [token, marketSymbol, marketEnvironment]);
+
   async function updateStrategyStatus(strategyId: string, status: StrategyStatus) {
     if (!token) return;
     setUpdatingStrategyId(strategyId);
@@ -53,6 +90,35 @@ export function DashboardPage() {
       setError(reason instanceof Error ? reason.message : 'Unable to update strategy');
     } finally {
       setUpdatingStrategyId(null);
+    }
+  }
+
+  async function subscribeMarketStream() {
+    if (!token) return;
+    setStreamBusy(true);
+    setStreamError(null);
+    try {
+      const status = await api.subscribeMarketStream(token, marketSymbol, marketEnvironment);
+      setStreamStatus(status);
+    } catch (reason: unknown) {
+      setStreamError(reason instanceof Error ? reason.message : 'Unable to start market stream');
+    } finally {
+      setStreamBusy(false);
+    }
+  }
+
+  async function unsubscribeMarketStream() {
+    if (!token) return;
+    setStreamBusy(true);
+    setStreamError(null);
+    try {
+      await api.unsubscribeMarketStream(token, marketSymbol, marketEnvironment);
+      const status = await api.getMarketStreamStatus(token, marketSymbol, marketEnvironment);
+      setStreamStatus(status);
+    } catch (reason: unknown) {
+      setStreamError(reason instanceof Error ? reason.message : 'Unable to stop market stream');
+    } finally {
+      setStreamBusy(false);
     }
   }
 
@@ -133,6 +199,76 @@ export function DashboardPage() {
                 <p className="mt-2 text-xs text-cyan-300">{stat.change}</p>
               </article>
             ))}
+          </section>
+
+          <section className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-400/[0.09] via-white/[0.03] to-violet-400/[0.08] p-5 sm:p-6">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-semibold">Live market</h3>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${streamStatus?.connected ? 'bg-emerald-400/15 text-emerald-300' : streamStatus?.subscribed ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-400'}`}>
+                    {streamStatus?.connected ? 'Connected' : streamStatus?.subscribed ? 'Reconnecting' : 'Disconnected'}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-slate-950/30 px-2.5 py-1 text-xs uppercase tracking-wider text-slate-400">Public data only</span>
+                </div>
+                <p className="mt-2 max-w-2xl text-sm text-slate-400">Real-time Binance ticker streaming. Live market data does not enable live order execution.</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-[minmax(150px,1fr)_140px_auto]">
+                <input
+                  value={marketSymbol}
+                  onChange={(event) => setMarketSymbol(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                  aria-label="Market symbol"
+                  className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm outline-none ring-cyan-400/40 placeholder:text-slate-600 focus:ring"
+                  placeholder="BTCUSDT"
+                />
+                <select
+                  value={marketEnvironment}
+                  onChange={(event) => setMarketEnvironment(event.target.value as BinanceStreamEnvironment)}
+                  className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm outline-none ring-cyan-400/40 focus:ring"
+                >
+                  <option value="testnet">Testnet</option>
+                  <option value="live">Live public</option>
+                </select>
+                {streamStatus?.subscribed ? (
+                  <button disabled={streamBusy} onClick={unsubscribeMarketStream} className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm font-semibold text-rose-200 disabled:opacity-50">Stop stream</button>
+                ) : (
+                  <button disabled={streamBusy || !marketSymbol} onClick={subscribeMarketStream} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">Start stream</button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-5 md:col-span-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{(streamStatus?.symbol ?? marketSymbol) || 'Market'}</p>
+                <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <p className="text-4xl font-semibold tracking-tight sm:text-5xl">
+                      {streamStatus?.latestPrice ? money(streamStatus.latestPrice.price) : '—'}
+                    </p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {streamStatus?.latestPrice
+                        ? `Updated ${new Date(streamStatus.latestPrice.receivedAt).toLocaleTimeString()}`
+                        : 'Start the stream to receive a live ticker price'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-right">
+                    <p className="text-xs text-slate-500">Environment</p>
+                    <p className="mt-1 text-sm font-semibold uppercase text-cyan-300">{marketEnvironment}</p>
+                  </div>
+                </div>
+              </article>
+
+              <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
+                <p className="text-sm font-medium">Stream health</p>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-center justify-between gap-3"><dt className="text-slate-500">Subscribed</dt><dd>{streamStatus?.subscribed ? 'Yes' : 'No'}</dd></div>
+                  <div className="flex items-center justify-between gap-3"><dt className="text-slate-500">Connection</dt><dd>{streamStatus?.connected ? 'Online' : 'Offline'}</dd></div>
+                  <div className="flex items-center justify-between gap-3"><dt className="text-slate-500">Reconnects</dt><dd>{streamStatus?.reconnectAttempts ?? 0}</dd></div>
+                </dl>
+                {streamError && <p className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">{streamError}</p>}
+              </article>
+            </div>
           </section>
 
           <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
