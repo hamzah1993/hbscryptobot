@@ -41,7 +41,7 @@ export class TestnetStrategyActionService {
     }
 
     const existing = await this.prisma.strategyAction.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
+      where: { actionKey: input.idempotencyKey },
     });
 
     if (existing) return { action: existing, claimed: false };
@@ -59,14 +59,15 @@ export class TestnetStrategyActionService {
           quoteAmount: input.quoteAmount ?? null,
           level: input.level ?? null,
           triggerPrice: input.triggerPrice ?? null,
-          idempotencyKey: input.idempotencyKey,
+          actionKey: input.idempotencyKey,
+          independent: input.type === 'INDEPENDENT_ENTRY' || input.type === 'INDEPENDENT_EXIT',
         },
       });
 
       return { action, claimed: true };
     } catch (error: unknown) {
       const raced = await this.prisma.strategyAction.findUnique({
-        where: { idempotencyKey: input.idempotencyKey },
+        where: { actionKey: input.idempotencyKey },
       });
       if (raced) return { action: raced, claimed: false };
       throw error;
@@ -78,7 +79,7 @@ export class TestnetStrategyActionService {
       where: { id: actionId },
       data: {
         status: 'SUBMITTED',
-        tradingOrderId,
+        orderId: tradingOrderId,
         errorMessage: null,
       },
     });
@@ -109,7 +110,7 @@ export class TestnetStrategyActionService {
   listRecoverable(limit = 100) {
     return this.prisma.strategyAction.findMany({
       where: { status: { in: ['PENDING', 'SUBMITTED'] } },
-      include: { strategy: true, position: true, tradingOrder: true },
+      include: { strategy: true, position: true, order: true },
       orderBy: { createdAt: 'asc' },
       take: Math.min(Math.max(limit, 1), 500),
     });
