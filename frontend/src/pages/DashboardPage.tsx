@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
 import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
+import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
 import {
   api,
   type BinanceStreamEnvironment,
@@ -52,7 +53,7 @@ export function DashboardPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || activeNav === 'Exchange accounts') return;
+    if (!token || activeNav === 'Exchange accounts' || activeNav === 'Trade history') return;
     let cancelled = false;
 
     const refresh = async () => {
@@ -143,6 +144,13 @@ export function DashboardPage() {
     { label: 'Independent legs', value: String(openIndependentPositions.length), change: `${independentPositions.length} total sub-position${independentPositions.length === 1 ? '' : 's'}` },
   ];
 
+  const secondaryPage = activeNav === 'Exchange accounts' || activeNav === 'Trade history';
+  const pageTitle = activeNav === 'Exchange accounts'
+    ? 'Exchange accounts'
+    : activeNav === 'Trade history'
+      ? 'Testnet orders'
+      : 'Trading dashboard';
+
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
       {showCreateBot && token && (
@@ -179,12 +187,10 @@ export function DashboardPage() {
           <header className="flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-sm text-slate-400">Welcome back, {user?.fullName}</p>
-              <h2 className="mt-1 text-3xl font-semibold tracking-tight">
-                {activeNav === 'Exchange accounts' ? 'Exchange accounts' : 'Trading dashboard'}
-              </h2>
+              <h2 className="mt-1 text-3xl font-semibold tracking-tight">{pageTitle}</h2>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {activeNav !== 'Exchange accounts' && (
+              {!secondaryPage && (
                 <>
                   <div className="flex rounded-xl border border-white/10 bg-white/[0.04] p-1">
                     <button onClick={() => setMode('paper')} className={`rounded-lg px-3 py-2 text-sm ${mode === 'paper' ? 'bg-cyan-400 text-slate-950' : 'text-slate-400'}`}>Paper</button>
@@ -199,6 +205,8 @@ export function DashboardPage() {
 
           {activeNav === 'Exchange accounts' && token ? (
             <ExchangeAccountsPanel token={token} />
+          ) : activeNav === 'Trade history' && token ? (
+            <TestnetOrdersPanel token={token} />
           ) : (
             <>
               {error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
