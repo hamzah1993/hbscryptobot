@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -7,6 +8,7 @@ export class TestnetEmergencyStopService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly testnetOrders: BinanceTestnetOrderService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async stopUserStrategies(userId: string) {
@@ -107,7 +109,7 @@ export class TestnetEmergencyStopService {
       }
     }));
 
-    return {
+    const response = {
       environment: 'TESTNET' as const,
       stoppedAt,
       ...result,
@@ -116,5 +118,24 @@ export class TestnetEmergencyStopService {
       failedOrderCancellations: orderResults.filter((item) => item.outcome === 'FAILED').length,
       orderResults,
     };
+
+    this.notifications.publish({
+      event: 'TESTNET_EMERGENCY_STOP',
+      message: response.failedOrderCancellations > 0
+        ? 'Testnet emergency stop completed with order cancellation failures.'
+        : 'Testnet emergency stop completed.',
+      severity: response.failedOrderCancellations > 0 ? 'CRITICAL' : 'WARNING',
+      userId,
+      metadata: {
+        stoppedAt: stoppedAt.toISOString(),
+        stoppedStrategies: response.stoppedStrategies,
+        cancelledPendingActions: response.cancelledPendingActions,
+        unresolvedOrders: response.unresolvedOrders,
+        cancelledOrders: response.cancelledOrders,
+        failedOrderCancellations: response.failedOrderCancellations,
+      },
+    });
+
+    return response;
   }
 }
