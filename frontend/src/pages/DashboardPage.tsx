@@ -17,6 +17,7 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateBot, setShowCreateBot] = useState(false);
+  const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
 
   function loadPositions() {
     if (!token) {
@@ -40,6 +41,8 @@ export function DashboardPage() {
   const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
   const realizedPnl = positions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
   const runningBots = new Set(openPositions.map((position) => position.strategy.id)).size;
+  const independentPositions = positions.flatMap((position) => position.subPositions ?? []);
+  const openIndependentPositions = independentPositions.filter((subPosition) => subPosition.status === 'OPEN');
 
   const initials = useMemo(
     () => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB',
@@ -50,7 +53,7 @@ export function DashboardPage() {
     { label: 'Allocated capital', value: money(invested), change: `${openPositions.length} open position${openPositions.length === 1 ? '' : 's'}` },
     { label: 'Realized P&L', value: money(realizedPnl), change: realizedPnl >= 0 ? 'Paper trading gains' : 'Paper trading loss' },
     { label: 'Running bots', value: String(runningBots), change: 'Paper strategies with open positions' },
-    { label: 'Trade records', value: String(positions.length), change: 'Open and closed positions' },
+    { label: 'Independent legs', value: String(openIndependentPositions.length), change: `${independentPositions.length} total sub-position${independentPositions.length === 1 ? '' : 's'}` },
   ];
 
   return (
@@ -117,7 +120,7 @@ export function DashboardPage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-lg font-semibold">Paper trading positions</h3>
-                <p className="mt-1 text-sm text-slate-400">Live data from the trading database</p>
+                <p className="mt-1 text-sm text-slate-400">Parent positions and Royal Q-style independent legs</p>
               </div>
               <button onClick={() => setShowCreateBot(true)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-200">New paper bot</button>
             </div>
@@ -130,25 +133,68 @@ export function DashboardPage() {
                 <button onClick={() => setShowCreateBot(true)} className="mt-4 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create your first bot</button>
               </div>
             ) : (
-              <div className="mt-5 overflow-x-auto">
-                <table className="w-full min-w-[840px] text-left text-sm">
-                  <thead className="text-xs uppercase tracking-wider text-slate-500">
-                    <tr><th className="pb-3">Pair</th><th className="pb-3">Status</th><th className="pb-3">Invested</th><th className="pb-3">Average entry</th><th className="pb-3">DCA</th><th className="pb-3">Take profit</th><th className="pb-3">Realized P&L</th></tr>
-                  </thead>
-                  <tbody>
-                    {positions.map((position) => (
-                      <tr key={position.id} className="border-t border-white/10">
-                        <td className="py-4 font-medium">{position.symbol}</td>
-                        <td className="py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${position.status === 'OPEN' ? 'bg-cyan-400/10 text-cyan-300' : 'bg-slate-400/10 text-slate-300'}`}>{position.status}</span></td>
-                        <td className="py-4">{money(Number(position.totalCostQuote))}</td>
-                        <td className="py-4">{money(Number(position.averageEntryPrice))}</td>
-                        <td className="py-4">{position.dcaCount}/{position.strategy.maxDcaOrders}</td>
-                        <td className="py-4">{position.takeProfitPrice ? money(Number(position.takeProfitPrice)) : '—'}</td>
-                        <td className={`py-4 font-medium ${Number(position.realizedPnlQuote) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{money(Number(position.realizedPnlQuote))}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="mt-5 space-y-3">
+                {positions.map((position) => {
+                  const subPositions = position.subPositions ?? [];
+                  const isExpanded = expandedPositionId === position.id;
+
+                  return (
+                    <article key={position.id} className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/20">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPositionId(isExpanded ? null : position.id)}
+                        className="grid w-full gap-4 px-4 py-4 text-left sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_auto] sm:items-center"
+                      >
+                        <div>
+                          <p className="font-semibold">{position.symbol}</p>
+                          <p className="mt-1 text-xs text-slate-500">{position.strategy.name}</p>
+                        </div>
+                        <div><span className={`rounded-full px-2.5 py-1 text-xs ${position.status === 'OPEN' ? 'bg-cyan-400/10 text-cyan-300' : 'bg-slate-400/10 text-slate-300'}`}>{position.status}</span></div>
+                        <div><p className="text-xs text-slate-500">Invested</p><p className="mt-1">{money(Number(position.totalCostQuote))}</p></div>
+                        <div><p className="text-xs text-slate-500">Independent legs</p><p className="mt-1">{subPositions.filter((subPosition) => subPosition.status === 'OPEN').length}/{subPositions.length}</p></div>
+                        <span className="text-sm text-cyan-300">{isExpanded ? 'Hide' : 'Details'}</span>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t border-white/10 px-4 py-4">
+                          <div className="grid gap-3 sm:grid-cols-4">
+                            <div><p className="text-xs text-slate-500">Average entry</p><p className="mt-1">{money(Number(position.averageEntryPrice))}</p></div>
+                            <div><p className="text-xs text-slate-500">DCA progress</p><p className="mt-1">{position.dcaCount}/{position.strategy.maxDcaOrders}</p></div>
+                            <div><p className="text-xs text-slate-500">Parent take profit</p><p className="mt-1">{position.takeProfitPrice ? money(Number(position.takeProfitPrice)) : '—'}</p></div>
+                            <div><p className="text-xs text-slate-500">Realized P&L</p><p className={`mt-1 font-medium ${Number(position.realizedPnlQuote) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{money(Number(position.realizedPnlQuote))}</p></div>
+                          </div>
+
+                          <div className="mt-5">
+                            <h4 className="text-sm font-semibold">Independent sub-positions</h4>
+                            {subPositions.length === 0 ? (
+                              <p className="mt-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-500">No independent DCA level has been opened yet.</p>
+                            ) : (
+                              <div className="mt-3 overflow-x-auto">
+                                <table className="w-full min-w-[720px] text-left text-sm">
+                                  <thead className="text-xs uppercase tracking-wider text-slate-500">
+                                    <tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">Take profit</th><th className="pb-3">Realized P&L</th></tr>
+                                  </thead>
+                                  <tbody>
+                                    {subPositions.map((subPosition) => (
+                                      <tr key={subPosition.id} className="border-t border-white/10">
+                                        <td className="py-3 font-medium">#{subPosition.level}</td>
+                                        <td className="py-3"><span className={`rounded-full px-2.5 py-1 text-xs ${subPosition.status === 'OPEN' ? 'bg-violet-400/10 text-violet-300' : 'bg-emerald-400/10 text-emerald-300'}`}>{subPosition.status}</span></td>
+                                        <td className="py-3">{money(Number(subPosition.costQuote))}</td>
+                                        <td className="py-3">{money(Number(subPosition.entryPrice))}</td>
+                                        <td className="py-3">{money(Number(subPosition.takeProfitPrice))}</td>
+                                        <td className={`py-3 font-medium ${Number(subPosition.realizedPnlQuote) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{money(Number(subPosition.realizedPnlQuote))}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>
