@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
@@ -21,6 +21,14 @@ export class StrategyController {
   @Get()
   list(@Req() request: AuthenticatedRequest) {
     return this.strategies.list(request.user.sub);
+  }
+
+  @Get('testnet-orders')
+  listTestnetOrders(
+    @Req() request: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    return this.testnetExecution.listOrders(request.user.sub, Number(limit ?? 100));
   }
 
   @Post()
