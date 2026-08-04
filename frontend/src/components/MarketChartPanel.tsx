@@ -61,7 +61,7 @@ export function MarketChartPanel({ token }: Props) {
     [candles],
   );
 
-  const latest = candles.at(-1);
+  const latest = candles.length > 0 ? candles[candles.length - 1] : undefined;
 
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
