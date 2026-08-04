@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { RedisLockService } from '../redis/redis-lock.service';
+import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
 
 const TESTNET_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-strategy-scheduler';
@@ -23,17 +23,16 @@ export class TestnetStrategySchedulerService {
     if (this.running) return;
 
     this.running = true;
-    const lock = await this.redisLock.acquire(
-      TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
-      TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS,
-    );
-
-    if (!lock) {
-      this.running = false;
-      return;
-    }
+    let lock: RedisLock | null = null;
 
     try {
+      lock = await this.redisLock.acquire(
+        TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
+        TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS,
+      );
+
+      if (!lock) return;
+
       const users = await this.prisma.tradingStrategy.findMany({
         where: {
           status: 'RUNNING',
@@ -66,7 +65,17 @@ export class TestnetStrategySchedulerService {
         error instanceof Error ? error.stack : String(error),
       );
     } finally {
-      await this.redisLock.release(lock);
+      if (lock) {
+        try {
+          await this.redisLock.release(lock);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to release the Testnet strategy scheduler lock: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
       this.running = false;
     }
   }
