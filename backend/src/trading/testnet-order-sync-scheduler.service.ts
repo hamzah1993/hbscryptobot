@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisLockService } from '../redis/redis-lock.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+
+const TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-order-sync-scheduler';
+const TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS = 30_000;
 
 @Injectable()
 export class TestnetOrderSyncSchedulerService {
@@ -13,6 +17,7 @@ export class TestnetOrderSyncSchedulerService {
     private readonly prisma: PrismaService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
     private readonly testnetActions: TestnetStrategyActionService,
+    private readonly redisLock: RedisLockService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
@@ -20,6 +25,16 @@ export class TestnetOrderSyncSchedulerService {
     if (this.running) return;
 
     this.running = true;
+    const lock = await this.redisLock.acquire(
+      TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY,
+      TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS,
+    );
+
+    if (!lock) {
+      this.running = false;
+      return;
+    }
+
     try {
       const orders = await this.prisma.tradingOrder.findMany({
         where: {
@@ -94,6 +109,7 @@ export class TestnetOrderSyncSchedulerService {
         error instanceof Error ? error.stack : String(error),
       );
     } finally {
+      await this.redisLock.release(lock);
       this.running = false;
     }
   }
