@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { RedisLockService } from '../redis/redis-lock.service';
+import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
@@ -25,17 +25,16 @@ export class TestnetOrderSyncSchedulerService {
     if (this.running) return;
 
     this.running = true;
-    const lock = await this.redisLock.acquire(
-      TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY,
-      TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS,
-    );
-
-    if (!lock) {
-      this.running = false;
-      return;
-    }
+    let lock: RedisLock | null = null;
 
     try {
+      lock = await this.redisLock.acquire(
+        TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY,
+        TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS,
+      );
+
+      if (!lock) return;
+
       const orders = await this.prisma.tradingOrder.findMany({
         where: {
           status: { in: ['PENDING', 'PARTIALLY_FILLED'] },
@@ -109,7 +108,17 @@ export class TestnetOrderSyncSchedulerService {
         error instanceof Error ? error.stack : String(error),
       );
     } finally {
-      await this.redisLock.release(lock);
+      if (lock) {
+        try {
+          await this.redisLock.release(lock);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to release the Testnet order sync scheduler lock: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
       this.running = false;
     }
   }
