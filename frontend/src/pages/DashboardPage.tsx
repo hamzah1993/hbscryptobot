@@ -18,6 +18,7 @@ import {
 } from '../lib/api';
 
 const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Notifications', 'Exchange accounts', 'Trade history'];
+const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
 
 function money(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -42,6 +43,7 @@ export function DashboardPage() {
   const [emergencyStopBusy, setEmergencyStopBusy] = useState(false);
   const [emergencyStopResult, setEmergencyStopResult] = useState<TestnetEmergencyStopResponse | null>(null);
   const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   function loadPositions() {
     if (!token) {
@@ -60,6 +62,39 @@ export function DashboardPage() {
   useEffect(() => {
     loadPositions();
   }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setUnreadNotifications(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshUnread = async () => {
+      try {
+        const notifications = await api.listNotifications(token, 250);
+        if (cancelled) return;
+        const seenAt = Number(window.localStorage.getItem(notificationSeenStorageKey) ?? 0);
+        const unread = notifications.filter((notification) => new Date(notification.createdAt).getTime() > seenAt).length;
+        setUnreadNotifications(unread);
+      } catch {
+        if (!cancelled) setUnreadNotifications(0);
+      }
+    };
+
+    void refreshUnread();
+    const interval = window.setInterval(() => void refreshUnread(), 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [token]);
+
+  useEffect(() => {
+    if (activeNav !== 'Notifications') return;
+    window.localStorage.setItem(notificationSeenStorageKey, String(Date.now()));
+    setUnreadNotifications(0);
+  }, [activeNav]);
 
   useEffect(() => {
     if (
@@ -250,8 +285,13 @@ export function DashboardPage() {
 
           <nav className="mt-7 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
             {navigation.map((item) => (
-              <button key={item} onClick={() => setActiveNav(item)} className={`rounded-xl px-4 py-3 text-left text-sm transition ${activeNav === item ? 'bg-cyan-400 text-slate-950' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
-                {item}
+              <button key={item} onClick={() => setActiveNav(item)} className={`flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition ${activeNav === item ? 'bg-cyan-400 text-slate-950' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}>
+                <span>{item}</span>
+                {item === 'Notifications' && unreadNotifications > 0 && (
+                  <span className={`ml-3 rounded-full px-2 py-0.5 text-xs font-semibold ${activeNav === item ? 'bg-slate-950/15 text-slate-950' : 'bg-rose-400/20 text-rose-200'}`}>
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
