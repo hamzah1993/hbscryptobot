@@ -79,9 +79,11 @@ export function MarketChartPanel({ token }: Props) {
   const [positions, setPositions] = useState<TestnetPosition[]>([]);
   const [orders, setOrders] = useState<TestnetOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  const [accountDataError, setAccountDataError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [streaming, setStreaming] = useState(false);
+  const [streamStale, setStreamStale] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,37 +93,62 @@ export function MarketChartPanel({ token }: Props) {
       setCandles([]);
       setPositions([]);
       setOrders([]);
-      setError('Enter a market symbol.');
+      setMarketError('Enter a market symbol.');
+      setAccountDataError(null);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    setError(null);
+    setMarketError(null);
+    setAccountDataError(null);
 
-    Promise.all([
-      api.getMarketCandles(token, normalizedSymbol, interval, 300, environment),
-      environment === 'testnet' ? api.listTestnetPositions(token, 100) : Promise.resolve([]),
-      environment === 'testnet' ? api.listTestnetOrders(token, 300) : Promise.resolve([]),
-    ])
-      .then(([response, testnetPositions, testnetOrders]) => {
+    const load = async () => {
+      try {
+        const response = await api.getMarketCandles(token, normalizedSymbol, interval, 300, environment);
+        if (!cancelled) setCandles(response.candles);
+      } catch (reason: unknown) {
         if (!cancelled) {
-          setCandles(response.candles);
-          setPositions(testnetPositions.filter((position) => position.symbol === normalizedSymbol));
-          setOrders(testnetOrders.filter((order) => order.position.symbol === normalizedSymbol));
+          setMarketError(reason instanceof Error ? reason.message : 'Unable to load market candles');
         }
-      })
-      .catch((reason: unknown) => {
+      }
+
+      if (environment !== 'testnet') {
         if (!cancelled) {
-          setCandles([]);
           setPositions([]);
           setOrders([]);
-          setError(reason instanceof Error ? reason.message : 'Unable to load market candles');
+          setLoading(false);
         }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        return;
+      }
+
+      const [positionResult, orderResult] = await Promise.allSettled([
+        api.listTestnetPositions(token, 100),
+        api.listTestnetOrders(token, 300),
+      ]);
+
+      if (!cancelled) {
+        if (positionResult.status === 'fulfilled') {
+          setPositions(positionResult.value.filter((position) => position.symbol === normalizedSymbol));
+        } else {
+          setPositions([]);
+        }
+
+        if (orderResult.status === 'fulfilled') {
+          setOrders(orderResult.value.filter((order) => order.position.symbol === normalizedSymbol));
+        } else {
+          setOrders([]);
+        }
+
+        if (positionResult.status === 'rejected' || orderResult.status === 'rejected') {
+          setAccountDataError('Chart candles loaded, but some Testnet position or order overlays are unavailable.');
+        }
+
+        setLoading(false);
+      }
+    };
+
+    void load();
 
     return () => {
       cancelled = true;
@@ -135,19 +162,29 @@ export function MarketChartPanel({ token }: Props) {
 
     let cancelled = false;
     let pollTimer: number | undefined;
+    let lastSuccessfulPoll = 0;
 
     const start = async () => {
       try {
         await api.subscribeMarketStream(token, normalizedSymbol, environment);
-        if (!cancelled) setStreaming(true);
+        if (!cancelled) {
+          setStreaming(true);
+          setStreamStale(false);
+        }
       } catch {
-        if (!cancelled) setStreaming(false);
+        if (!cancelled) {
+          setStreaming(false);
+          setStreamStale(true);
+        }
       }
 
       const poll = async () => {
         try {
           const streamed = await api.getStreamedMarketPrice(token, normalizedSymbol, environment);
           if (!cancelled && streamed && Number.isFinite(streamed.price)) {
+            lastSuccessfulPoll = Date.now();
+            setStreaming(true);
+            setStreamStale(false);
             const candleTime = Math.floor(streamed.eventTime / 1000 / bucketSize) * bucketSize;
             setCandles((current) => {
               if (current.length === 0) return current;
@@ -176,9 +213,14 @@ export function MarketChartPanel({ token }: Props) {
               };
               return [...current.slice(-299), next];
             });
+          } else if (!cancelled && lastSuccessfulPoll > 0 && Date.now() - lastSuccessfulPoll > 10_000) {
+            setStreamStale(true);
           }
         } catch {
-          if (!cancelled) setStreaming(false);
+          if (!cancelled) {
+            setStreaming(false);
+            setStreamStale(true);
+          }
         } finally {
           if (!cancelled) pollTimer = window.setTimeout(poll, 2000);
         }
@@ -192,6 +234,7 @@ export function MarketChartPanel({ token }: Props) {
     return () => {
       cancelled = true;
       setStreaming(false);
+      setStreamStale(false);
       if (pollTimer) window.clearTimeout(pollTimer);
       void api.unsubscribeMarketStream(token, normalizedSymbol, environment).catch(() => undefined);
     };
@@ -263,6 +306,7 @@ export function MarketChartPanel({ token }: Props) {
   }, [candles, orders]);
 
   const latest = candles.length > 0 ? candles[candles.length - 1] : undefined;
+  const streamLabel = streaming && !streamStale ? 'Live updates' : streamStale ? 'Reconnecting' : 'Snapshot only';
 
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
@@ -273,8 +317,8 @@ export function MarketChartPanel({ token }: Props) {
             <span className="rounded-full border border-white/10 bg-slate-950/30 px-2.5 py-1 text-xs uppercase tracking-wider text-slate-400">
               Public market data
             </span>
-            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${streaming ? 'bg-emerald-400/15 text-emerald-300' : 'bg-slate-400/10 text-slate-400'}`}>
-              {streaming ? 'Live updates' : 'Snapshot only'}
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${streaming && !streamStale ? 'bg-emerald-400/15 text-emerald-300' : streamStale ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-400'}`}>
+              {streamLabel}
             </span>
           </div>
           <p className="mt-2 text-sm text-slate-400">
@@ -318,9 +362,15 @@ export function MarketChartPanel({ token }: Props) {
         </div>
       </div>
 
-      {error && (
+      {marketError && (
         <div className="mx-5 mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
-          {error}
+          {marketError}
+        </div>
+      )}
+
+      {accountDataError && (
+        <div className="mx-5 mt-5 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+          {accountDataError}
         </div>
       )}
 
@@ -329,8 +379,8 @@ export function MarketChartPanel({ token }: Props) {
           data={chartData}
           priceLevels={environment === 'testnet' ? positionLevels : []}
           orderMarkers={environment === 'testnet' ? orderMarkers : []}
-          loading={loading}
-          emptyMessage={error ? 'Market candles could not be loaded.' : 'No candles returned for this market.'}
+          loading={loading && candles.length === 0}
+          emptyMessage={marketError ? 'Market candles could not be loaded.' : 'No candles returned for this market.'}
         />
 
         <aside className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
