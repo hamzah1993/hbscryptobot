@@ -481,8 +481,9 @@ export class TestnetStrategyExecutionService {
     const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
     const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
     const status = this.mapOrderStatus(exchangeOrder.status);
+    const previousStatus = order.status;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.tradingOrder.update({
         where: { id: order.id },
         data: {
@@ -506,6 +507,41 @@ export class TestnetStrategyExecutionService {
 
       return { tradingOrder: updatedOrder, exchangeOrder };
     });
+
+    if (status !== previousStatus) {
+      const terminalFailure = status === 'REJECTED' || status === 'CANCELLED';
+      this.notifications.publish({
+        event: status === 'FILLED'
+          ? 'TESTNET_ORDER_SYNC_FILLED'
+          : terminalFailure
+            ? 'TESTNET_ORDER_SYNC_TERMINAL'
+            : 'TESTNET_ORDER_SYNC_UPDATED',
+        message: status === 'FILLED'
+          ? `Testnet order synchronization confirmed a fill for ${order.position.symbol}.`
+          : terminalFailure
+            ? `Testnet order synchronization ended with status ${status} for ${order.position.symbol}.`
+            : `Testnet order synchronization updated status to ${status} for ${order.position.symbol}.`,
+        severity: terminalFailure ? 'WARNING' : 'INFO',
+        userId,
+        strategyId: order.position.strategyId,
+        positionId: order.positionId,
+        orderId: order.id,
+        metadata: {
+          actionId: order.strategyAction?.id ?? null,
+          symbol: order.position.symbol,
+          side: order.side,
+          previousStatus,
+          status,
+          clientOrderId: order.clientOrderId,
+          exchangeOrderId: order.exchangeOrderId,
+          filledQuantity: executedQuantity,
+          quoteAmount,
+          averageFillPrice: averageFillPrice || null,
+        },
+      });
+    }
+
+    return result;
   }
 
   private mapOrderStatus(status?: string) {
