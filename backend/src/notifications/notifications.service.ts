@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 
@@ -13,33 +14,62 @@ export type OperationalNotification = {
   metadata?: Record<string, unknown>;
 };
 
+export type StoredOperationalNotification = OperationalNotification & {
+  id: string;
+  createdAt: string;
+};
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private readonly recent: StoredOperationalNotification[] = [];
+  private readonly maxRecent = 500;
 
   publish(notification: OperationalNotification): void {
-    const context = {
-      event: notification.event,
-      severity: notification.severity,
-      userId: notification.userId,
-      strategyId: notification.strategyId,
-      positionId: notification.positionId,
-      orderId: notification.orderId,
-      metadata: notification.metadata,
+    const stored: StoredOperationalNotification = {
+      ...notification,
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
     };
 
-    const payload = `${notification.message} ${JSON.stringify(context)}`;
+    this.recent.unshift(stored);
+    if (this.recent.length > this.maxRecent) this.recent.length = this.maxRecent;
 
-    if (notification.severity === 'CRITICAL') {
+    const context = {
+      id: stored.id,
+      createdAt: stored.createdAt,
+      event: stored.event,
+      severity: stored.severity,
+      userId: stored.userId,
+      strategyId: stored.strategyId,
+      positionId: stored.positionId,
+      orderId: stored.orderId,
+      metadata: stored.metadata,
+    };
+
+    const payload = `${stored.message} ${JSON.stringify(context)}`;
+
+    if (stored.severity === 'CRITICAL') {
       this.logger.error(payload);
       return;
     }
 
-    if (notification.severity === 'WARNING') {
+    if (stored.severity === 'WARNING') {
       this.logger.warn(payload);
       return;
     }
 
     this.logger.log(payload);
+  }
+
+  listRecent(userId: string, limit = 100): StoredOperationalNotification[] {
+    const safeLimit = Math.min(Math.max(Math.trunc(limit) || 100, 1), 500);
+    return this.recent
+      .filter((notification) => notification.userId === userId)
+      .slice(0, safeLimit)
+      .map((notification) => ({
+        ...notification,
+        metadata: notification.metadata ? { ...notification.metadata } : undefined,
+      }));
   }
 }
