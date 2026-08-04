@@ -11,6 +11,8 @@ import { StrategyService } from './strategy.service';
 import { TestnetOrderSyncSchedulerService } from './testnet-order-sync-scheduler.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
+import { TestnetStrategySchedulerService } from './testnet-strategy-scheduler.service';
 import { TradingEngineController } from './trading-engine.controller';
 import { TradingEngineService } from './trading-engine.service';
 
@@ -27,6 +29,8 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetStrategyExecutionService,
     TestnetOrderSyncSchedulerService,
     TestnetStrategyActionService,
+    TestnetStrategyRunnerService,
+    TestnetStrategySchedulerService,
   ],
   exports: [
     RiskBudgetService,
@@ -36,6 +40,7 @@ import { TradingEngineService } from './trading-engine.service';
     PaperStrategyRunnerService,
     TestnetStrategyExecutionService,
     TestnetStrategyActionService,
+    TestnetStrategyRunnerService,
   ],
 })
 export class TradingEngineModule {}
