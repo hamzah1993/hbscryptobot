@@ -4,6 +4,7 @@ import { CreateBotWizard } from '../components/CreateBotWizard';
 import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
 import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
+import { TestnetPositionsPanel } from '../components/TestnetPositionsPanel';
 import {
   api,
   type BinanceStreamEnvironment,
@@ -53,7 +54,12 @@ export function DashboardPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!token || activeNav === 'Exchange accounts' || activeNav === 'Trade history') return;
+    if (
+      !token ||
+      activeNav === 'Exchange accounts' ||
+      activeNav === 'Trade history' ||
+      activeNav === 'Positions'
+    ) return;
     let cancelled = false;
 
     const refresh = async () => {
@@ -144,12 +150,17 @@ export function DashboardPage() {
     { label: 'Independent legs', value: String(openIndependentPositions.length), change: `${independentPositions.length} total sub-position${independentPositions.length === 1 ? '' : 's'}` },
   ];
 
-  const secondaryPage = activeNav === 'Exchange accounts' || activeNav === 'Trade history';
+  const secondaryPage =
+    activeNav === 'Exchange accounts' ||
+    activeNav === 'Trade history' ||
+    activeNav === 'Positions';
   const pageTitle = activeNav === 'Exchange accounts'
     ? 'Exchange accounts'
     : activeNav === 'Trade history'
       ? 'Testnet orders'
-      : 'Trading dashboard';
+      : activeNav === 'Positions'
+        ? 'Testnet positions'
+        : 'Trading dashboard';
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
@@ -207,6 +218,8 @@ export function DashboardPage() {
             <ExchangeAccountsPanel token={token} />
           ) : activeNav === 'Trade history' && token ? (
             <TestnetOrdersPanel token={token} />
+          ) : activeNav === 'Positions' && token ? (
+            <TestnetPositionsPanel token={token} />
           ) : (
             <>
               {error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
