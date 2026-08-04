@@ -224,6 +224,13 @@ export type TestnetAction = {
   } | null;
 };
 
+export type TestnetEmergencyStopResponse = {
+  environment: 'TESTNET';
+  stoppedAt: string;
+  stoppedStrategies: number;
+  cancelledPendingActions: number;
+};
+
 export type StreamedMarketPrice = {
   symbol: string;
   price: number;
@@ -317,6 +324,11 @@ export const api = {
     }),
   listTestnetActions: (token: string, limit = 100) =>
     request<TestnetAction[]>(`/strategies/testnet-actions?limit=${encodeURIComponent(String(limit))}`, {
+      headers: authHeaders(token),
+    }),
+  stopTestnetStrategies: (token: string) =>
+    request<TestnetEmergencyStopResponse>('/strategies/testnet-emergency-stop', {
+      method: 'POST',
       headers: authHeaders(token),
     }),
   listExchangeCredentials: (token: string) =>
