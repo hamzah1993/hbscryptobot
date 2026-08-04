@@ -9,6 +9,7 @@ import { RiskBudgetService } from './risk-budget.service';
 import { StrategyController } from './strategy.controller';
 import { StrategyService } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
+import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
 import { TestnetOrderSyncSchedulerService } from './testnet-order-sync-scheduler.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
@@ -31,6 +32,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetOrderSyncSchedulerService,
     TestnetStrategyActionService,
     TestnetActionTimelineService,
+    TestnetEmergencyStopService,
     TestnetStrategyRunnerService,
     TestnetStrategySchedulerService,
   ],
@@ -43,6 +45,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetStrategyExecutionService,
     TestnetStrategyActionService,
     TestnetActionTimelineService,
+    TestnetEmergencyStopService,
     TestnetStrategyRunnerService,
   ],
 })
