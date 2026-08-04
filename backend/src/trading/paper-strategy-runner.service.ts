@@ -3,10 +3,12 @@ import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaperTradingService } from './paper-trading.service';
 
+export type StrategyRunnerAction = 'OPEN' | 'DCA' | 'TAKE_PROFIT' | 'HOLD' | 'SKIP' | 'ERROR';
+
 export type StrategyRunnerResult = {
   strategyId: string;
   symbol: string;
-  action: 'OPEN' | 'DCA' | 'TAKE_PROFIT' | 'HOLD' | 'SKIP' | 'ERROR';
+  action: StrategyRunnerAction;
   price?: number;
   positionId?: string;
   message?: string;
@@ -77,11 +79,12 @@ export class PaperStrategyRunnerService {
         openPosition.id,
         quote.price,
       );
+      const action: Extract<StrategyRunnerAction, 'DCA' | 'TAKE_PROFIT' | 'HOLD'> = processed.action;
 
       return {
         strategyId: strategy.id,
         symbol: strategy.symbol,
-        action: processed.action,
+        action,
         price: quote.price,
         positionId: processed.position?.id ?? openPosition.id,
       };
