@@ -142,6 +142,42 @@ export type TestnetOrderSyncResponse = {
   deltaQuoteAmount: number;
 };
 
+export type TestnetPosition = {
+  id: string;
+  userId: string;
+  strategyId: string;
+  symbol: string;
+  status: TradingPosition['status'];
+  totalQuantity: string;
+  totalCostQuote: string;
+  averageEntryPrice: string;
+  realizedPnlQuote: string;
+  dcaCount: number;
+  nextDcaPrice: string | null;
+  takeProfitPrice: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  updatedAt: string;
+  strategy: TradingStrategy;
+  subPositions: TradingSubPosition[];
+  orders: Array<{
+    id: string;
+    exchangeOrderId: string | null;
+    clientOrderId: string;
+    side: 'BUY' | 'SELL';
+    type: 'MARKET' | 'LIMIT';
+    status: TestnetOrderStatus;
+    level: number;
+    independent: boolean;
+    quantity: string;
+    filledQuantity: string;
+    quoteAmount: string;
+    averageFillPrice: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
 export type StreamedMarketPrice = {
   symbol: string;
   price: number;
@@ -227,6 +263,10 @@ export const api = {
   syncTestnetOrder: (token: string, tradingOrderId: string) =>
     request<TestnetOrderSyncResponse>(`/strategies/testnet-orders/${tradingOrderId}/sync`, {
       method: 'POST',
+      headers: authHeaders(token),
+    }),
+  listTestnetPositions: (token: string, limit = 100) =>
+    request<TestnetPosition[]>(`/strategies/testnet-positions?limit=${encodeURIComponent(String(limit))}`, {
       headers: authHeaders(token),
     }),
   listExchangeCredentials: (token: string) =>
