@@ -84,7 +84,11 @@ export class PaperTradingService {
 
       return tx.tradingPosition.findUnique({
         where: { id: position.id },
-        include: { orders: { orderBy: { createdAt: 'asc' } }, strategy: true },
+        include: {
+          orders: { orderBy: { createdAt: 'asc' } },
+          subPositions: { orderBy: { level: 'asc' } },
+          strategy: true,
+        },
       });
     });
   }
@@ -114,7 +118,9 @@ export class PaperTradingService {
   ): Promise<PaperTickResult> {
     if (marketPrice <= 0) throw new BadRequestException('Market price must be positive');
 
-    const position = await this.getOpenPosition(userId, positionId);
+    let position = await this.getOpenPosition(userId, positionId);
+    position = await this.closeEligibleSubPositions(position, marketPrice);
+
     const takeProfitPrice = position.takeProfitPrice ? Number(position.takeProfitPrice) : null;
     const nextDcaPrice = position.nextDcaPrice ? Number(position.nextDcaPrice) : null;
 
@@ -137,7 +143,11 @@ export class PaperTradingService {
   async listPositions(userId: string) {
     return this.prisma.tradingPosition.findMany({
       where: { userId },
-      include: { strategy: true, orders: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        strategy: true,
+        orders: { orderBy: { createdAt: 'asc' } },
+        subPositions: { orderBy: { level: 'asc' } },
+      },
       orderBy: { openedAt: 'desc' },
     });
   }
@@ -145,7 +155,11 @@ export class PaperTradingService {
   private async getOpenPosition(userId: string, positionId: string) {
     const position = await this.prisma.tradingPosition.findFirst({
       where: { id: positionId, userId, status: 'OPEN' },
-      include: { strategy: true, orders: { orderBy: { createdAt: 'asc' } } },
+      include: {
+        strategy: true,
+        orders: { orderBy: { createdAt: 'asc' } },
+        subPositions: { orderBy: { level: 'asc' } },
+      },
     });
     if (!position) throw new NotFoundException('Open paper position not found');
     if (!position.strategy.paperTrading) throw new BadRequestException('Strategy is not in paper mode');
@@ -196,6 +210,8 @@ export class PaperTradingService {
       : null;
     const takeProfitPrice =
       averageEntryPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
+    const subPositionTakeProfitPrice =
+      marketPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
@@ -216,6 +232,19 @@ export class PaperTradingService {
         },
       });
 
+      if (allocation.independent) {
+        await tx.tradingSubPosition.create({
+          data: {
+            positionId: position.id,
+            level: nextLevel,
+            quantity,
+            costQuote: allocation.quoteAmount,
+            entryPrice: marketPrice,
+            takeProfitPrice: subPositionTakeProfitPrice,
+          },
+        });
+      }
+
       await tx.tradingPosition.update({
         where: { id: position.id },
         data: {
@@ -230,7 +259,90 @@ export class PaperTradingService {
 
       return tx.tradingPosition.findUnique({
         where: { id: position.id },
-        include: { orders: { orderBy: { createdAt: 'asc' } }, strategy: true },
+        include: {
+          orders: { orderBy: { createdAt: 'asc' } },
+          subPositions: { orderBy: { level: 'asc' } },
+          strategy: true,
+        },
+      });
+    });
+  }
+
+  private async closeEligibleSubPositions(position: any, marketPrice: number) {
+    const eligible = position.subPositions.filter(
+      (subPosition: any) =>
+        subPosition.status === 'OPEN' &&
+        marketPrice >= Number(subPosition.takeProfitPrice),
+    );
+    if (!eligible.length) return position;
+
+    return this.prisma.$transaction(async (tx) => {
+      let totalQuantity = Number(position.totalQuantity);
+      let totalCostQuote = Number(position.totalCostQuote);
+      let realizedPnlQuote = Number(position.realizedPnlQuote);
+
+      for (const subPosition of eligible) {
+        const quantity = Number(subPosition.quantity);
+        const costQuote = Number(subPosition.costQuote);
+        const proceeds = quantity * marketPrice;
+        const pnl = proceeds - costQuote;
+
+        await tx.tradingOrder.create({
+          data: {
+            userId: position.userId,
+            positionId: position.id,
+            clientOrderId: `paper-${randomUUID()}`,
+            side: 'SELL',
+            type: 'MARKET',
+            status: 'FILLED',
+            level: subPosition.level,
+            independent: true,
+            quantity,
+            price: marketPrice,
+            filledQuantity: quantity,
+            quoteAmount: proceeds,
+            averageFillPrice: marketPrice,
+          },
+        });
+
+        await tx.tradingSubPosition.update({
+          where: { id: subPosition.id },
+          data: {
+            status: 'CLOSED',
+            realizedPnlQuote: pnl,
+            closedAt: new Date(),
+          },
+        });
+
+        totalQuantity -= quantity;
+        totalCostQuote -= costQuote;
+        realizedPnlQuote += pnl;
+      }
+
+      const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
+      const takeProfitPrice =
+        totalQuantity > 0
+          ? averageEntryPrice * (1 + Number(position.strategy.takeProfitPercent) / 100)
+          : null;
+
+      await tx.tradingPosition.update({
+        where: { id: position.id },
+        data: {
+          totalQuantity,
+          totalCostQuote,
+          averageEntryPrice,
+          realizedPnlQuote,
+          takeProfitPrice,
+        },
+      });
+
+      return tx.tradingPosition.findUnique({
+        where: { id: position.id },
+        include: {
+          orders: { orderBy: { createdAt: 'asc' } },
+          subPositions: { orderBy: { level: 'asc' } },
+          strategy: true,
+        },
       });
     });
   }
@@ -238,7 +350,8 @@ export class PaperTradingService {
   private async executeClose(position: any, marketPrice: number) {
     const quantity = Number(position.totalQuantity);
     const proceeds = quantity * marketPrice;
-    const realizedPnlQuote = proceeds - Number(position.totalCostQuote);
+    const realizedPnlQuote =
+      Number(position.realizedPnlQuote) + proceeds - Number(position.totalCostQuote);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
@@ -259,6 +372,11 @@ export class PaperTradingService {
         },
       });
 
+      await tx.tradingSubPosition.updateMany({
+        where: { positionId: position.id, status: 'OPEN' },
+        data: { status: 'CLOSED', closedAt: new Date() },
+      });
+
       await tx.tradingPosition.update({
         where: { id: position.id },
         data: {
@@ -272,7 +390,11 @@ export class PaperTradingService {
 
       return tx.tradingPosition.findUnique({
         where: { id: position.id },
-        include: { orders: { orderBy: { createdAt: 'asc' } }, strategy: true },
+        include: {
+          orders: { orderBy: { createdAt: 'asc' } },
+          subPositions: { orderBy: { level: 'asc' } },
+          strategy: true,
+        },
       });
     });
   }
