@@ -162,6 +162,11 @@ export function DashboardPage() {
     window.localStorage.setItem(browserNotificationStorageKey, String(enabled));
   }
 
+  function disableBrowserNotifications() {
+    setBrowserNotificationsEnabled(false);
+    window.localStorage.setItem(browserNotificationStorageKey, 'false');
+  }
+
   useEffect(() => {
     if (
       !token ||
@@ -375,14 +380,24 @@ export function DashboardPage() {
               <h2 className="mt-1 text-3xl font-semibold tracking-tight">{pageTitle}</h2>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {'Notification' in window && !browserNotificationsEnabled && (
-                <button
-                  type="button"
-                  onClick={() => void enableBrowserNotifications()}
-                  className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20"
-                >
-                  Enable browser alerts
-                </button>
+              {'Notification' in window && (
+                browserNotificationsEnabled ? (
+                  <button
+                    type="button"
+                    onClick={disableBrowserNotifications}
+                    className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08]"
+                  >
+                    Disable browser alerts
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void enableBrowserNotifications()}
+                    className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20"
+                  >
+                    Enable browser alerts
+                  </button>
+                )
               )}
               <button
                 type="button"
