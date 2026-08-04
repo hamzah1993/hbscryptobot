@@ -20,6 +20,24 @@ type Props = {
 
 const intervals: BinanceKlineInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
 
+const intervalSeconds: Record<BinanceKlineInterval, number | null> = {
+  '1m': 60,
+  '3m': 180,
+  '5m': 300,
+  '15m': 900,
+  '30m': 1800,
+  '1h': 3600,
+  '2h': 7200,
+  '4h': 14400,
+  '6h': 21600,
+  '8h': 28800,
+  '12h': 43200,
+  '1d': 86400,
+  '3d': 259200,
+  '1w': 604800,
+  '1M': null,
+};
+
 const markerKind = (order: TestnetOrder): TradingViewOrderMarker['kind'] => {
   switch (order.strategyAction?.type) {
     case 'DCA_ENTRY':
@@ -63,6 +81,7 @@ export function MarketChartPanel({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [streaming, setStreaming] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +127,75 @@ export function MarketChartPanel({ token }: Props) {
       cancelled = true;
     };
   }, [token, symbol, interval, environment, refreshKey]);
+
+  useEffect(() => {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const bucketSize = intervalSeconds[interval];
+    if (!normalizedSymbol || bucketSize === null) return;
+
+    let cancelled = false;
+    let pollTimer: number | undefined;
+
+    const start = async () => {
+      try {
+        await api.subscribeMarketStream(token, normalizedSymbol, environment);
+        if (!cancelled) setStreaming(true);
+      } catch {
+        if (!cancelled) setStreaming(false);
+      }
+
+      const poll = async () => {
+        try {
+          const streamed = await api.getStreamedMarketPrice(token, normalizedSymbol, environment);
+          if (!cancelled && streamed && Number.isFinite(streamed.price)) {
+            const candleTime = Math.floor(streamed.eventTime / 1000 / bucketSize) * bucketSize;
+            setCandles((current) => {
+              if (current.length === 0) return current;
+              const last = current[current.length - 1];
+              if (candleTime < last.time) return current;
+
+              if (candleTime === last.time) {
+                const updated: MarketCandle = {
+                  ...last,
+                  high: Math.max(last.high, streamed.price),
+                  low: Math.min(last.low, streamed.price),
+                  close: streamed.price,
+                  closeTime: (candleTime + bucketSize) * 1000 - 1,
+                };
+                return [...current.slice(0, -1), updated];
+              }
+
+              const next: MarketCandle = {
+                time: candleTime,
+                open: last.close,
+                high: streamed.price,
+                low: streamed.price,
+                close: streamed.price,
+                volume: 0,
+                closeTime: (candleTime + bucketSize) * 1000 - 1,
+              };
+              return [...current.slice(-299), next];
+            });
+          }
+        } catch {
+          if (!cancelled) setStreaming(false);
+        } finally {
+          if (!cancelled) pollTimer = window.setTimeout(poll, 2000);
+        }
+      };
+
+      void poll();
+    };
+
+    void start();
+
+    return () => {
+      cancelled = true;
+      setStreaming(false);
+      if (pollTimer) window.clearTimeout(pollTimer);
+      void api.unsubscribeMarketStream(token, normalizedSymbol, environment).catch(() => undefined);
+    };
+  }, [token, symbol, interval, environment]);
 
   const chartData = useMemo<TradingViewCandle[]>(
     () => candles.map((candle) => ({
@@ -184,6 +272,9 @@ export function MarketChartPanel({ token }: Props) {
             <h3 className="text-lg font-semibold">TradingView market chart</h3>
             <span className="rounded-full border border-white/10 bg-slate-950/30 px-2.5 py-1 text-xs uppercase tracking-wider text-slate-400">
               Public market data
+            </span>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${streaming ? 'bg-emerald-400/15 text-emerald-300' : 'bg-slate-400/10 text-slate-400'}`}>
+              {streaming ? 'Live updates' : 'Snapshot only'}
             </span>
           </div>
           <p className="mt-2 text-sm text-slate-400">
