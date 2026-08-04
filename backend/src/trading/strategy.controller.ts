@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
+import { TestnetActionTimelineService } from './testnet-action-timeline.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 interface AuthenticatedRequest extends Request {
@@ -16,6 +17,7 @@ export class StrategyController {
     private readonly strategies: StrategyService,
     private readonly runner: PaperStrategyRunnerService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
+    private readonly testnetTimeline: TestnetActionTimelineService,
   ) {}
 
   @Get()
@@ -37,6 +39,14 @@ export class StrategyController {
     @Query('limit') limit?: string,
   ) {
     return this.testnetExecution.listPositions(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Get('testnet-actions')
+  listTestnetActions(
+    @Req() request: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    return this.testnetTimeline.list(request.user.sub, Number(limit ?? 100));
   }
 
   @Post()
