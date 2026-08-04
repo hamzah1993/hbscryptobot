@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma, type NotificationSeverity as PrismaNotificationSeverity } from '@prisma/client';
 import { createHmac, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,7 +46,7 @@ export type NotificationWebhookMetrics = {
 };
 
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnModuleInit {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly recent: StoredOperationalNotification[] = [];
   private readonly maxRecent = 500;
@@ -69,6 +69,10 @@ export class NotificationsService {
   };
 
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.restoreWebhookMetricsSnapshot();
+  }
 
   publish(notification: OperationalNotification): void {
     const stored: StoredOperationalNotification = {
@@ -189,6 +193,27 @@ export class NotificationsService {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown notification persistence error';
       this.logger.warn(`Operational notification persistence failed for ${notification.id}: ${message}`);
+    }
+  }
+
+  private async restoreWebhookMetricsSnapshot(): Promise<void> {
+    try {
+      const snapshot = await this.prisma.notificationWebhookMetricsSnapshot.findFirst({
+        orderBy: { recordedAt: 'desc' },
+      });
+      if (!snapshot) return;
+
+      this.webhookMetrics.attempted = snapshot.attempted;
+      this.webhookMetrics.delivered = snapshot.delivered;
+      this.webhookMetrics.failed = snapshot.failed;
+      this.webhookMetrics.retried = snapshot.retried;
+      this.webhookMetrics.lastAttemptAt = snapshot.lastAttemptAt?.toISOString();
+      this.webhookMetrics.lastSuccessAt = snapshot.lastSuccessAt?.toISOString();
+      this.webhookMetrics.lastFailureAt = snapshot.lastFailureAt?.toISOString();
+      this.webhookMetrics.lastStatusCode = snapshot.lastStatusCode ?? undefined;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown webhook metrics restore error';
+      this.logger.warn(`Notification webhook metrics snapshot restore failed: ${message}`);
     }
   }
 
