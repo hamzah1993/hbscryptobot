@@ -58,6 +58,22 @@ enum OrderStatus {
   FAILED
 }
 
+enum StrategyActionType {
+  INITIAL_ENTRY
+  DCA_ENTRY
+  INDEPENDENT_ENTRY
+  PARENT_EXIT
+  INDEPENDENT_EXIT
+}
+
+enum StrategyActionStatus {
+  PENDING
+  SUBMITTED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 model User {
   id                  String               @id @default(uuid())
   email               String               @unique
@@ -68,6 +84,7 @@ model User {
   strategies          TradingStrategy[]
   positions           TradingPosition[]
   orders              TradingOrder[]
+  strategyActions     StrategyAction[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 }
@@ -106,6 +123,7 @@ model TradingStrategy {
   takeProfitPercent     Decimal               @db.Decimal(10, 4)
   independentFromLevel  Int                   @default(5)
   positions             TradingPosition[]
+  actions               StrategyAction[]
   user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -129,6 +147,7 @@ model TradingPosition {
   takeProfitPrice   Decimal?             @db.Decimal(28, 12)
   orders            TradingOrder[]
   subPositions      TradingSubPosition[]
+  actions           StrategyAction[]
   strategy          TradingStrategy      @relation(fields: [strategyId], references: [id], onDelete: Cascade)
   user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   openedAt          DateTime             @default(now())
@@ -176,6 +195,7 @@ model TradingOrder {
   accountedFilledQuantity  Decimal         @default(0) @db.Decimal(28, 12)
   accountedQuoteAmount     Decimal         @default(0) @db.Decimal(28, 8)
   errorMessage             String?
+  strategyAction           StrategyAction?
   position                 TradingPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
   user                     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt                DateTime        @default(now())
@@ -183,4 +203,33 @@ model TradingOrder {
 
   @@index([positionId, status])
   @@index([userId, createdAt])
+}
+
+model StrategyAction {
+  id          String               @id @default(uuid())
+  userId      String
+  strategyId  String
+  positionId  String?
+  orderId     String?              @unique
+  actionKey   String               @unique
+  type        StrategyActionType
+  status      StrategyActionStatus @default(PENDING)
+  level       Int?
+  independent Boolean              @default(false)
+  side        OrderSide
+  quantity    Decimal?             @db.Decimal(28, 12)
+  quoteAmount Decimal?             @db.Decimal(28, 8)
+  triggerPrice Decimal?            @db.Decimal(28, 12)
+  errorMessage String?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  completedAt DateTime?
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy    TradingStrategy      @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  position    TradingPosition?     @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  order       TradingOrder?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([strategyId, status])
+  @@index([userId, createdAt])
+  @@index([positionId, status])
 }
