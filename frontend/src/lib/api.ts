@@ -33,6 +33,22 @@ export type TradingSubPosition = {
 export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
 export type BinanceStreamEnvironment = 'testnet' | 'live';
 export type ExchangeEnvironment = 'TESTNET' | 'LIVE';
+export type BinanceKlineInterval =
+  | '1m'
+  | '3m'
+  | '5m'
+  | '15m'
+  | '30m'
+  | '1h'
+  | '2h'
+  | '4h'
+  | '6h'
+  | '8h'
+  | '12h'
+  | '1d'
+  | '3d'
+  | '1w'
+  | '1M';
 export type TestnetOrderStatus = 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'REJECTED' | 'CANCELLED';
 export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 export type TestnetActionStatus = 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
@@ -231,6 +247,23 @@ export type TestnetEmergencyStopResponse = {
   cancelledPendingActions: number;
 };
 
+export type MarketCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  closeTime: number;
+};
+
+export type MarketCandlesResponse = {
+  symbol: string;
+  interval: BinanceKlineInterval;
+  environment: BinanceStreamEnvironment;
+  candles: MarketCandle[];
+};
+
 export type StreamedMarketPrice = {
   symbol: string;
   price: number;
@@ -353,6 +386,17 @@ export const api = {
       headers: authHeaders(token),
       body: JSON.stringify({ environment: toBinanceEnvironment(environment) }),
     }),
+  getMarketCandles: (
+    token: string,
+    symbol: string,
+    interval: BinanceKlineInterval = '5m',
+    limit = 200,
+    environment: BinanceStreamEnvironment = 'live',
+  ) =>
+    request<MarketCandlesResponse>(
+      `/market-data/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(String(limit))}&environment=${environment}`,
+      { headers: authHeaders(token) },
+    ),
   subscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<MarketStreamStatus>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
       method: 'POST',
