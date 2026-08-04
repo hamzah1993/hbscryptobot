@@ -14,7 +14,12 @@ describe('TestnetStrategyRunnerService', () => {
     positions: [],
   };
 
-  function createService(strategies: any[], price: number, executionResult: any = {}) {
+  function createService(
+    strategies: any[],
+    price: number,
+    executionResult: any = {},
+    lockAcquired = true,
+  ) {
     const prisma = {
       tradingStrategy: {
         findMany: jest.fn().mockResolvedValue(strategies),
@@ -30,17 +35,29 @@ describe('TestnetStrategyRunnerService', () => {
         ...executionResult,
       }),
     } as any;
+    const redisLock = {
+      acquire: jest
+        .fn()
+        .mockResolvedValue(lockAcquired ? { key: 'strategy-lock', token: 'token' } : null),
+      release: jest.fn().mockResolvedValue(true),
+    } as any;
 
     return {
-      service: new TestnetStrategyRunnerService(prisma, marketData, testnetExecution),
+      service: new TestnetStrategyRunnerService(
+        prisma,
+        marketData,
+        testnetExecution,
+        redisLock,
+      ),
       prisma,
       marketData,
       testnetExecution,
+      redisLock,
     };
   }
 
   it('opens an initial Testnet position with a stable action key', async () => {
-    const { service, testnetExecution } = createService([baseStrategy], 50);
+    const { service, testnetExecution, redisLock } = createService([baseStrategy], 50);
 
     const result = await service.runUserStrategies(userId);
 
@@ -55,6 +72,7 @@ describe('TestnetStrategyRunnerService', () => {
       triggerPrice: 50,
       allowRunningStrategy: true,
     });
+    expect(redisLock.release).toHaveBeenCalledTimes(1);
   });
 
   it('submits a parent DCA before the independent level', async () => {
@@ -203,11 +221,31 @@ describe('TestnetStrategyRunnerService', () => {
   });
 
   it('returns ERROR when the exchange execution fails', async () => {
-    const { service, testnetExecution } = createService([baseStrategy], 50);
+    const { service, testnetExecution, redisLock } = createService([baseStrategy], 50);
     testnetExecution.executeMarketOrder.mockRejectedValue(new Error('Binance unavailable'));
 
     const result = await service.runUserStrategies(userId);
 
     expect(result[0]).toMatchObject({ action: 'ERROR', message: 'Binance unavailable' });
+    expect(redisLock.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips execution when another instance owns the strategy lock', async () => {
+    const { service, marketData, testnetExecution, redisLock } = createService(
+      [baseStrategy],
+      50,
+      {},
+      false,
+    );
+
+    const result = await service.runUserStrategies(userId);
+
+    expect(result[0]).toMatchObject({
+      action: 'SKIP',
+      message: 'Strategy tick is already running on another instance',
+    });
+    expect(marketData.getQuote).not.toHaveBeenCalled();
+    expect(testnetExecution.executeMarketOrder).not.toHaveBeenCalled();
+    expect(redisLock.release).not.toHaveBeenCalled();
   });
 });
