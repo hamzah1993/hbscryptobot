@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
-import { api, type TradingPosition } from '../lib/api';
+import { api, type StrategyStatus, type TradingPosition } from '../lib/api';
 
 const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Exchange accounts', 'Trade history'];
 
@@ -18,6 +18,7 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreateBot, setShowCreateBot] = useState(false);
   const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
+  const [updatingStrategyId, setUpdatingStrategyId] = useState<string | null>(null);
 
   function loadPositions() {
     if (!token) {
@@ -37,10 +38,28 @@ export function DashboardPage() {
     loadPositions();
   }, [token]);
 
+  async function updateStrategyStatus(strategyId: string, status: StrategyStatus) {
+    if (!token) return;
+    setUpdatingStrategyId(strategyId);
+    setError(null);
+    try {
+      const strategy = await api.setStrategyStatus(token, strategyId, status);
+      setPositions((current) => current.map((position) => (
+        position.strategy.id === strategyId
+          ? { ...position, strategy: { ...position.strategy, ...strategy } }
+          : position
+      )));
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Unable to update strategy');
+    } finally {
+      setUpdatingStrategyId(null);
+    }
+  }
+
   const openPositions = positions.filter((position) => position.status === 'OPEN');
   const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
   const realizedPnl = positions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
-  const runningBots = new Set(openPositions.map((position) => position.strategy.id)).size;
+  const runningBots = new Set(openPositions.filter((position) => position.strategy.status === 'RUNNING').map((position) => position.strategy.id)).size;
   const independentPositions = positions.flatMap((position) => position.subPositions ?? []);
   const openIndependentPositions = independentPositions.filter((subPosition) => subPosition.status === 'OPEN');
 
@@ -52,7 +71,7 @@ export function DashboardPage() {
   const stats = [
     { label: 'Allocated capital', value: money(invested), change: `${openPositions.length} open position${openPositions.length === 1 ? '' : 's'}` },
     { label: 'Realized P&L', value: money(realizedPnl), change: realizedPnl >= 0 ? 'Paper trading gains' : 'Paper trading loss' },
-    { label: 'Running bots', value: String(runningBots), change: 'Paper strategies with open positions' },
+    { label: 'Running bots', value: String(runningBots), change: 'Strategies actively processed by the scheduler' },
     { label: 'Independent legs', value: String(openIndependentPositions.length), change: `${independentPositions.length} total sub-position${independentPositions.length === 1 ? '' : 's'}` },
   ];
 
@@ -137,23 +156,37 @@ export function DashboardPage() {
                 {positions.map((position) => {
                   const subPositions = position.subPositions ?? [];
                   const isExpanded = expandedPositionId === position.id;
+                  const strategyStatus = position.strategy.status ?? 'STOPPED';
+                  const isUpdating = updatingStrategyId === position.strategy.id;
 
                   return (
                     <article key={position.id} className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/20">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedPositionId(isExpanded ? null : position.id)}
-                        className="grid w-full gap-4 px-4 py-4 text-left sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_auto] sm:items-center"
-                      >
-                        <div>
+                      <div className="grid gap-4 px-4 py-4 sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_auto] sm:items-center">
+                        <button type="button" onClick={() => setExpandedPositionId(isExpanded ? null : position.id)} className="text-left">
                           <p className="font-semibold">{position.symbol}</p>
                           <p className="mt-1 text-xs text-slate-500">{position.strategy.name}</p>
+                        </button>
+                        <div className="space-y-2">
+                          <span className={`rounded-full px-2.5 py-1 text-xs ${position.status === 'OPEN' ? 'bg-cyan-400/10 text-cyan-300' : 'bg-slate-400/10 text-slate-300'}`}>{position.status}</span>
+                          <div><span className={`rounded-full px-2.5 py-1 text-xs ${strategyStatus === 'RUNNING' ? 'bg-emerald-400/10 text-emerald-300' : strategyStatus === 'PAUSED' ? 'bg-amber-400/10 text-amber-300' : 'bg-slate-400/10 text-slate-300'}`}>{strategyStatus}</span></div>
                         </div>
-                        <div><span className={`rounded-full px-2.5 py-1 text-xs ${position.status === 'OPEN' ? 'bg-cyan-400/10 text-cyan-300' : 'bg-slate-400/10 text-slate-300'}`}>{position.status}</span></div>
                         <div><p className="text-xs text-slate-500">Invested</p><p className="mt-1">{money(Number(position.totalCostQuote))}</p></div>
                         <div><p className="text-xs text-slate-500">Independent legs</p><p className="mt-1">{subPositions.filter((subPosition) => subPosition.status === 'OPEN').length}/{subPositions.length}</p></div>
-                        <span className="text-sm text-cyan-300">{isExpanded ? 'Hide' : 'Details'}</span>
-                      </button>
+                        <button type="button" onClick={() => setExpandedPositionId(isExpanded ? null : position.id)} className="text-sm text-cyan-300">{isExpanded ? 'Hide' : 'Details'}</button>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 border-t border-white/10 px-4 py-3">
+                        {strategyStatus !== 'RUNNING' && (
+                          <button disabled={isUpdating} onClick={() => updateStrategyStatus(position.strategy.id, 'RUNNING')} className="rounded-lg bg-emerald-400 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">Start</button>
+                        )}
+                        {strategyStatus === 'RUNNING' && (
+                          <button disabled={isUpdating} onClick={() => updateStrategyStatus(position.strategy.id, 'PAUSED')} className="rounded-lg bg-amber-300 px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">Pause</button>
+                        )}
+                        {strategyStatus !== 'STOPPED' && (
+                          <button disabled={isUpdating} onClick={() => updateStrategyStatus(position.strategy.id, 'STOPPED')} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-200 disabled:opacity-50">Stop</button>
+                        )}
+                        {isUpdating && <span className="self-center text-xs text-slate-500">Updating strategy…</span>}
+                      </div>
 
                       {isExpanded && (
                         <div className="border-t border-white/10 px-4 py-4">

@@ -30,11 +30,13 @@ export type TradingSubPosition = {
   closedAt: string | null;
 };
 
+export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
+
 export type TradingStrategy = {
   id: string;
   name: string;
   symbol: string;
-  status?: 'STOPPED' | 'RUNNING' | 'PAUSED';
+  status?: StrategyStatus;
   environment?: 'TESTNET' | 'LIVE';
   paperTrading: boolean;
   riskBudgetQuote: string;
@@ -116,6 +118,12 @@ export const api = {
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify(payload),
+    }),
+  setStrategyStatus: (token: string, strategyId: string, status: StrategyStatus) =>
+    request<TradingStrategy>(`/strategies/${strategyId}/status`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ status }),
     }),
   openPaperPosition: (token: string, strategyId: string, marketPrice: number) =>
     request<TradingPosition>('/paper-trading/positions/open', {
