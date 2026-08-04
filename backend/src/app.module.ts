@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { BinanceModule } from './exchange/binance/binance.module';
 import { ExchangeCredentialsModule } from './exchange/credentials/exchange-credentials.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
 
 const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expiresIn'];
@@ -24,6 +25,7 @@ const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expire
     UsersModule,
     ExchangeCredentialsModule,
     BinanceModule,
+    TradingEngineModule,
   ],
   controllers: [AppController],
 })
