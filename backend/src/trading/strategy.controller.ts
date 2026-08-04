@@ -31,6 +31,14 @@ export class StrategyController {
     return this.testnetExecution.listOrders(request.user.sub, Number(limit ?? 100));
   }
 
+  @Get('testnet-positions')
+  listTestnetPositions(
+    @Req() request: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    return this.testnetExecution.listPositions(request.user.sub, Number(limit ?? 100));
+  }
+
   @Post()
   create(@Req() request: AuthenticatedRequest, @Body() body: StrategyInput) {
     return this.strategies.create(request.user.sub, body);
