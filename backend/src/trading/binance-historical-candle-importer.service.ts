@@ -9,6 +9,8 @@ export type BinanceHistoricalCandleImportRequest = {
   symbol: string;
   interval?: BinanceKlineInterval;
   limit?: number;
+  startTime?: number;
+  endTime?: number;
 };
 
 export type BinanceHistoricalCandleImportResult = {
@@ -16,6 +18,8 @@ export type BinanceHistoricalCandleImportResult = {
   interval: BinanceKlineInterval;
   requested: number;
   imported: number;
+  startTime?: number;
+  endTime?: number;
 };
 
 @Injectable()
@@ -35,7 +39,10 @@ export class BinanceHistoricalCandleImporterService {
       throw new BadRequestException('Candle import limit must be an integer between 1 and 1000');
     }
 
-    const klines = await this.binance.getKlines(symbol, interval, limit, 'live');
+    const klines = await this.binance.getKlines(symbol, interval, limit, 'live', {
+      startTime: request.startTime,
+      endTime: request.endTime,
+    });
     const imported = await this.ingestion.upsertMany(
       klines.map((kline) => ({
         symbol,
@@ -55,6 +62,8 @@ export class BinanceHistoricalCandleImporterService {
       interval,
       requested: limit,
       imported,
+      startTime: request.startTime,
+      endTime: request.endTime,
     };
   }
 }
