@@ -208,7 +208,7 @@ export class PaperTradingService {
     const nextDcaPrice = following
       ? baseEntryPrice * (1 - following.triggerDropPercent / 100)
       : null;
-    const takeProfitPrice =
+    const parentTakeProfitPrice =
       averageEntryPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
     const subPositionTakeProfitPrice =
       marketPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
@@ -253,7 +253,9 @@ export class PaperTradingService {
           averageEntryPrice,
           dcaCount: position.dcaCount + 1,
           nextDcaPrice,
-          takeProfitPrice,
+          takeProfitPrice: allocation.independent
+            ? Number(position.takeProfitPrice ?? parentTakeProfitPrice)
+            : parentTakeProfitPrice,
         },
       });
 
