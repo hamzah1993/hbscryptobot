@@ -3,33 +3,39 @@ import { NotificationRetentionScheduler } from './notification-retention.schedul
 import type { NotificationsService } from './notifications.service';
 
 describe('NotificationRetentionScheduler', () => {
-  it('runs retention cleanup', async () => {
-    const notifications = {
-      cleanupExpired: jest.fn().mockResolvedValue(0),
-    } as unknown as NotificationsService;
+  const createNotifications = (notificationsDeleted = 0, metricsSnapshotsDeleted = 0) =>
+    ({
+      cleanupExpired: jest.fn().mockResolvedValue(notificationsDeleted),
+      cleanupExpiredWebhookMetricsSnapshots: jest
+        .fn()
+        .mockResolvedValue(metricsSnapshotsDeleted),
+    }) as unknown as NotificationsService;
+
+  it('runs both retention cleanup operations', async () => {
+    const notifications = createNotifications();
     const scheduler = new NotificationRetentionScheduler(notifications);
 
     await scheduler.cleanupExpiredNotifications();
 
     expect(notifications.cleanupExpired).toHaveBeenCalledTimes(1);
+    expect(notifications.cleanupExpiredWebhookMetricsSnapshots).toHaveBeenCalledTimes(1);
   });
 
-  it('logs the deleted notification count when cleanup removes records', async () => {
-    const notifications = {
-      cleanupExpired: jest.fn().mockResolvedValue(12),
-    } as unknown as NotificationsService;
+  it('logs separate deletion counts for notifications and webhook metrics snapshots', async () => {
+    const notifications = createNotifications(12, 4);
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     const scheduler = new NotificationRetentionScheduler(notifications);
 
     await scheduler.cleanupExpiredNotifications();
 
     expect(log).toHaveBeenCalledWith('Deleted 12 expired operational notification(s)');
+    expect(log).toHaveBeenCalledWith(
+      'Deleted 4 expired notification webhook metrics snapshot(s)',
+    );
   });
 
-  it('does not log a deletion message when no records are removed', async () => {
-    const notifications = {
-      cleanupExpired: jest.fn().mockResolvedValue(0),
-    } as unknown as NotificationsService;
+  it('does not log deletion messages when no records are removed', async () => {
+    const notifications = createNotifications();
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     const scheduler = new NotificationRetentionScheduler(notifications);
 
