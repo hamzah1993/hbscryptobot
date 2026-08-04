@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { CreateBotWizard } from '../components/CreateBotWizard';
 import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { MarketChartPanel } from '../components/MarketChartPanel';
+import { NotificationsPanel } from '../components/NotificationsPanel';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
 import { TestnetActionTimelinePanel } from '../components/TestnetActionTimelinePanel';
 import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
@@ -16,7 +17,7 @@ import {
   type TradingPosition,
 } from '../lib/api';
 
-const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Exchange accounts', 'Trade history'];
+const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Notifications', 'Exchange accounts', 'Trade history'];
 
 function money(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -66,7 +67,8 @@ export function DashboardPage() {
       activeNav === 'Exchange accounts' ||
       activeNav === 'Trade history' ||
       activeNav === 'Positions' ||
-      activeNav === 'Strategies'
+      activeNav === 'Strategies' ||
+      activeNav === 'Notifications'
     ) return;
     let cancelled = false;
 
@@ -178,7 +180,8 @@ export function DashboardPage() {
     activeNav === 'Exchange accounts' ||
     activeNav === 'Trade history' ||
     activeNav === 'Positions' ||
-    activeNav === 'Strategies';
+    activeNav === 'Strategies' ||
+    activeNav === 'Notifications';
   const pageTitle = activeNav === 'Exchange accounts'
     ? 'Exchange accounts'
     : activeNav === 'Trade history'
@@ -187,7 +190,9 @@ export function DashboardPage() {
         ? 'Testnet positions'
         : activeNav === 'Strategies'
           ? 'Strategy action timeline'
-          : 'Trading dashboard';
+          : activeNav === 'Notifications'
+            ? 'Operational notifications'
+            : 'Trading dashboard';
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
@@ -296,6 +301,8 @@ export function DashboardPage() {
             <TestnetPositionsPanel token={token} />
           ) : activeNav === 'Strategies' && token ? (
             <TestnetActionTimelinePanel token={token} />
+          ) : activeNav === 'Notifications' && token ? (
+            <NotificationsPanel token={token} />
           ) : (
             <>
               {error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
@@ -458,13 +465,13 @@ export function DashboardPage() {
                                       </thead>
                                       <tbody>
                                         {subPositions.map((subPosition) => (
-                                          <tr key={subPosition.id} className="border-t border-white/10">
-                                            <td className="py-3 font-medium">#{subPosition.level}</td>
-                                            <td className="py-3"><span className={`rounded-full px-2.5 py-1 text-xs ${subPosition.status === 'OPEN' ? 'bg-violet-400/10 text-violet-300' : 'bg-emerald-400/10 text-emerald-300'}`}>{subPosition.status}</span></td>
+                                          <tr key={subPosition.id} className="border-t border-white/5">
+                                            <td className="py-3">#{subPosition.level}</td>
+                                            <td className="py-3">{subPosition.status}</td>
                                             <td className="py-3">{money(Number(subPosition.costQuote))}</td>
                                             <td className="py-3">{money(Number(subPosition.entryPrice))}</td>
                                             <td className="py-3">{money(Number(subPosition.takeProfitPrice))}</td>
-                                            <td className={`py-3 font-medium ${Number(subPosition.realizedPnlQuote) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{money(Number(subPosition.realizedPnlQuote))}</td>
+                                            <td className={`py-3 ${Number(subPosition.realizedPnlQuote) >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{money(Number(subPosition.realizedPnlQuote))}</td>
                                           </tr>
                                         ))}
                                       </tbody>
