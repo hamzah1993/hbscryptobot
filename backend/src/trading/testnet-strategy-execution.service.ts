@@ -124,6 +124,8 @@ export class TestnetStrategyExecutionService {
 
       const savedOrder = await this.prisma.$transaction(async (tx) => {
         let position = openPosition;
+        let subPositionId: string | null = null;
+        const independentEntry = actionType === 'INDEPENDENT_ENTRY' && input.side === 'BUY';
 
         if (!position && input.side === 'BUY') {
           position = await tx.tradingPosition.create({
@@ -132,14 +134,14 @@ export class TestnetStrategyExecutionService {
               strategyId: strategy.id,
               symbol: strategy.symbol,
               status: 'OPEN',
-              totalQuantity: executedQuantity,
-              totalCostQuote: quoteAmount,
-              averageEntryPrice: averageFillPrice,
+              totalQuantity: independentEntry ? 0 : executedQuantity,
+              totalCostQuote: independentEntry ? 0 : quoteAmount,
+              averageEntryPrice: independentEntry ? 0 : averageFillPrice,
               realizedPnlQuote: 0,
               dcaCount: 0,
             },
           });
-        } else if (position && input.side === 'BUY') {
+        } else if (position && input.side === 'BUY' && !independentEntry) {
           const previousQuantity = Number(position.totalQuantity);
           const previousCost = Number(position.totalCostQuote);
           const totalQuantity = previousQuantity + executedQuantity;
@@ -184,14 +186,41 @@ export class TestnetStrategyExecutionService {
         if (!position) throw new BadRequestException('Unable to resolve a testnet trading position');
 
         const level =
-          input.side === 'BUY'
+          input.level ??
+          (input.side === 'BUY'
             ? (await tx.tradingOrder.count({ where: { positionId: position.id, side: 'BUY' } })) + 1
-            : Math.max(position.dcaCount + 1, 1);
+            : Math.max(position.dcaCount + 1, 1));
 
-        return tx.tradingOrder.create({
+        if (independentEntry && executedQuantity > 0) {
+          const takeProfitPrice = averageFillPrice * (1 + Number(strategy.takeProfitPercent) / 100);
+          const subPosition = await tx.tradingSubPosition.upsert({
+            where: { positionId_level: { positionId: position.id, level } },
+            create: {
+              positionId: position.id,
+              level,
+              status: 'OPEN',
+              quantity: executedQuantity,
+              costQuote: quoteAmount,
+              entryPrice: averageFillPrice,
+              takeProfitPrice,
+            },
+            update: {
+              status: 'OPEN',
+              quantity: executedQuantity,
+              costQuote: quoteAmount,
+              entryPrice: averageFillPrice,
+              takeProfitPrice,
+              closedAt: null,
+            },
+          });
+          subPositionId = subPosition.id;
+        }
+
+        const order = await tx.tradingOrder.create({
           data: {
             userId,
             positionId: position.id,
+            subPositionId,
             exchangeOrderId: exchangeOrder.orderId ? String(exchangeOrder.orderId) : null,
             clientOrderId: exchangeOrder.clientOrderId ?? clientOrderId,
             side: input.side,
@@ -207,8 +236,17 @@ export class TestnetStrategyExecutionService {
             accountedQuoteAmount: quoteAmount,
             averageFillPrice: averageFillPrice || null,
           },
-          include: { position: true },
+          include: { position: true, subPosition: true },
         });
+
+        if (claimedActionId && subPositionId) {
+          await tx.strategyAction.update({
+            where: { id: claimedActionId },
+            data: { subPositionId },
+          });
+        }
+
+        return order;
       });
 
       if (claimedActionId) {
@@ -239,7 +277,7 @@ export class TestnetStrategyExecutionService {
   async syncOrder(userId: string, tradingOrderId: string) {
     const order = await this.prisma.tradingOrder.findFirst({
       where: { id: tradingOrderId, userId },
-      include: { position: { include: { strategy: true } }, strategyAction: true },
+      include: { position: { include: { strategy: true } }, strategyAction: true, subPosition: true },
     });
     if (!order) throw new NotFoundException('Trading order not found');
     if (!order.exchangeOrderId) {
@@ -271,7 +309,44 @@ export class TestnetStrategyExecutionService {
         });
         if (!currentPosition) throw new NotFoundException('Trading position not found');
 
-        if (order.side === 'BUY') {
+        if (order.independent && order.side === 'BUY') {
+          const existing = order.subPositionId
+            ? await tx.tradingSubPosition.findUnique({ where: { id: order.subPositionId } })
+            : await tx.tradingSubPosition.findUnique({
+                where: { positionId_level: { positionId: order.positionId, level: order.level } },
+              });
+          const previousQuantity = Number(existing?.quantity ?? 0);
+          const previousCost = Number(existing?.costQuote ?? 0);
+          const quantity = previousQuantity + deltaQuantity;
+          const costQuote = previousCost + deltaQuoteAmount;
+          const entryPrice = quantity > 0 ? costQuote / quantity : averageFillPrice;
+          const takeProfitPrice = entryPrice * (1 + Number(order.position.strategy.takeProfitPercent) / 100);
+          const subPosition = existing
+            ? await tx.tradingSubPosition.update({
+                where: { id: existing.id },
+                data: { quantity, costQuote, entryPrice, takeProfitPrice, status: 'OPEN', closedAt: null },
+              })
+            : await tx.tradingSubPosition.create({
+                data: {
+                  positionId: order.positionId,
+                  level: order.level,
+                  status: 'OPEN',
+                  quantity,
+                  costQuote,
+                  entryPrice,
+                  takeProfitPrice,
+                },
+              });
+          if (!order.subPositionId) {
+            await tx.tradingOrder.update({ where: { id: order.id }, data: { subPositionId: subPosition.id } });
+          }
+          if (order.strategyAction && !order.strategyAction.subPositionId) {
+            await tx.strategyAction.update({
+              where: { id: order.strategyAction.id },
+              data: { subPositionId: subPosition.id },
+            });
+          }
+        } else if (order.side === 'BUY') {
           const previousQuantity = Number(currentPosition.totalQuantity);
           const previousCost = Number(currentPosition.totalCostQuote);
           const totalQuantity = previousQuantity + deltaQuantity;
@@ -327,7 +402,7 @@ export class TestnetStrategyExecutionService {
           price: averageFillPrice || Number(exchangeOrder.price ?? 0) || null,
           averageFillPrice: averageFillPrice || null,
         },
-        include: { position: true },
+        include: { position: true, subPosition: true },
       });
     });
 
