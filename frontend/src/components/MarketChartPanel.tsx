@@ -6,7 +6,11 @@ import {
   type MarketCandle,
   type TestnetPosition,
 } from '../lib/api';
-import { TradingViewChart, type TradingViewCandle } from './TradingViewChart';
+import {
+  TradingViewChart,
+  type TradingViewCandle,
+  type TradingViewPriceLevel,
+} from './TradingViewChart';
 
 type Props = {
   token: string;
@@ -76,16 +80,24 @@ export function MarketChartPanel({ token }: Props) {
     [candles],
   );
 
-  const positionLevels = useMemo(() => positions.flatMap((position) => {
-    const levels = [
-      { label: 'Average entry', value: Number(position.averageEntryPrice) },
-      { label: 'Next DCA', value: Number(position.nextDcaPrice ?? 0) },
-      { label: 'Take profit', value: Number(position.takeProfitPrice ?? 0) },
+  const positionLevels = useMemo<TradingViewPriceLevel[]>(() => positions.flatMap((position) => {
+    const levels: TradingViewPriceLevel[] = [
+      { label: 'Average entry', value: Number(position.averageEntryPrice), kind: 'ENTRY' },
+      { label: 'Next DCA', value: Number(position.nextDcaPrice ?? 0), kind: 'DCA' },
+      { label: 'Take profit', value: Number(position.takeProfitPrice ?? 0), kind: 'TAKE_PROFIT' },
       ...position.subPositions
         .filter((subPosition) => subPosition.status === 'OPEN')
-        .flatMap((subPosition) => [
-          { label: `Independent #${subPosition.level} entry`, value: Number(subPosition.entryPrice) },
-          { label: `Independent #${subPosition.level} TP`, value: Number(subPosition.takeProfitPrice) },
+        .flatMap<TradingViewPriceLevel>((subPosition) => [
+          {
+            label: `Independent #${subPosition.level} entry`,
+            value: Number(subPosition.entryPrice),
+            kind: 'INDEPENDENT_ENTRY',
+          },
+          {
+            label: `Independent #${subPosition.level} TP`,
+            value: Number(subPosition.takeProfitPrice),
+            kind: 'INDEPENDENT_TAKE_PROFIT',
+          },
         ]),
     ];
 
@@ -154,6 +166,7 @@ export function MarketChartPanel({ token }: Props) {
       <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_220px]">
         <TradingViewChart
           data={chartData}
+          priceLevels={environment === 'testnet' ? positionLevels : []}
           loading={loading}
           emptyMessage={error ? 'Market candles could not be loaded.' : 'No candles returned for this market.'}
         />
