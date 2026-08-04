@@ -123,6 +123,11 @@ export function ExchangeAccountsPanel({ token }: Props) {
   }
 
   const nonZeroBalances = account?.balances?.filter((balance) => Number(balance.free) > 0 || Number(balance.locked) > 0) ?? [];
+  const availableAssets = nonZeroBalances.filter((balance) => Number(balance.free) > 0).length;
+  const lockedAssets = nonZeroBalances.filter((balance) => Number(balance.locked) > 0).length;
+  const connectionStatus = account ? 'Connected' : selectedCredential ? 'Credentials saved' : 'Not connected';
+  const tradingStatus = account ? (account.canTrade ? 'Enabled' : 'Unavailable') : 'Not tested';
+  const withdrawalStatus = account ? (account.canWithdraw ? 'Enabled' : 'Disabled') : 'Not tested';
 
   return (
     <section className="mt-6 space-y-6">
@@ -148,16 +153,28 @@ export function ExchangeAccountsPanel({ token }: Props) {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
             <p className="text-xs uppercase tracking-wider text-slate-500">Connection</p>
-            <p className={`mt-2 text-lg font-semibold ${selectedCredential ? 'text-emerald-300' : 'text-slate-300'}`}>
-              {loading ? 'Loading…' : selectedCredential ? 'Credentials saved' : 'Not connected'}
+            <p className={`mt-2 text-lg font-semibold ${account ? 'text-emerald-300' : selectedCredential ? 'text-cyan-300' : 'text-slate-300'}`}>
+              {loading ? 'Loading…' : connectionStatus}
             </p>
+            <p className="mt-2 text-xs text-slate-500">{formatDate(selectedCredential?.updatedAt)}</p>
           </article>
-          <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-4 md:col-span-2">
-            <p className="text-xs uppercase tracking-wider text-slate-500">Last updated</p>
-            <p className="mt-2 text-sm text-slate-200">{formatDate(selectedCredential?.updatedAt)}</p>
+          <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+            <p className="text-xs uppercase tracking-wider text-slate-500">Trading permission</p>
+            <p className={`mt-2 text-lg font-semibold ${account?.canTrade ? 'text-emerald-300' : 'text-slate-300'}`}>{tradingStatus}</p>
+            <p className="mt-2 text-xs text-slate-500">Account type: {account?.accountType ?? 'Unknown'}</p>
+          </article>
+          <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+            <p className="text-xs uppercase tracking-wider text-slate-500">Withdrawals</p>
+            <p className={`mt-2 text-lg font-semibold ${account?.canWithdraw ? 'text-rose-300' : account ? 'text-emerald-300' : 'text-slate-300'}`}>{withdrawalStatus}</p>
+            <p className="mt-2 text-xs text-slate-500">Withdrawal access should remain disabled.</p>
+          </article>
+          <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+            <p className="text-xs uppercase tracking-wider text-slate-500">Non-zero assets</p>
+            <p className="mt-2 text-lg font-semibold text-cyan-300">{account ? nonZeroBalances.length : '—'}</p>
+            <p className="mt-2 text-xs text-slate-500">{availableAssets} available · {lockedAssets} locked</p>
           </article>
         </div>
       </div>
@@ -228,8 +245,8 @@ export function ExchangeAccountsPanel({ token }: Props) {
         <section className="rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h4 className="text-lg font-semibold">Connection result</h4>
-              <p className="mt-1 text-sm text-slate-400">Account permissions and non-zero balances from Binance.</p>
+              <h4 className="text-lg font-semibold">Balance details</h4>
+              <p className="mt-1 text-sm text-slate-400">Available and locked balances returned by the Binance account test.</p>
             </div>
             <span className={`rounded-full px-3 py-1 text-xs font-medium ${account?.canTrade ? 'bg-emerald-400/15 text-emerald-300' : 'bg-slate-400/10 text-slate-400'}`}>
               {account ? account.canTrade ? 'Trading enabled' : 'Trading unavailable' : 'Not tested'}
@@ -237,29 +254,41 @@ export function ExchangeAccountsPanel({ token }: Props) {
           </div>
 
           {account ? (
-            <div className="mt-5 space-y-5">
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-xl border border-white/10 bg-slate-950/30 p-3"><dt className="text-slate-500">Account type</dt><dd className="mt-1 font-medium">{account.accountType ?? 'Unknown'}</dd></div>
-                <div className="rounded-xl border border-white/10 bg-slate-950/30 p-3"><dt className="text-slate-500">Withdrawals</dt><dd className={`mt-1 font-medium ${account.canWithdraw ? 'text-rose-300' : 'text-emerald-300'}`}>{account.canWithdraw ? 'Enabled — unsafe' : 'Disabled'}</dd></div>
-              </dl>
-
-              <div>
-                <p className="text-sm font-medium">Non-zero balances</p>
-                {nonZeroBalances.length ? (
-                  <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
-                    {nonZeroBalances.map((balance) => (
-                      <div key={balance.asset} className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-950/30 px-4 py-3 text-sm">
-                        <span className="font-semibold">{balance.asset}</span>
-                        <span className="text-right text-slate-400">{balance.free} free · {balance.locked} locked</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : <p className="mt-3 text-sm text-slate-500">No non-zero balances returned.</p>}
-              </div>
+            <div className="mt-5">
+              {nonZeroBalances.length ? (
+                <div className="max-h-80 overflow-auto rounded-xl border border-white/10">
+                  <table className="w-full min-w-[520px] text-left text-sm">
+                    <thead className="sticky top-0 bg-[#0b1728] text-xs uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Asset</th>
+                        <th className="px-4 py-3 text-right">Available</th>
+                        <th className="px-4 py-3 text-right">Locked</th>
+                        <th className="px-4 py-3 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nonZeroBalances.map((balance) => {
+                        const available = Number(balance.free);
+                        const locked = Number(balance.locked);
+                        return (
+                          <tr key={balance.asset} className="border-t border-white/10">
+                            <td className="px-4 py-3 font-semibold">{balance.asset}</td>
+                            <td className="px-4 py-3 text-right text-emerald-300">{balance.free}</td>
+                            <td className="px-4 py-3 text-right text-amber-300">{balance.locked}</td>
+                            <td className="px-4 py-3 text-right">{(available + locked).toFixed(8).replace(/\.?0+$/, '')}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-slate-500">No non-zero balances returned.</p>
+              )}
             </div>
           ) : (
             <div className="mt-5 rounded-xl border border-dashed border-white/10 px-4 py-10 text-center text-sm text-slate-500">
-              Save credentials and run a connection test to inspect the account.
+              Save credentials and run a connection test to load account status and balances.
             </div>
           )}
         </section>
