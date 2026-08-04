@@ -7,6 +7,7 @@ export type TestnetStrategyRunnerAction =
   | 'OPEN'
   | 'DCA'
   | 'INDEPENDENT_ENTRY'
+  | 'INDEPENDENT_TAKE_PROFIT'
   | 'TAKE_PROFIT'
   | 'HOLD'
   | 'SKIP'
@@ -19,6 +20,7 @@ export type TestnetStrategyRunnerResult = {
   price?: number;
   quantity?: number;
   positionId?: string;
+  subPositionId?: string;
   message?: string;
 };
 
@@ -45,6 +47,12 @@ export class TestnetStrategyRunnerService {
           where: { status: 'OPEN' },
           orderBy: { openedAt: 'desc' },
           take: 1,
+          include: {
+            subPositions: {
+              where: { status: 'OPEN' },
+              orderBy: { level: 'asc' },
+            },
+          },
         },
       },
       orderBy: { createdAt: 'asc' },
@@ -104,6 +112,45 @@ export class TestnetStrategyRunnerService {
           quantity,
           positionId: execution.savedOrder?.positionId,
           message: execution.duplicate ? 'Initial entry action was already claimed' : undefined,
+        };
+      }
+
+      const triggeredSubPosition = openPosition.subPositions?.find((subPosition: any) => {
+        const quantity = Number(subPosition.quantity);
+        const takeProfitPrice = Number(subPosition.takeProfitPrice);
+        return (
+          Number.isFinite(quantity) &&
+          quantity > 0 &&
+          Number.isFinite(takeProfitPrice) &&
+          takeProfitPrice > 0 &&
+          quote.price >= takeProfitPrice
+        );
+      });
+
+      if (triggeredSubPosition) {
+        const quantity = Number(triggeredSubPosition.quantity);
+        const takeProfitPrice = Number(triggeredSubPosition.takeProfitPrice);
+        const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:subposition:${triggeredSubPosition.id}:independent-exit`;
+        const execution = await this.testnetExecution.executeMarketOrder(userId, {
+          strategyId: strategy.id,
+          side: 'SELL',
+          quantity,
+          actionType: 'INDEPENDENT_EXIT',
+          actionKey,
+          level: Number(triggeredSubPosition.level),
+          triggerPrice: takeProfitPrice,
+          allowRunningStrategy: true,
+        });
+
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: execution.duplicate ? 'SKIP' : 'INDEPENDENT_TAKE_PROFIT',
+          price: quote.price,
+          quantity,
+          positionId: openPosition.id,
+          subPositionId: triggeredSubPosition.id,
+          message: execution.duplicate ? 'Independent take-profit action was already claimed' : undefined,
         };
       }
 
