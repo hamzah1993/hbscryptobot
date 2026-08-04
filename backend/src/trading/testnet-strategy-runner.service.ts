@@ -3,7 +3,7 @@ import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
-export type TestnetStrategyRunnerAction = 'OPEN' | 'HOLD' | 'SKIP' | 'ERROR';
+export type TestnetStrategyRunnerAction = 'OPEN' | 'DCA' | 'HOLD' | 'SKIP' | 'ERROR';
 
 export type TestnetStrategyRunnerResult = {
   strategyId: string;
@@ -62,50 +62,112 @@ export class TestnetStrategyRunnerService {
 
     this.runningStrategies.add(strategy.id);
     try {
+      const quote = await this.marketData.getQuote(strategy.symbol, 'testnet');
+      if (!Number.isFinite(quote.price) || quote.price <= 0) {
+        throw new Error('Unable to calculate testnet quantity from the market price');
+      }
+
       const openPosition = strategy.positions[0];
-      if (openPosition) {
+      if (!openPosition) {
+        const baseOrderQuote = Number(strategy.baseOrderQuote);
+        const riskBudgetQuote = Number(strategy.riskBudgetQuote);
+        const quoteAmount = Math.min(baseOrderQuote, riskBudgetQuote);
+        if (!Number.isFinite(quoteAmount) || quoteAmount <= 0) {
+          throw new Error('Initial testnet quote amount must be greater than zero');
+        }
+
+        const quantity = quoteAmount / quote.price;
+        const actionKey = `strategy:${strategy.id}:initial-entry`;
+        const execution = await this.testnetExecution.executeMarketOrder(userId, {
+          strategyId: strategy.id,
+          side: 'BUY',
+          quantity,
+          actionType: 'INITIAL_ENTRY',
+          actionKey,
+          level: 1,
+          triggerPrice: quote.price,
+          allowRunningStrategy: true,
+        });
+
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: execution.duplicate ? 'SKIP' : 'OPEN',
+          price: quote.price,
+          quantity,
+          positionId: execution.savedOrder?.positionId,
+          message: execution.duplicate ? 'Initial entry action was already claimed' : undefined,
+        };
+      }
+
+      const dcaCount = Number(openPosition.dcaCount);
+      const maxDcaOrders = Number(strategy.maxDcaOrders);
+      const nextLevel = dcaCount + 2;
+      const nextDcaPrice = Number(openPosition.nextDcaPrice ?? 0);
+
+      if (dcaCount >= maxDcaOrders) {
         return {
           strategyId: strategy.id,
           symbol: strategy.symbol,
           action: 'HOLD',
+          price: quote.price,
           positionId: openPosition.id,
-          message: 'Initial testnet position is already open',
+          message: 'Maximum DCA orders reached',
         };
       }
 
-      const quote = await this.marketData.getQuote(strategy.symbol, 'testnet');
-      if (!Number.isFinite(quote.price) || quote.price <= 0) {
-        throw new Error('Unable to calculate initial testnet quantity from the market price');
+      if (!Number.isFinite(nextDcaPrice) || nextDcaPrice <= 0 || quote.price > nextDcaPrice) {
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: 'HOLD',
+          price: quote.price,
+          positionId: openPosition.id,
+          message: 'Next DCA trigger has not been reached',
+        };
       }
 
+      const multiplier = Number(strategy.dcaMultiplier);
       const baseOrderQuote = Number(strategy.baseOrderQuote);
-      const riskBudgetQuote = Number(strategy.riskBudgetQuote);
-      const quoteAmount = Math.min(baseOrderQuote, riskBudgetQuote);
+      const requestedQuote = baseOrderQuote * Math.pow(multiplier, dcaCount + 1);
+      const remainingBudget = Math.max(
+        Number(strategy.riskBudgetQuote) - Number(openPosition.totalCostQuote),
+        0,
+      );
+      const quoteAmount = Math.min(requestedQuote, remainingBudget);
+
       if (!Number.isFinite(quoteAmount) || quoteAmount <= 0) {
-        throw new Error('Initial testnet quote amount must be greater than zero');
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: 'HOLD',
+          price: quote.price,
+          positionId: openPosition.id,
+          message: 'No remaining risk budget is available for DCA',
+        };
       }
 
       const quantity = quoteAmount / quote.price;
-      const actionKey = `strategy:${strategy.id}:initial-entry`;
+      const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:dca:${nextLevel}`;
       const execution = await this.testnetExecution.executeMarketOrder(userId, {
         strategyId: strategy.id,
         side: 'BUY',
         quantity,
-        actionType: 'INITIAL_ENTRY',
+        actionType: 'DCA_ENTRY',
         actionKey,
-        level: 1,
-        triggerPrice: quote.price,
+        level: nextLevel,
+        triggerPrice: nextDcaPrice,
         allowRunningStrategy: true,
       });
 
       return {
         strategyId: strategy.id,
         symbol: strategy.symbol,
-        action: execution.duplicate ? 'SKIP' : 'OPEN',
+        action: execution.duplicate ? 'SKIP' : 'DCA',
         price: quote.price,
         quantity,
-        positionId: execution.savedOrder?.positionId,
-        message: execution.duplicate ? 'Initial entry action was already claimed' : undefined,
+        positionId: openPosition.id,
+        message: execution.duplicate ? 'DCA action was already claimed' : undefined,
       };
     } catch (error) {
       return {
