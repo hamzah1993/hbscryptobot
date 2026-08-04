@@ -17,6 +17,19 @@ export type TradingOrder = {
   createdAt: string;
 };
 
+export type TradingSubPosition = {
+  id: string;
+  level: number;
+  status: 'OPEN' | 'CLOSED';
+  quantity: string;
+  costQuote: string;
+  entryPrice: string;
+  takeProfitPrice: string;
+  realizedPnlQuote: string;
+  openedAt: string;
+  closedAt: string | null;
+};
+
 export type TradingStrategy = {
   id: string;
   name: string;
@@ -48,6 +61,7 @@ export type TradingPosition = {
   closedAt: string | null;
   strategy: TradingStrategy;
   orders: TradingOrder[];
+  subPositions: TradingSubPosition[];
 };
 
 type AuthResponse = {
