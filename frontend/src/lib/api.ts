@@ -66,6 +66,23 @@ export type TradingPosition = {
   subPositions: TradingSubPosition[];
 };
 
+export type StreamedMarketPrice = {
+  symbol: string;
+  price: number;
+  eventTime: number;
+  receivedAt: number;
+  environment: 'testnet' | 'live';
+};
+
+export type MarketStreamStatus = {
+  symbol: string;
+  environment: 'testnet' | 'live';
+  subscribed: boolean;
+  connected: boolean;
+  reconnectAttempts: number;
+  latestPrice: StreamedMarketPrice | null;
+};
+
 type AuthResponse = {
   user: AuthUser;
   accessToken: string;
@@ -124,6 +141,24 @@ export const api = {
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify({ status }),
+    }),
+  subscribeMarketStream: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+    request<MarketStreamStatus>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
+      method: 'POST',
+      headers: authHeaders(token),
+    }),
+  unsubscribeMarketStream: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+    request<{ unsubscribed: boolean }>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    }),
+  getMarketStreamStatus: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+    request<MarketStreamStatus>(`/market-data/stream/status?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
+      headers: authHeaders(token),
+    }),
+  getStreamedMarketPrice: (token: string, symbol: string, environment: 'testnet' | 'live') =>
+    request<StreamedMarketPrice | null>(`/market-data/stream/price?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
+      headers: authHeaders(token),
     }),
   openPaperPosition: (token: string, strategyId: string, marketPrice: number) =>
     request<TradingPosition>('/paper-trading/positions/open', {
