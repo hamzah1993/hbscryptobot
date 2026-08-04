@@ -2,9 +2,11 @@ import { useEffect, useRef } from 'react';
 import {
   CandlestickSeries,
   ColorType,
+  LineStyle,
   createChart,
   type CandlestickData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type Time,
 } from 'lightweight-charts';
@@ -17,15 +19,38 @@ export type TradingViewCandle = {
   close: number;
 };
 
+export type TradingViewPriceLevel = {
+  label: string;
+  value: number;
+  kind?: 'ENTRY' | 'DCA' | 'TAKE_PROFIT' | 'INDEPENDENT_ENTRY' | 'INDEPENDENT_TAKE_PROFIT';
+};
+
 type Props = {
   data: TradingViewCandle[];
+  priceLevels?: TradingViewPriceLevel[];
   height?: number;
   loading?: boolean;
   emptyMessage?: string;
 };
 
+const priceLevelStyle = (kind: TradingViewPriceLevel['kind']) => {
+  switch (kind) {
+    case 'DCA':
+      return { color: '#fbbf24', lineStyle: LineStyle.Dashed };
+    case 'TAKE_PROFIT':
+    case 'INDEPENDENT_TAKE_PROFIT':
+      return { color: '#34d399', lineStyle: LineStyle.Dashed };
+    case 'INDEPENDENT_ENTRY':
+      return { color: '#a78bfa', lineStyle: LineStyle.Dotted };
+    case 'ENTRY':
+    default:
+      return { color: '#22d3ee', lineStyle: LineStyle.Solid };
+  }
+};
+
 export function TradingViewChart({
   data,
+  priceLevels = [],
   height = 420,
   loading = false,
   emptyMessage = 'No market candles are available yet.',
@@ -33,6 +58,7 @@ export function TradingViewChart({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -87,6 +113,7 @@ export function TradingViewChart({
 
     return () => {
       resizeObserver.disconnect();
+      priceLinesRef.current = [];
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -101,6 +128,26 @@ export function TradingViewChart({
     series.setData(data as CandlestickData<Time>[]);
     if (data.length > 0) chart.timeScale().fitContent();
   }, [data]);
+
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    priceLinesRef.current.forEach((line) => series.removePriceLine(line));
+    priceLinesRef.current = priceLevels
+      .filter((level) => Number.isFinite(level.value) && level.value > 0)
+      .map((level) => {
+        const style = priceLevelStyle(level.kind);
+        return series.createPriceLine({
+          price: level.value,
+          title: level.label,
+          color: style.color,
+          lineStyle: style.lineStyle,
+          lineWidth: 1,
+          axisLabelVisible: true,
+        });
+      });
+  }, [priceLevels]);
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#07111f]">
