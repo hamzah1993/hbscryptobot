@@ -11,6 +11,25 @@ export type BinanceMarketOrderParams = {
   clientOrderId?: string;
 };
 
+export type BinanceSymbolFilter = {
+  filterType: string;
+  minQty?: string;
+  maxQty?: string;
+  stepSize?: string;
+  minNotional?: string;
+  notional?: string;
+  applyToMarket?: boolean;
+  applyMinToMarket?: boolean;
+};
+
+export type BinanceSymbolInfo = {
+  symbol: string;
+  status: string;
+  baseAsset: string;
+  quoteAsset: string;
+  filters: BinanceSymbolFilter[];
+};
+
 @Injectable()
 export class BinanceService {
   constructor(private readonly config: ConfigService) {}
@@ -33,6 +52,30 @@ export class BinanceService {
     );
     if (!response.ok) throw new Error(`Binance ticker request failed: ${response.status}`);
     return response.json();
+  }
+
+  async getSymbolInfo(
+    symbol: string,
+    environment: BinanceEnvironment = 'testnet',
+  ): Promise<BinanceSymbolInfo> {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) throw new BadRequestException('Symbol is required');
+
+    const response = await fetch(
+      `${this.getBaseUrl(environment)}/api/v3/exchangeInfo?symbol=${encodeURIComponent(normalized)}`,
+    );
+    const body = await response.json();
+    if (!response.ok) {
+      const message = typeof body?.msg === 'string' ? body.msg : `Binance exchange info request failed: ${response.status}`;
+      throw new Error(message);
+    }
+
+    const info = body?.symbols?.[0] as BinanceSymbolInfo | undefined;
+    if (!info) throw new BadRequestException(`Binance symbol ${normalized} was not found`);
+    if (info.status !== 'TRADING') {
+      throw new BadRequestException(`Binance symbol ${normalized} is not available for trading`);
+    }
+    return info;
   }
 
   async getAccount(apiKey: string, apiSecret: string, environment: BinanceEnvironment = 'testnet') {
