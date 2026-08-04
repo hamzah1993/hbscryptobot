@@ -42,6 +42,9 @@ export class NotificationsService {
   private readonly webhookMinimumSeverity = this.parseSeverity(
     process.env.NOTIFICATION_WEBHOOK_MIN_SEVERITY,
   );
+  private readonly webhookMaxAttempts = this.parseWebhookMaxAttempts(
+    process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS,
+  );
 
   publish(notification: OperationalNotification): void {
     const stored: StoredOperationalNotification = {
@@ -99,6 +102,12 @@ export class NotificationsService {
     return 'WARNING';
   }
 
+  private parseWebhookMaxAttempts(value?: string): number {
+    const parsed = Number.parseInt(value ?? '', 10);
+    if (!Number.isFinite(parsed)) return 3;
+    return Math.min(Math.max(parsed, 1), 5);
+  }
+
   private shouldDeliverWebhook(severity: NotificationSeverity): boolean {
     if (!this.webhookUrl) return false;
     const rank: Record<NotificationSeverity, number> = {
@@ -125,34 +134,49 @@ export class NotificationsService {
       metadata: notification.metadata ? { ...notification.metadata } : undefined,
     };
     const body = JSON.stringify(payload);
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-      'x-hbs-webhook-timestamp': timestamp,
-    };
 
-    if (this.webhookSecret) {
-      headers['x-hbs-webhook-signature'] = `sha256=${createHmac('sha256', this.webhookSecret)
-        .update(`${timestamp}.${body}`)
-        .digest('hex')}`;
-    }
+    for (let attempt = 1; attempt <= this.webhookMaxAttempts; attempt += 1) {
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        'x-hbs-webhook-timestamp': timestamp,
+        'x-hbs-webhook-attempt': String(attempt),
+      };
 
-    try {
-      const response = await fetch(this.webhookUrl, {
-        method: 'POST',
-        headers,
-        body,
-        signal: AbortSignal.timeout(5_000),
-      });
-
-      if (!response.ok) {
-        this.logger.warn(
-          `Notification webhook delivery failed with HTTP ${response.status} for ${notification.id}`,
-        );
+      if (this.webhookSecret) {
+        headers['x-hbs-webhook-signature'] = `sha256=${createHmac('sha256', this.webhookSecret)
+          .update(`${timestamp}.${body}`)
+          .digest('hex')}`;
       }
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown webhook delivery error';
-      this.logger.warn(`Notification webhook delivery failed for ${notification.id}: ${message}`);
+
+      try {
+        const response = await fetch(this.webhookUrl, {
+          method: 'POST',
+          headers,
+          body,
+          signal: AbortSignal.timeout(5_000),
+        });
+
+        if (response.ok) return;
+
+        const retryable = response.status === 429 || response.status >= 500;
+        this.logger.warn(
+          `Notification webhook delivery failed with HTTP ${response.status} for ${notification.id} on attempt ${attempt}`,
+        );
+        if (!retryable || attempt === this.webhookMaxAttempts) return;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unknown webhook delivery error';
+        this.logger.warn(
+          `Notification webhook delivery failed for ${notification.id} on attempt ${attempt}: ${message}`,
+        );
+        if (attempt === this.webhookMaxAttempts) return;
+      }
+
+      await this.delay(500 * 2 ** (attempt - 1));
     }
+  }
+
+  private delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 }
