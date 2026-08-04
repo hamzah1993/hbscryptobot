@@ -30,6 +30,33 @@ export type BinanceSymbolInfo = {
   filters: BinanceSymbolFilter[];
 };
 
+export type BinanceKlineInterval =
+  | '1m'
+  | '3m'
+  | '5m'
+  | '15m'
+  | '30m'
+  | '1h'
+  | '2h'
+  | '4h'
+  | '6h'
+  | '8h'
+  | '12h'
+  | '1d'
+  | '3d'
+  | '1w'
+  | '1M';
+
+export type BinanceKline = {
+  openTime: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  closeTime: number;
+};
+
 @Injectable()
 export class BinanceService {
   constructor(private readonly config: ConfigService) {}
@@ -52,6 +79,47 @@ export class BinanceService {
     );
     if (!response.ok) throw new Error(`Binance ticker request failed: ${response.status}`);
     return response.json();
+  }
+
+  async getKlines(
+    symbol: string,
+    interval: BinanceKlineInterval = '5m',
+    limit = 200,
+    environment: BinanceEnvironment = 'live',
+  ): Promise<BinanceKline[]> {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) throw new BadRequestException('Symbol is required');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new BadRequestException('Kline limit must be an integer between 1 and 1000');
+    }
+
+    const search = new URLSearchParams({
+      symbol: normalized,
+      interval,
+      limit: String(limit),
+    });
+    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/klines?${search.toString()}`);
+    const body = await response.json();
+    if (!response.ok) {
+      const message = typeof body?.msg === 'string' ? body.msg : `Binance klines request failed: ${response.status}`;
+      throw new Error(message);
+    }
+    if (!Array.isArray(body)) throw new Error('Binance klines response is invalid');
+
+    return body.map((item: unknown) => {
+      if (!Array.isArray(item) || item.length < 7) {
+        throw new Error('Binance kline item is invalid');
+      }
+      return {
+        openTime: Number(item[0]),
+        open: String(item[1]),
+        high: String(item[2]),
+        low: String(item[3]),
+        close: String(item[4]),
+        volume: String(item[5]),
+        closeTime: Number(item[6]),
+      };
+    });
   }
 
   async getSymbolInfo(
