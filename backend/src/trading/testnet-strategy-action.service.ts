@@ -46,6 +46,44 @@ export class TestnetStrategyActionService {
 
     if (existing) return { action: existing, claimed: false };
 
+    const blockingAction = await this.prisma.strategyAction.findFirst({
+      where: {
+        strategyId: strategy.id,
+        status: { in: ['PENDING', 'SUBMITTED'] },
+        NOT: { actionKey: input.idempotencyKey },
+        OR: input.positionId
+          ? [
+              { positionId: input.positionId },
+              { positionId: null, type: 'INITIAL_ENTRY' },
+            ]
+          : [{ positionId: null }, { type: 'INITIAL_ENTRY' }],
+      },
+      include: { order: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (blockingAction) {
+      throw new BadRequestException(
+        `Another testnet action is still unresolved (${blockingAction.type}:${blockingAction.status})`,
+      );
+    }
+
+    if (input.positionId) {
+      const blockingOrder = await this.prisma.tradingOrder.findFirst({
+        where: {
+          positionId: input.positionId,
+          status: { in: ['PENDING', 'PARTIALLY_FILLED'] },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (blockingOrder) {
+        throw new BadRequestException(
+          `Another testnet order is still unresolved (${blockingOrder.clientOrderId}:${blockingOrder.status})`,
+        );
+      }
+    }
+
     try {
       const action = await this.prisma.strategyAction.create({
         data: {
