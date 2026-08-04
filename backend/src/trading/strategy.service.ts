@@ -1,0 +1,123 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { RiskBudgetService } from './risk-budget.service';
+
+export type StrategyInput = {
+  name: string;
+  symbol: string;
+  environment?: 'TESTNET' | 'LIVE';
+  paperTrading?: boolean;
+  riskBudgetQuote: number;
+  baseOrderQuote: number;
+  maxDcaOrders: number;
+  dcaStepPercent: number;
+  dcaMultiplier: number;
+  takeProfitPercent: number;
+  independentFromLevel: number;
+};
+
+@Injectable()
+export class StrategyService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly riskBudget: RiskBudgetService,
+  ) {}
+
+  async create(userId: string, input: StrategyInput) {
+    const normalized = this.normalize(input);
+    this.riskBudget.buildPlan(normalized);
+
+    return this.prisma.tradingStrategy.create({
+      data: {
+        userId,
+        name: normalized.name,
+        symbol: normalized.symbol,
+        environment: normalized.environment,
+        paperTrading: normalized.paperTrading,
+        riskBudgetQuote: normalized.riskBudgetQuote,
+        baseOrderQuote: normalized.baseOrderQuote,
+        maxDcaOrders: normalized.maxDcaOrders,
+        dcaStepPercent: normalized.dcaStepPercent,
+        dcaMultiplier: normalized.dcaMultiplier,
+        takeProfitPercent: normalized.takeProfitPercent,
+        independentFromLevel: normalized.independentFromLevel,
+      },
+    });
+  }
+
+  list(userId: string) {
+    return this.prisma.tradingStrategy.findMany({
+      where: { userId },
+      include: {
+        positions: {
+          where: { status: 'OPEN' },
+          select: { id: true, status: true, totalCostQuote: true, averageEntryPrice: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async update(userId: string, strategyId: string, input: Partial<StrategyInput>) {
+    const existing = await this.prisma.tradingStrategy.findFirst({ where: { id: strategyId, userId } });
+    if (!existing) throw new NotFoundException('Strategy not found');
+    if (existing.status === 'RUNNING') throw new BadRequestException('Pause or stop the strategy before editing');
+
+    const merged = this.normalize({
+      name: input.name ?? existing.name,
+      symbol: input.symbol ?? existing.symbol,
+      environment: input.environment ?? existing.environment,
+      paperTrading: input.paperTrading ?? existing.paperTrading,
+      riskBudgetQuote: input.riskBudgetQuote ?? Number(existing.riskBudgetQuote),
+      baseOrderQuote: input.baseOrderQuote ?? Number(existing.baseOrderQuote),
+      maxDcaOrders: input.maxDcaOrders ?? existing.maxDcaOrders,
+      dcaStepPercent: input.dcaStepPercent ?? Number(existing.dcaStepPercent),
+      dcaMultiplier: input.dcaMultiplier ?? Number(existing.dcaMultiplier),
+      takeProfitPercent: input.takeProfitPercent ?? Number(existing.takeProfitPercent),
+      independentFromLevel: input.independentFromLevel ?? existing.independentFromLevel,
+    });
+    this.riskBudget.buildPlan(merged);
+
+    return this.prisma.tradingStrategy.update({
+      where: { id: strategyId },
+      data: merged,
+    });
+  }
+
+  async setStatus(userId: string, strategyId: string, status: 'RUNNING' | 'PAUSED' | 'STOPPED') {
+    const existing = await this.prisma.tradingStrategy.findFirst({ where: { id: strategyId, userId } });
+    if (!existing) throw new NotFoundException('Strategy not found');
+    return this.prisma.tradingStrategy.update({ where: { id: strategyId }, data: { status } });
+  }
+
+  async remove(userId: string, strategyId: string) {
+    const existing = await this.prisma.tradingStrategy.findFirst({
+      where: { id: strategyId, userId },
+      include: { positions: { where: { status: 'OPEN' }, select: { id: true } } },
+    });
+    if (!existing) throw new NotFoundException('Strategy not found');
+    if (existing.positions.length) throw new BadRequestException('Close open positions before deleting the strategy');
+    return this.prisma.tradingStrategy.delete({ where: { id: strategyId } });
+  }
+
+  private normalize(input: StrategyInput) {
+    const name = input.name.trim();
+    const symbol = input.symbol.replace(/[^a-z0-9]/gi, '').toUpperCase();
+    if (!name) throw new BadRequestException('Strategy name is required');
+    if (!symbol) throw new BadRequestException('Trading symbol is required');
+
+    return {
+      name,
+      symbol,
+      environment: input.environment ?? 'TESTNET',
+      paperTrading: input.paperTrading ?? true,
+      riskBudgetQuote: Number(input.riskBudgetQuote),
+      baseOrderQuote: Number(input.baseOrderQuote),
+      maxDcaOrders: Number(input.maxDcaOrders),
+      dcaStepPercent: Number(input.dcaStepPercent),
+      dcaMultiplier: Number(input.dcaMultiplier),
+      takeProfitPercent: Number(input.takeProfitPercent),
+      independentFromLevel: Number(input.independentFromLevel),
+    } as const;
+  }
+}
