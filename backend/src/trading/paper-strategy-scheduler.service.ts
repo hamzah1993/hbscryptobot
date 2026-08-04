@@ -5,7 +5,14 @@ import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 
 const PAPER_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:paper-strategy-scheduler';
-const PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS = 30_000;
+const DEFAULT_PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS = 30_000;
+
+const getLockTtlMilliseconds = (): number => {
+  const value = Number.parseInt(process.env.PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS ?? '', 10);
+  return Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS;
+};
 
 @Injectable()
 export class PaperStrategySchedulerService {
@@ -28,7 +35,7 @@ export class PaperStrategySchedulerService {
     try {
       lock = await this.redisLock.acquire(
         PAPER_STRATEGY_SCHEDULER_LOCK_KEY,
-        PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS,
+        getLockTtlMilliseconds(),
       );
 
       if (!lock) return;
