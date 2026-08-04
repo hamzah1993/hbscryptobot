@@ -66,15 +66,30 @@ export class TestnetStrategyExecutionService {
       orderBy: { openedAt: 'desc' },
     });
 
-    if (input.side === 'SELL') {
+    const actionKey = input.actionKey?.trim();
+    const actionType = input.actionType;
+    let independentSubPosition: Awaited<ReturnType<typeof this.prisma.tradingSubPosition.findUnique>> = null;
+
+    if (actionType === 'INDEPENDENT_EXIT') {
+      if (!openPosition) throw new BadRequestException('No open testnet position is available');
+      const level = input.level ?? null;
+      if (!level) throw new BadRequestException('Independent exit level is required');
+      independentSubPosition = await this.prisma.tradingSubPosition.findUnique({
+        where: { positionId_level: { positionId: openPosition.id, level } },
+      });
+      if (!independentSubPosition || independentSubPosition.status !== 'OPEN') {
+        throw new BadRequestException('Open independent sub-position was not found');
+      }
+      if (input.quantity > Number(independentSubPosition.quantity)) {
+        throw new BadRequestException('Sell quantity exceeds the independent sub-position quantity');
+      }
+    } else if (input.side === 'SELL') {
       if (!openPosition) throw new BadRequestException('No open testnet position is available to sell');
       if (input.quantity > Number(openPosition.totalQuantity)) {
         throw new BadRequestException('Sell quantity exceeds the open testnet position quantity');
       }
     }
 
-    const actionKey = input.actionKey?.trim();
-    const actionType = input.actionType;
     let claimedActionId: string | null = null;
 
     if (actionKey || actionType) {
@@ -124,8 +139,9 @@ export class TestnetStrategyExecutionService {
 
       const savedOrder = await this.prisma.$transaction(async (tx) => {
         let position = openPosition;
-        let subPositionId: string | null = null;
+        let subPositionId: string | null = independentSubPosition?.id ?? null;
         const independentEntry = actionType === 'INDEPENDENT_ENTRY' && input.side === 'BUY';
+        const independentExit = actionType === 'INDEPENDENT_EXIT' && input.side === 'SELL';
 
         if (!position && input.side === 'BUY') {
           position = await tx.tradingPosition.create({
@@ -157,7 +173,7 @@ export class TestnetStrategyExecutionService {
               dcaCount: position.dcaCount + 1,
             },
           });
-        } else if (position && input.side === 'SELL' && executedQuantity > 0) {
+        } else if (position && input.side === 'SELL' && !independentExit && executedQuantity > 0) {
           const previousQuantity = Number(position.totalQuantity);
           const previousCost = Number(position.totalCostQuote);
           const soldQuantity = Math.min(executedQuantity, previousQuantity);
@@ -214,6 +230,29 @@ export class TestnetStrategyExecutionService {
             },
           });
           subPositionId = subPosition.id;
+        }
+
+        if (independentExit && independentSubPosition && executedQuantity > 0) {
+          const previousQuantity = Number(independentSubPosition.quantity);
+          const previousCost = Number(independentSubPosition.costQuote);
+          const soldQuantity = Math.min(executedQuantity, previousQuantity);
+          const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
+          const proceeds = quoteAmount > 0 ? quoteAmount : soldQuantity * averageFillPrice;
+          const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
+          const remainingCost = Math.max(previousCost - allocatedCost, 0);
+          const closed = remainingQuantity <= 1e-12;
+
+          await tx.tradingSubPosition.update({
+            where: { id: independentSubPosition.id },
+            data: {
+              status: closed ? 'CLOSED' : 'OPEN',
+              quantity: closed ? 0 : remainingQuantity,
+              costQuote: closed ? 0 : remainingCost,
+              entryPrice: closed ? Number(independentSubPosition.entryPrice) : remainingCost / remainingQuantity,
+              realizedPnlQuote: Number(independentSubPosition.realizedPnlQuote) + proceeds - allocatedCost,
+              closedAt: closed ? new Date() : null,
+            },
+          });
         }
 
         const order = await tx.tradingOrder.create({
@@ -337,6 +376,47 @@ export class TestnetStrategyExecutionService {
                   takeProfitPrice,
                 },
               });
+          if (!order.subPositionId) {
+            await tx.tradingOrder.update({ where: { id: order.id }, data: { subPositionId: subPosition.id } });
+          }
+          if (order.strategyAction && !order.strategyAction.subPositionId) {
+            await tx.strategyAction.update({
+              where: { id: order.strategyAction.id },
+              data: { subPositionId: subPosition.id },
+            });
+          }
+        } else if (order.independent && order.side === 'SELL') {
+          const subPosition = order.subPositionId
+            ? await tx.tradingSubPosition.findUnique({ where: { id: order.subPositionId } })
+            : await tx.tradingSubPosition.findUnique({
+                where: { positionId_level: { positionId: order.positionId, level: order.level } },
+              });
+          if (!subPosition) throw new NotFoundException('Independent sub-position not found');
+
+          const previousQuantity = Number(subPosition.quantity);
+          const previousCost = Number(subPosition.costQuote);
+          const soldQuantity = Math.min(deltaQuantity, previousQuantity);
+          const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
+          const deltaAveragePrice = deltaQuantity > 0 && deltaQuoteAmount > 0
+            ? deltaQuoteAmount / deltaQuantity
+            : averageFillPrice;
+          const proceeds = deltaQuoteAmount > 0 ? deltaQuoteAmount : soldQuantity * deltaAveragePrice;
+          const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
+          const remainingCost = Math.max(previousCost - allocatedCost, 0);
+          const closed = remainingQuantity <= 1e-12;
+
+          await tx.tradingSubPosition.update({
+            where: { id: subPosition.id },
+            data: {
+              status: closed ? 'CLOSED' : 'OPEN',
+              quantity: closed ? 0 : remainingQuantity,
+              costQuote: closed ? 0 : remainingCost,
+              entryPrice: closed ? Number(subPosition.entryPrice) : remainingCost / remainingQuantity,
+              realizedPnlQuote: Number(subPosition.realizedPnlQuote) + proceeds - allocatedCost,
+              closedAt: closed ? new Date() : null,
+            },
+          });
+
           if (!order.subPositionId) {
             await tx.tradingOrder.update({ where: { id: order.id }, data: { subPositionId: subPosition.id } });
           }
