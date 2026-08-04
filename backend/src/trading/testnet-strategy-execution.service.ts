@@ -12,6 +12,7 @@ export type ExecuteTestnetStrategyInput = {
   actionKey?: string;
   level?: number | null;
   triggerPrice?: number | null;
+  allowRunningStrategy?: boolean;
 };
 
 type BinanceOrderFill = {
@@ -52,8 +53,12 @@ export class TestnetStrategyExecutionService {
     if (strategy.environment !== 'TESTNET') {
       throw new BadRequestException('Only Binance testnet strategy execution is allowed');
     }
-    if (strategy.status !== 'PAUSED') {
-      throw new BadRequestException('Strategy must be PAUSED for a controlled testnet order');
+
+    const isAutomaticRunningExecution = input.allowRunningStrategy === true && strategy.status === 'RUNNING';
+    if (strategy.status !== 'PAUSED' && !isAutomaticRunningExecution) {
+      throw new BadRequestException(
+        'Strategy must be PAUSED for a controlled testnet order or RUNNING for an authorized automatic execution',
+      );
     }
 
     const openPosition = await this.prisma.tradingPosition.findFirst({
