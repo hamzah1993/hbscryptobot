@@ -32,13 +32,40 @@ export type TradingSubPosition = {
 
 export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
 export type BinanceStreamEnvironment = 'testnet' | 'live';
+export type ExchangeEnvironment = 'TESTNET' | 'LIVE';
+
+export type ExchangeCredentialSummary = {
+  id: string;
+  exchange: 'BINANCE';
+  environment: ExchangeEnvironment;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BinanceAccountTestResponse = {
+  makerCommission?: number;
+  takerCommission?: number;
+  buyerCommission?: number;
+  sellerCommission?: number;
+  canTrade?: boolean;
+  canWithdraw?: boolean;
+  canDeposit?: boolean;
+  updateTime?: number;
+  accountType?: string;
+  balances?: Array<{
+    asset: string;
+    free: string;
+    locked: string;
+  }>;
+  permissions?: string[];
+};
 
 export type TradingStrategy = {
   id: string;
   name: string;
   symbol: string;
   status?: StrategyStatus;
-  environment?: 'TESTNET' | 'LIVE';
+  environment?: ExchangeEnvironment;
   paperTrading: boolean;
   riskBudgetQuote: string;
   baseOrderQuote?: string;
@@ -92,7 +119,7 @@ type AuthResponse = {
 export type CreateStrategyPayload = {
   name: string;
   symbol: string;
-  environment: 'TESTNET' | 'LIVE';
+  environment: ExchangeEnvironment;
   paperTrading: boolean;
   riskBudgetQuote: number;
   baseOrderQuote: number;
@@ -122,6 +149,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const authHeaders = (token: string) => ({ Authorization: `Bearer ${token}` });
+const toBinanceEnvironment = (environment: ExchangeEnvironment): BinanceStreamEnvironment =>
+  environment === 'LIVE' ? 'live' : 'testnet';
 
 export const api = {
   register: (payload: { email: string; fullName: string; password: string }) =>
@@ -142,6 +171,28 @@ export const api = {
       method: 'POST',
       headers: authHeaders(token),
       body: JSON.stringify({ status }),
+    }),
+  listExchangeCredentials: (token: string) =>
+    request<ExchangeCredentialSummary[]>('/exchange/credentials', { headers: authHeaders(token) }),
+  saveBinanceCredentials: (
+    token: string,
+    payload: { apiKey: string; apiSecret: string; environment: ExchangeEnvironment },
+  ) =>
+    request<ExchangeCredentialSummary>('/exchange/credentials/binance', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(payload),
+    }),
+  deleteBinanceCredentials: (token: string, environment: ExchangeEnvironment) =>
+    request<{ deleted: boolean }>(`/exchange/credentials/binance/${environment}`, {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    }),
+  testBinanceConnection: (token: string, environment: ExchangeEnvironment) =>
+    request<BinanceAccountTestResponse>('/exchange/binance/account/test', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ environment: toBinanceEnvironment(environment) }),
     }),
   subscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<MarketStreamStatus>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
