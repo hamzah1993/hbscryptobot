@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class TestnetOrderSyncSchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
+    private readonly testnetActions: TestnetStrategyActionService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
@@ -49,8 +51,42 @@ export class TestnetOrderSyncSchedulerService {
         }
       }
 
+      const recoverableActions = await this.testnetActions.listRecoverable(100);
+      let recovered = 0;
+
+      for (const action of recoverableActions) {
+        try {
+          if (!action.order) {
+            continue;
+          }
+
+          if (action.order.status === 'FILLED') {
+            await this.testnetActions.markCompleted(action.id);
+            recovered += 1;
+            continue;
+          }
+
+          if (['CANCELLED', 'REJECTED', 'FAILED'].includes(action.order.status)) {
+            await this.testnetActions.markFailed(
+              action.id,
+              action.order.errorMessage ?? `Exchange order ended with ${action.order.status}`,
+            );
+            recovered += 1;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Unable to recover testnet strategy action ${action.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
       if (synced > 0) {
         this.logger.log(`Synchronized ${synced} Binance testnet order(s)`);
+      }
+      if (recovered > 0) {
+        this.logger.log(`Recovered ${recovered} Binance testnet strategy action(s)`);
       }
     } catch (error) {
       this.logger.error(
