@@ -1,8 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 
 export type BinanceEnvironment = 'testnet' | 'live';
+
+export type BinanceMarketOrderParams = {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  quantity: string;
+  clientOrderId?: string;
+};
 
 @Injectable()
 export class BinanceService {
@@ -49,6 +56,36 @@ export class BinanceService {
       payload.timeInForce = params.timeInForce ?? 'GTC';
     }
     return this.signedRequest('/api/v3/order/test', 'POST', payload, apiKey, apiSecret, environment);
+  }
+
+  async placeMarketOrder(
+    params: BinanceMarketOrderParams,
+    apiKey: string,
+    apiSecret: string,
+    environment: BinanceEnvironment = 'testnet',
+  ) {
+    if (environment !== 'testnet') {
+      throw new BadRequestException('Live Binance order execution is disabled');
+    }
+
+    const quantity = Number(params.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new BadRequestException('Order quantity must be positive');
+    }
+
+    const payload: Record<string, string> = {
+      symbol: params.symbol.trim().toUpperCase(),
+      side: params.side,
+      type: 'MARKET',
+      quantity: params.quantity,
+      newOrderRespType: 'FULL',
+    };
+
+    if (params.clientOrderId) {
+      payload.newClientOrderId = params.clientOrderId;
+    }
+
+    return this.signedRequest('/api/v3/order', 'POST', payload, apiKey, apiSecret, environment);
   }
 
   private async signedRequest(
