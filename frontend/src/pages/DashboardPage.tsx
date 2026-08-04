@@ -23,9 +23,34 @@ const navigation = ['Overview', 'Bots', 'Positions', 'Strategies', 'Notification
 const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
 const notificationToastStorageKey = 'hbs-notifications-last-toast-at';
 const browserNotificationStorageKey = 'hbs-browser-notifications-enabled';
+const notificationSoundStorageKey = 'hbs-notification-sounds-enabled';
+
+type AudioWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
 
 function money(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+}
+
+function playNotificationSound(severity: OperationalNotification['severity']) {
+  const audioWindow = window as AudioWindow;
+  const AudioContextClass = audioWindow.AudioContext || audioWindow.webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  const context = new AudioContextClass();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = severity === 'CRITICAL' ? 'square' : 'sine';
+  oscillator.frequency.value = severity === 'CRITICAL' ? 880 : 660;
+  gain.gain.setValueAtTime(0.0001, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.25);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + 0.25);
+  oscillator.addEventListener('ended', () => void context.close());
 }
 
 export function DashboardPage() {
@@ -51,6 +76,9 @@ export function DashboardPage() {
   const [toastNotifications, setToastNotifications] = useState<OperationalNotification[]>([]);
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(
     () => window.localStorage.getItem(browserNotificationStorageKey) === 'true',
+  );
+  const [notificationSoundsEnabled, setNotificationSoundsEnabled] = useState(
+    () => window.localStorage.getItem(notificationSoundStorageKey) === 'true',
   );
   const initializedNotificationPolling = useRef(false);
 
@@ -114,6 +142,14 @@ export function DashboardPage() {
               return merged.slice(-3);
             });
 
+            if (notificationSoundsEnabled) {
+              playNotificationSound(
+                freshOperationalAlerts.some((notification) => notification.severity === 'CRITICAL')
+                  ? 'CRITICAL'
+                  : 'WARNING',
+              );
+            }
+
             if (
               browserNotificationsEnabled &&
               'Notification' in window &&
@@ -146,7 +182,7 @@ export function DashboardPage() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [token, browserNotificationsEnabled]);
+  }, [token, browserNotificationsEnabled, notificationSoundsEnabled]);
 
   useEffect(() => {
     if (activeNav !== 'Notifications') return;
@@ -165,6 +201,13 @@ export function DashboardPage() {
   function disableBrowserNotifications() {
     setBrowserNotificationsEnabled(false);
     window.localStorage.setItem(browserNotificationStorageKey, 'false');
+  }
+
+  function toggleNotificationSounds() {
+    const enabled = !notificationSoundsEnabled;
+    setNotificationSoundsEnabled(enabled);
+    window.localStorage.setItem(notificationSoundStorageKey, String(enabled));
+    if (enabled) playNotificationSound('WARNING');
   }
 
   useEffect(() => {
@@ -380,6 +423,13 @@ export function DashboardPage() {
               <h2 className="mt-1 text-3xl font-semibold tracking-tight">{pageTitle}</h2>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={toggleNotificationSounds}
+                className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08]"
+              >
+                {notificationSoundsEnabled ? 'Disable sounds' : 'Enable sounds'}
+              </button>
               {'Notification' in window && (
                 browserNotificationsEnabled ? (
                   <button
