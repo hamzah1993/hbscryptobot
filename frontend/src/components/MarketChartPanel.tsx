@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type BinanceKlineInterval, type BinanceStreamEnvironment, type MarketCandle } from '../lib/api';
+import {
+  api,
+  type BinanceKlineInterval,
+  type BinanceStreamEnvironment,
+  type MarketCandle,
+  type TestnetPosition,
+} from '../lib/api';
 import { TradingViewChart, type TradingViewCandle } from './TradingViewChart';
 
 type Props = {
@@ -13,6 +19,7 @@ export function MarketChartPanel({ token }: Props) {
   const [interval, setInterval] = useState<BinanceKlineInterval>('5m');
   const [environment, setEnvironment] = useState<BinanceStreamEnvironment>('live');
   const [candles, setCandles] = useState<MarketCandle[]>([]);
+  const [positions, setPositions] = useState<TestnetPosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -23,6 +30,7 @@ export function MarketChartPanel({ token }: Props) {
 
     if (!normalizedSymbol) {
       setCandles([]);
+      setPositions([]);
       setError('Enter a market symbol.');
       setLoading(false);
       return;
@@ -31,13 +39,20 @@ export function MarketChartPanel({ token }: Props) {
     setLoading(true);
     setError(null);
 
-    api.getMarketCandles(token, normalizedSymbol, interval, 300, environment)
-      .then((response) => {
-        if (!cancelled) setCandles(response.candles);
+    Promise.all([
+      api.getMarketCandles(token, normalizedSymbol, interval, 300, environment),
+      environment === 'testnet' ? api.listTestnetPositions(token, 100) : Promise.resolve([]),
+    ])
+      .then(([response, testnetPositions]) => {
+        if (!cancelled) {
+          setCandles(response.candles);
+          setPositions(testnetPositions.filter((position) => position.symbol === normalizedSymbol));
+        }
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
           setCandles([]);
+          setPositions([]);
           setError(reason instanceof Error ? reason.message : 'Unable to load market candles');
         }
       })
@@ -60,6 +75,22 @@ export function MarketChartPanel({ token }: Props) {
     })),
     [candles],
   );
+
+  const positionLevels = useMemo(() => positions.flatMap((position) => {
+    const levels = [
+      { label: 'Average entry', value: Number(position.averageEntryPrice) },
+      { label: 'Next DCA', value: Number(position.nextDcaPrice ?? 0) },
+      { label: 'Take profit', value: Number(position.takeProfitPrice ?? 0) },
+      ...position.subPositions
+        .filter((subPosition) => subPosition.status === 'OPEN')
+        .flatMap((subPosition) => [
+          { label: `Independent #${subPosition.level} entry`, value: Number(subPosition.entryPrice) },
+          { label: `Independent #${subPosition.level} TP`, value: Number(subPosition.takeProfitPrice) },
+        ]),
+    ];
+
+    return levels.filter((level) => Number.isFinite(level.value) && level.value > 0);
+  }), [positions]);
 
   const latest = candles.length > 0 ? candles[candles.length - 1] : undefined;
 
@@ -138,6 +169,24 @@ export function MarketChartPanel({ token }: Props) {
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Volume</dt><dd>{latest ? latest.volume.toLocaleString() : '—'}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-slate-500">Candles</dt><dd>{candles.length}</dd></div>
           </dl>
+
+          {environment === 'testnet' && (
+            <div className="mt-6 border-t border-white/10 pt-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Position levels</p>
+              {positionLevels.length === 0 ? (
+                <p className="mt-3 text-xs leading-5 text-slate-500">No open Testnet levels for this symbol.</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {positionLevels.map((level, index) => (
+                    <div key={`${level.label}-${level.value}-${index}`} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <p className="text-xs text-slate-500">{level.label}</p>
+                      <p className="mt-1 text-sm font-medium">{level.value.toLocaleString()}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </aside>
       </div>
     </section>
