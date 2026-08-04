@@ -1,11 +1,19 @@
 import { createHmac } from 'crypto';
+import type { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from './notifications.service';
 
 type MockResponse = { ok: boolean; status: number };
 
+type PrismaMock = {
+  operationalNotification: {
+    create: jest.Mock;
+  };
+};
+
 describe('NotificationsService webhook delivery', () => {
   const originalEnvironment = { ...process.env };
   const originalFetch = global.fetch;
+  let prisma: PrismaMock;
 
   beforeEach(() => {
     jest.useFakeTimers();
@@ -15,6 +23,11 @@ describe('NotificationsService webhook delivery', () => {
     delete process.env.NOTIFICATION_WEBHOOK_MIN_SEVERITY;
     delete process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS;
     global.fetch = jest.fn();
+    prisma = {
+      operationalNotification: {
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
   });
 
   afterEach(() => {
@@ -24,8 +37,10 @@ describe('NotificationsService webhook delivery', () => {
     jest.restoreAllMocks();
   });
 
+  const createService = () => new NotificationsService(prisma as unknown as PrismaService);
+
   it('does not call a webhook when no URL is configured', async () => {
-    const service = new NotificationsService();
+    const service = createService();
 
     service.publish({ event: 'TEST_EVENT', message: 'No webhook', severity: 'CRITICAL' });
     await Promise.resolve();
@@ -36,7 +51,7 @@ describe('NotificationsService webhook delivery', () => {
   it('respects the minimum severity threshold', async () => {
     process.env.NOTIFICATION_WEBHOOK_URL = 'https://example.test/webhook';
     process.env.NOTIFICATION_WEBHOOK_MIN_SEVERITY = 'CRITICAL';
-    const service = new NotificationsService();
+    const service = createService();
 
     service.publish({ event: 'WARNING_EVENT', message: 'Below threshold', severity: 'WARNING' });
     await Promise.resolve();
@@ -51,7 +66,7 @@ describe('NotificationsService webhook delivery', () => {
     process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS = '1';
     jest.spyOn(Date, 'now').mockReturnValue(1_750_000_000_000);
     (global.fetch as jest.Mock).mockResolvedValue({ ok: true, status: 200 } satisfies MockResponse);
-    const service = new NotificationsService();
+    const service = createService();
 
     service.publish({
       event: 'SIGNED_EVENT',
@@ -81,7 +96,7 @@ describe('NotificationsService webhook delivery', () => {
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({ ok: false, status: 500 } satisfies MockResponse)
       .mockResolvedValueOnce({ ok: true, status: 204 } satisfies MockResponse);
-    const service = new NotificationsService();
+    const service = createService();
 
     service.publish({ event: 'RETRY_EVENT', message: 'Retry me', severity: 'CRITICAL' });
     await Promise.resolve();
@@ -102,7 +117,7 @@ describe('NotificationsService webhook delivery', () => {
     process.env.NOTIFICATION_WEBHOOK_URL = 'https://example.test/webhook';
     process.env.NOTIFICATION_WEBHOOK_MAX_ATTEMPTS = '3';
     (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 400 } satisfies MockResponse);
-    const service = new NotificationsService();
+    const service = createService();
 
     service.publish({ event: 'CLIENT_ERROR', message: 'Do not retry', severity: 'CRITICAL' });
     await Promise.resolve();
