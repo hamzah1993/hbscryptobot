@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisLockService } from '../redis/redis-lock.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 export type TestnetStrategyRunnerAction =
@@ -24,6 +25,8 @@ export type TestnetStrategyRunnerResult = {
   message?: string;
 };
 
+const TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS = 30_000;
+
 @Injectable()
 export class TestnetStrategyRunnerService {
   private readonly runningStrategies = new Set<string>();
@@ -32,6 +35,7 @@ export class TestnetStrategyRunnerService {
     private readonly prisma: PrismaService,
     private readonly marketData: MarketDataService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
+    private readonly redisLock: RedisLockService,
   ) {}
 
   async runUserStrategies(userId: string): Promise<TestnetStrategyRunnerResult[]> {
@@ -76,6 +80,21 @@ export class TestnetStrategyRunnerService {
     }
 
     this.runningStrategies.add(strategy.id);
+    const lock = await this.redisLock.acquire(
+      `hbs:lock:testnet-strategy:${strategy.id}`,
+      TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS,
+    );
+
+    if (!lock) {
+      this.runningStrategies.delete(strategy.id);
+      return {
+        strategyId: strategy.id,
+        symbol: strategy.symbol,
+        action: 'SKIP',
+        message: 'Strategy tick is already running on another instance',
+      };
+    }
+
     try {
       const quote = await this.marketData.getQuote(strategy.symbol, 'testnet');
       if (!Number.isFinite(quote.price) || quote.price <= 0) {
@@ -273,6 +292,7 @@ export class TestnetStrategyRunnerService {
         message: error instanceof Error ? error.message : 'Testnet strategy tick failed',
       };
     } finally {
+      await this.redisLock.release(lock);
       this.runningStrategies.delete(strategy.id);
     }
   }
