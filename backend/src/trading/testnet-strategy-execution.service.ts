@@ -117,7 +117,7 @@ export class TestnetStrategyExecutionService {
         clientOrderId,
       })) as BinanceOrderResponse;
 
-      const executedQuantity = Number(exchangeOrder.executedQty ?? input.quantity);
+      const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
       const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
       const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
       const status = this.mapOrderStatus(exchangeOrder.status);
@@ -141,7 +141,7 @@ export class TestnetStrategyExecutionService {
               dcaCount: 0,
             },
           });
-        } else if (position && input.side === 'BUY' && !independentEntry) {
+        } else if (position && input.side === 'BUY' && !independentEntry && executedQuantity > 0) {
           const previousQuantity = Number(position.totalQuantity);
           const previousCost = Number(position.totalCostQuote);
           const totalQuantity = previousQuantity + executedQuantity;
@@ -157,7 +157,7 @@ export class TestnetStrategyExecutionService {
               dcaCount: position.dcaCount + 1,
             },
           });
-        } else if (position && input.side === 'SELL') {
+        } else if (position && input.side === 'SELL' && executedQuantity > 0) {
           const previousQuantity = Number(position.totalQuantity);
           const previousCost = Number(position.totalCostQuote);
           const soldQuantity = Math.min(executedQuantity, previousQuantity);
@@ -397,8 +397,8 @@ export class TestnetStrategyExecutionService {
           status,
           filledQuantity: executedQuantity,
           quoteAmount,
-          accountedFilledQuantity: executedQuantity,
-          accountedQuoteAmount: quoteAmount,
+          accountedFilledQuantity: Math.max(accountedFilledQuantity, executedQuantity),
+          accountedQuoteAmount: Math.max(accountedQuoteAmount, quoteAmount),
           price: averageFillPrice || Number(exchangeOrder.price ?? 0) || null,
           averageFillPrice: averageFillPrice || null,
         },
