@@ -1,11 +1,19 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { ExchangeEnvironment } from '@prisma/client';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { ExchangeCredentialsService } from '../credentials/exchange-credentials.service';
 import { BinanceService, type BinanceEnvironment } from './binance.service';
+
+type AuthenticatedRequest = Request & { user: { sub: string } };
 
 @Controller('exchange/binance')
 @UseGuards(JwtAuthGuard)
 export class BinanceController {
-  constructor(private readonly binance: BinanceService) {}
+  constructor(
+    private readonly binance: BinanceService,
+    private readonly credentials: ExchangeCredentialsService,
+  ) {}
 
   @Get('time')
   getTime(@Query('environment') environment: BinanceEnvironment = 'testnet') {
@@ -21,18 +29,26 @@ export class BinanceController {
   }
 
   @Post('account/test')
-  getAccount(
-    @Body() body: { apiKey: string; apiSecret: string; environment?: BinanceEnvironment },
+  async getAccount(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { environment?: BinanceEnvironment },
   ) {
-    return this.binance.getAccount(body.apiKey, body.apiSecret, body.environment ?? 'testnet');
+    const environment = body.environment ?? 'testnet';
+    const credentialEnvironment =
+      environment === 'live' ? ExchangeEnvironment.LIVE : ExchangeEnvironment.TESTNET;
+    const credential = await this.credentials.getBinance(request.user.sub, credentialEnvironment);
+    return this.binance.getAccount(
+      credential.apiKey,
+      credential.apiSecret,
+      environment,
+    );
   }
 
   @Post('order/test')
-  testOrder(
+  async testOrder(
+    @Req() request: AuthenticatedRequest,
     @Body()
     body: {
-      apiKey: string;
-      apiSecret: string;
       environment?: BinanceEnvironment;
       symbol: string;
       side: 'BUY' | 'SELL';
@@ -42,7 +58,15 @@ export class BinanceController {
       timeInForce?: 'GTC' | 'IOC' | 'FOK';
     },
   ) {
-    const { apiKey, apiSecret, environment = 'testnet', ...order } = body;
-    return this.binance.testOrder(order, apiKey, apiSecret, environment);
+    const { environment = 'testnet', ...order } = body;
+    const credentialEnvironment =
+      environment === 'live' ? ExchangeEnvironment.LIVE : ExchangeEnvironment.TESTNET;
+    const credential = await this.credentials.getBinance(request.user.sub, credentialEnvironment);
+    return this.binance.testOrder(
+      order,
+      credential.apiKey,
+      credential.apiSecret,
+      environment,
+    );
   }
 }
