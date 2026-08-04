@@ -156,6 +156,8 @@ export class TestnetStrategyExecutionService {
           price: averageFillPrice || null,
           filledQuantity: executedQuantity,
           quoteAmount,
+          accountedFilledQuantity: executedQuantity,
+          accountedQuoteAmount: quoteAmount,
           averageFillPrice: averageFillPrice || null,
         },
         include: { position: true },
@@ -196,20 +198,86 @@ export class TestnetStrategyExecutionService {
     const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
     const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
     const status = this.mapOrderStatus(exchangeOrder.status);
+    const accountedFilledQuantity = Number(order.accountedFilledQuantity);
+    const accountedQuoteAmount = Number(order.accountedQuoteAmount);
+    const deltaQuantity = Math.max(executedQuantity - accountedFilledQuantity, 0);
+    const deltaQuoteAmount = Math.max(quoteAmount - accountedQuoteAmount, 0);
 
-    const updatedOrder = await this.prisma.tradingOrder.update({
-      where: { id: order.id },
-      data: {
-        status,
-        filledQuantity: executedQuantity,
-        quoteAmount,
-        price: averageFillPrice || Number(exchangeOrder.price ?? 0) || null,
-        averageFillPrice: averageFillPrice || null,
-      },
-      include: { position: true },
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      if (deltaQuantity > 0) {
+        const currentPosition = await tx.tradingPosition.findUnique({
+          where: { id: order.positionId },
+        });
+        if (!currentPosition) throw new NotFoundException('Trading position not found');
+
+        if (order.side === 'BUY') {
+          const previousQuantity = Number(currentPosition.totalQuantity);
+          const previousCost = Number(currentPosition.totalCostQuote);
+          const totalQuantity = previousQuantity + deltaQuantity;
+          const totalCostQuote = previousCost + deltaQuoteAmount;
+
+          await tx.tradingPosition.update({
+            where: { id: currentPosition.id },
+            data: {
+              status: 'OPEN',
+              totalQuantity,
+              totalCostQuote,
+              averageEntryPrice: totalQuantity > 0 ? totalCostQuote / totalQuantity : 0,
+              closedAt: null,
+            },
+          });
+        } else {
+          const previousQuantity = Number(currentPosition.totalQuantity);
+          const previousCost = Number(currentPosition.totalCostQuote);
+          const soldQuantity = Math.min(deltaQuantity, previousQuantity);
+          const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
+          const deltaAveragePrice = deltaQuantity > 0 && deltaQuoteAmount > 0
+            ? deltaQuoteAmount / deltaQuantity
+            : averageFillPrice;
+          const proceeds = deltaQuoteAmount > 0 ? deltaQuoteAmount : soldQuantity * deltaAveragePrice;
+          const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
+          const remainingCost = Math.max(previousCost - allocatedCost, 0);
+          const closed = remainingQuantity <= 1e-12;
+
+          await tx.tradingPosition.update({
+            where: { id: currentPosition.id },
+            data: {
+              status: closed ? 'CLOSED' : 'OPEN',
+              totalQuantity: closed ? 0 : remainingQuantity,
+              totalCostQuote: closed ? 0 : remainingCost,
+              averageEntryPrice: closed ? 0 : remainingCost / remainingQuantity,
+              realizedPnlQuote: Number(currentPosition.realizedPnlQuote) + proceeds - allocatedCost,
+              closedAt: closed ? new Date() : null,
+              nextDcaPrice: closed ? null : currentPosition.nextDcaPrice,
+              takeProfitPrice: closed ? null : currentPosition.takeProfitPrice,
+            },
+          });
+        }
+      }
+
+      return tx.tradingOrder.update({
+        where: { id: order.id },
+        data: {
+          status,
+          filledQuantity: executedQuantity,
+          quoteAmount,
+          accountedFilledQuantity: executedQuantity,
+          accountedQuoteAmount: quoteAmount,
+          price: averageFillPrice || Number(exchangeOrder.price ?? 0) || null,
+          averageFillPrice: averageFillPrice || null,
+        },
+        include: { position: true },
+      });
     });
 
-    return { updatedOrder, exchangeOrder };
+    return {
+      updatedOrder,
+      exchangeOrder,
+      reconciliation: {
+        deltaQuantity,
+        deltaQuoteAmount,
+      },
+    };
   }
 
   private calculateAverageFillPrice(
