@@ -21,9 +21,16 @@ export type TradingStrategy = {
   id: string;
   name: string;
   symbol: string;
+  status?: 'STOPPED' | 'RUNNING' | 'PAUSED';
+  environment?: 'TESTNET' | 'LIVE';
   paperTrading: boolean;
   riskBudgetQuote: string;
+  baseOrderQuote?: string;
   maxDcaOrders: number;
+  dcaStepPercent?: string;
+  dcaMultiplier?: string;
+  takeProfitPercent?: string;
+  independentFromLevel?: number;
 };
 
 export type TradingPosition = {
@@ -46,6 +53,20 @@ export type TradingPosition = {
 type AuthResponse = {
   user: AuthUser;
   accessToken: string;
+};
+
+export type CreateStrategyPayload = {
+  name: string;
+  symbol: string;
+  environment: 'TESTNET' | 'LIVE';
+  paperTrading: boolean;
+  riskBudgetQuote: number;
+  baseOrderQuote: number;
+  maxDcaOrders: number;
+  dcaStepPercent: number;
+  dcaMultiplier: number;
+  takeProfitPercent: number;
+  independentFromLevel: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -74,6 +95,20 @@ export const api = {
   login: (payload: { email: string; password: string }) =>
     request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
   me: (token: string) => request<AuthUser>('/users/me', { headers: authHeaders(token) }),
+  listStrategies: (token: string) =>
+    request<TradingStrategy[]>('/strategies', { headers: authHeaders(token) }),
+  createStrategy: (token: string, payload: CreateStrategyPayload) =>
+    request<TradingStrategy>('/strategies', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(payload),
+    }),
+  openPaperPosition: (token: string, strategyId: string, marketPrice: number) =>
+    request<TradingPosition>('/paper-trading/positions/open', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify({ strategyId, marketPrice }),
+    }),
   listPaperPositions: (token: string) =>
     request<TradingPosition[]>('/paper-trading/positions', { headers: authHeaders(token) }),
   tickPaperPosition: (token: string, positionId: string, marketPrice: number) =>
