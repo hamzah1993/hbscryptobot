@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma, type NotificationSeverity as PrismaNotificationSeverity } from '@prisma/client';
 import { createHmac, randomUUID } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
 
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 
@@ -63,6 +65,8 @@ export class NotificationsService {
     retried: 0,
   };
 
+  constructor(private readonly prisma: PrismaService) {}
+
   publish(notification: OperationalNotification): void {
     const stored: StoredOperationalNotification = {
       ...notification,
@@ -72,6 +76,10 @@ export class NotificationsService {
 
     this.recent.unshift(stored);
     if (this.recent.length > this.maxRecent) this.recent.length = this.maxRecent;
+
+    if (stored.userId) {
+      void this.persist(stored);
+    }
 
     const context = {
       id: stored.id,
@@ -113,6 +121,30 @@ export class NotificationsService {
 
   getWebhookMetrics(): NotificationWebhookMetrics {
     return { ...this.webhookMetrics };
+  }
+
+  private async persist(notification: StoredOperationalNotification): Promise<void> {
+    if (!notification.userId) return;
+
+    try {
+      await this.prisma.operationalNotification.create({
+        data: {
+          id: notification.id,
+          userId: notification.userId,
+          event: notification.event,
+          message: notification.message,
+          severity: notification.severity as PrismaNotificationSeverity,
+          strategyId: notification.strategyId,
+          positionId: notification.positionId,
+          orderId: notification.orderId,
+          metadata: notification.metadata as Prisma.InputJsonValue | undefined,
+          createdAt: new Date(notification.createdAt),
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown notification persistence error';
+      this.logger.warn(`Operational notification persistence failed for ${notification.id}: ${message}`);
+    }
   }
 
   private parseSeverity(value?: string): NotificationSeverity {
