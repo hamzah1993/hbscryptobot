@@ -7,6 +7,7 @@ type MockResponse = { ok: boolean; status: number };
 type PrismaMock = {
   operationalNotification: {
     create: jest.Mock;
+    findMany: jest.Mock;
   };
 };
 
@@ -26,6 +27,7 @@ describe('NotificationsService webhook delivery', () => {
     prisma = {
       operationalNotification: {
         create: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
   });
@@ -130,6 +132,84 @@ describe('NotificationsService webhook delivery', () => {
       failed: 1,
       retried: 0,
       lastStatusCode: 400,
+    });
+  });
+
+  it('loads persistent user-scoped history in newest-first order', async () => {
+    prisma.operationalNotification.findMany.mockResolvedValue([
+      {
+        id: 'notification-2',
+        userId: 'user-1',
+        event: 'SECOND_EVENT',
+        message: 'Second notification',
+        severity: 'CRITICAL',
+        strategyId: 'strategy-1',
+        positionId: null,
+        orderId: null,
+        metadata: { attempt: 2 },
+        createdAt: new Date('2026-08-04T12:01:00.000Z'),
+      },
+      {
+        id: 'notification-1',
+        userId: 'user-1',
+        event: 'FIRST_EVENT',
+        message: 'First notification',
+        severity: 'INFO',
+        strategyId: null,
+        positionId: null,
+        orderId: null,
+        metadata: null,
+        createdAt: new Date('2026-08-04T12:00:00.000Z'),
+      },
+    ]);
+    const service = createService();
+
+    const notifications = await service.listRecent('user-1', 25);
+
+    expect(prisma.operationalNotification.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+    });
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        id: 'notification-2',
+        event: 'SECOND_EVENT',
+        severity: 'CRITICAL',
+        strategyId: 'strategy-1',
+        metadata: { attempt: 2 },
+        createdAt: '2026-08-04T12:01:00.000Z',
+      }),
+      expect.objectContaining({
+        id: 'notification-1',
+        event: 'FIRST_EVENT',
+        severity: 'INFO',
+        createdAt: '2026-08-04T12:00:00.000Z',
+      }),
+    ]);
+  });
+
+  it('falls back to the in-memory history when persistent reads fail', async () => {
+    prisma.operationalNotification.findMany.mockRejectedValue(new Error('Database unavailable'));
+    const service = createService();
+    service.publish({
+      event: 'FALLBACK_EVENT',
+      message: 'Use memory fallback',
+      severity: 'WARNING',
+      userId: 'user-1',
+      metadata: { source: 'memory' },
+    });
+    await Promise.resolve();
+
+    const notifications = await service.listRecent('user-1', 10);
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      event: 'FALLBACK_EVENT',
+      message: 'Use memory fallback',
+      severity: 'WARNING',
+      userId: 'user-1',
+      metadata: { source: 'memory' },
     });
   });
 });
