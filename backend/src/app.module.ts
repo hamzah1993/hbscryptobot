@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import type { SignOptions } from 'jsonwebtoken';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
@@ -14,11 +16,19 @@ import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
 
 const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expiresIn'];
+const throttleTtlMilliseconds = 60_000;
+const throttleLimit = 120;
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([
+      {
+        ttl: throttleTtlMilliseconds,
+        limit: throttleLimit,
+      },
+    ]),
     JwtModule.register({
       global: true,
       secret: process.env.JWT_SECRET,
@@ -34,5 +44,11 @@ const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expire
     TradingEngineModule,
   ],
   controllers: [AppController],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
