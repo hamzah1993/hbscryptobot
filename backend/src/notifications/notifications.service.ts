@@ -19,11 +19,28 @@ export type StoredOperationalNotification = OperationalNotification & {
   createdAt: string;
 };
 
+type WebhookPayload = {
+  id: string;
+  createdAt: string;
+  event: string;
+  message: string;
+  severity: NotificationSeverity;
+  userId?: string;
+  strategyId?: string;
+  positionId?: string;
+  orderId?: string;
+  metadata?: Record<string, unknown>;
+};
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly recent: StoredOperationalNotification[] = [];
   private readonly maxRecent = 500;
+  private readonly webhookUrl = process.env.NOTIFICATION_WEBHOOK_URL?.trim();
+  private readonly webhookMinimumSeverity = this.parseSeverity(
+    process.env.NOTIFICATION_WEBHOOK_MIN_SEVERITY,
+  );
 
   publish(notification: OperationalNotification): void {
     const stored: StoredOperationalNotification = {
@@ -51,15 +68,15 @@ export class NotificationsService {
 
     if (stored.severity === 'CRITICAL') {
       this.logger.error(payload);
-      return;
-    }
-
-    if (stored.severity === 'WARNING') {
+    } else if (stored.severity === 'WARNING') {
       this.logger.warn(payload);
-      return;
+    } else {
+      this.logger.log(payload);
     }
 
-    this.logger.log(payload);
+    if (this.shouldDeliverWebhook(stored.severity)) {
+      void this.deliverWebhook(stored);
+    }
   }
 
   listRecent(userId: string, limit = 100): StoredOperationalNotification[] {
@@ -71,5 +88,60 @@ export class NotificationsService {
         ...notification,
         metadata: notification.metadata ? { ...notification.metadata } : undefined,
       }));
+  }
+
+  private parseSeverity(value?: string): NotificationSeverity {
+    const normalized = value?.trim().toUpperCase();
+    if (normalized === 'INFO' || normalized === 'WARNING' || normalized === 'CRITICAL') {
+      return normalized;
+    }
+    return 'WARNING';
+  }
+
+  private shouldDeliverWebhook(severity: NotificationSeverity): boolean {
+    if (!this.webhookUrl) return false;
+    const rank: Record<NotificationSeverity, number> = {
+      INFO: 1,
+      WARNING: 2,
+      CRITICAL: 3,
+    };
+    return rank[severity] >= rank[this.webhookMinimumSeverity];
+  }
+
+  private async deliverWebhook(notification: StoredOperationalNotification): Promise<void> {
+    if (!this.webhookUrl) return;
+
+    const payload: WebhookPayload = {
+      id: notification.id,
+      createdAt: notification.createdAt,
+      event: notification.event,
+      message: notification.message,
+      severity: notification.severity,
+      userId: notification.userId,
+      strategyId: notification.strategyId,
+      positionId: notification.positionId,
+      orderId: notification.orderId,
+      metadata: notification.metadata ? { ...notification.metadata } : undefined,
+    };
+
+    try {
+      const response = await fetch(this.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5_000),
+      });
+
+      if (!response.ok) {
+        this.logger.warn(
+          `Notification webhook delivery failed with HTTP ${response.status} for ${notification.id}`,
+        );
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown webhook delivery error';
+      this.logger.warn(`Notification webhook delivery failed for ${notification.id}: ${message}`);
+    }
   }
 }
