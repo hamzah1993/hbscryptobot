@@ -46,6 +46,25 @@ export class BinanceTestnetOrderService {
     );
   }
 
+  async getOrder(userId: string, symbol: string, exchangeOrderId: string) {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) throw new BadRequestException('Symbol is required');
+    if (!exchangeOrderId.trim()) throw new BadRequestException('Exchange order ID is required');
+
+    const credential = await this.credentials.getBinance(
+      userId,
+      ExchangeEnvironment.TESTNET,
+    );
+
+    return this.binance.getOrder(
+      normalized,
+      exchangeOrderId.trim(),
+      credential.apiKey,
+      credential.apiSecret,
+      'testnet',
+    );
+  }
+
   private normalizeQuantity(quantity: number, filters: BinanceSymbolFilter[]) {
     const lotSize = filters.find((filter) => filter.filterType === 'LOT_SIZE');
     if (!lotSize?.stepSize || !lotSize.minQty || !lotSize.maxQty) {
