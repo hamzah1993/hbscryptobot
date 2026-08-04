@@ -17,8 +17,13 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
+    setError(null);
     api.listPaperPositions(token)
       .then(setPositions)
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load positions'))
@@ -28,7 +33,7 @@ export function DashboardPage() {
   const openPositions = positions.filter((position) => position.status === 'OPEN');
   const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
   const realizedPnl = positions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
-  const runningBots = new Set(openPositions.map((position) => position.strategyId ?? position.strategy.id)).size;
+  const runningBots = new Set(openPositions.map((position) => position.strategy.id)).size;
 
   const initials = useMemo(
     () => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB',
