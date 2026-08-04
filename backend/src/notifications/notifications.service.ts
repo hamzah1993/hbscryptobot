@@ -108,15 +108,42 @@ export class NotificationsService {
     }
   }
 
-  listRecent(userId: string, limit = 100): StoredOperationalNotification[] {
+  async listRecent(userId: string, limit = 100): Promise<StoredOperationalNotification[]> {
     const safeLimit = Math.min(Math.max(Math.trunc(limit) || 100, 1), 500);
-    return this.recent
-      .filter((notification) => notification.userId === userId)
-      .slice(0, safeLimit)
-      .map((notification) => ({
-        ...notification,
-        metadata: notification.metadata ? { ...notification.metadata } : undefined,
+
+    try {
+      const notifications = await this.prisma.operationalNotification.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: safeLimit,
+      });
+
+      return notifications.map((notification) => ({
+        id: notification.id,
+        event: notification.event,
+        message: notification.message,
+        severity: notification.severity as NotificationSeverity,
+        userId: notification.userId,
+        strategyId: notification.strategyId ?? undefined,
+        positionId: notification.positionId ?? undefined,
+        orderId: notification.orderId ?? undefined,
+        metadata: notification.metadata
+          ? { ...(notification.metadata as Record<string, unknown>) }
+          : undefined,
+        createdAt: notification.createdAt.toISOString(),
       }));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown notification history error';
+      this.logger.warn(`Persistent notification history read failed for ${userId}: ${message}`);
+
+      return this.recent
+        .filter((notification) => notification.userId === userId)
+        .slice(0, safeLimit)
+        .map((notification) => ({
+          ...notification,
+          metadata: notification.metadata ? { ...notification.metadata } : undefined,
+        }));
+    }
   }
 
   getWebhookMetrics(): NotificationWebhookMetrics {
