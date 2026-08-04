@@ -53,6 +53,9 @@ export class NotificationsService implements OnModuleInit {
   private readonly retentionDays = this.parseRetentionDays(
     process.env.NOTIFICATION_RETENTION_DAYS,
   );
+  private readonly webhookMetricsRetentionDays = this.parseWebhookMetricsRetentionDays(
+    process.env.NOTIFICATION_WEBHOOK_METRICS_RETENTION_DAYS,
+  );
   private readonly webhookUrl = process.env.NOTIFICATION_WEBHOOK_URL?.trim();
   private readonly webhookSecret = process.env.NOTIFICATION_WEBHOOK_SECRET?.trim();
   private readonly webhookMinimumSeverity = this.parseSeverity(
@@ -172,6 +175,24 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
+  async cleanupExpiredWebhookMetricsSnapshots(): Promise<number> {
+    const cutoff = new Date(
+      Date.now() - this.webhookMetricsRetentionDays * 24 * 60 * 60 * 1000,
+    );
+
+    try {
+      const result = await this.prisma.notificationWebhookMetricsSnapshot.deleteMany({
+        where: { recordedAt: { lt: cutoff } },
+      });
+      return result.count;
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown webhook metrics retention error';
+      this.logger.warn(`Notification webhook metrics retention cleanup failed: ${message}`);
+      return 0;
+    }
+  }
+
   private async persist(notification: StoredOperationalNotification): Promise<void> {
     if (!notification.userId) return;
 
@@ -258,6 +279,12 @@ export class NotificationsService implements OnModuleInit {
   }
 
   private parseRetentionDays(value?: string): number {
+    const parsed = Number.parseInt(value ?? '', 10);
+    if (!Number.isFinite(parsed)) return 30;
+    return Math.min(Math.max(parsed, 1), 365);
+  }
+
+  private parseWebhookMetricsRetentionDays(value?: string): number {
     const parsed = Number.parseInt(value ?? '', 10);
     if (!Number.isFinite(parsed)) return 30;
     return Math.min(Math.max(parsed, 1), 365);
