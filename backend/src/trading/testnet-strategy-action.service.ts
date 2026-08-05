@@ -14,8 +14,27 @@ export type ClaimTestnetStrategyActionInput = {
   idempotencyKey: string;
 };
 
+type FailureCategory =
+  | 'NETWORK'
+  | 'TIMEOUT'
+  | 'RATE_LIMIT'
+  | 'EXCHANGE_TEMPORARY'
+  | 'VALIDATION'
+  | 'AUTHENTICATION'
+  | 'INSUFFICIENT_BALANCE'
+  | 'UNKNOWN';
+
+type ClassifiedFailure = {
+  category: FailureCategory;
+  retryable: boolean;
+  message: string;
+};
+
 @Injectable()
 export class TestnetStrategyActionService {
+  private readonly baseRetryDelayMs = 30_000;
+  private readonly maxRetryDelayMs = 15 * 60_000;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -103,6 +122,11 @@ export class TestnetStrategyActionService {
           triggerPrice: input.triggerPrice ?? null,
           actionKey: input.idempotencyKey,
           independent: input.type === 'INDEPENDENT_ENTRY' || input.type === 'INDEPENDENT_EXIT',
+          attemptCount: 0,
+          retryable: false,
+          failureCategory: null,
+          lastAttemptedAt: null,
+          nextRetryAt: null,
         },
       });
 
@@ -123,6 +147,9 @@ export class TestnetStrategyActionService {
         status: 'SUBMITTED',
         orderId: tradingOrderId,
         errorMessage: null,
+        retryable: false,
+        failureCategory: null,
+        nextRetryAt: null,
       },
     });
   }
@@ -134,17 +161,45 @@ export class TestnetStrategyActionService {
         status: 'COMPLETED',
         completedAt: new Date(),
         errorMessage: null,
+        retryable: false,
+        failureCategory: null,
+        nextRetryAt: null,
+      },
+    });
+  }
+
+  async markAttemptStarted(actionId: string) {
+    return this.prisma.strategyAction.update({
+      where: { id: actionId },
+      data: {
+        lastAttemptedAt: new Date(),
+        attemptCount: { increment: 1 },
       },
     });
   }
 
   async markFailed(actionId: string, error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unknown testnet strategy action failure';
+    const classified = this.classifyFailure(error);
+    const current = await this.prisma.strategyAction.findUnique({
+      where: { id: actionId },
+      select: { attemptCount: true, maxAttempts: true },
+    });
+
+    if (!current) throw new BadRequestException('Strategy action not found');
+
+    const exhausted = current.attemptCount >= current.maxAttempts;
+    const permanentlyFailed = !classified.retryable || exhausted;
+    const nextRetryAt = permanentlyFailed ? null : this.calculateNextRetryAt(current.attemptCount);
+
     const action = await this.prisma.strategyAction.update({
       where: { id: actionId },
       data: {
-        status: 'FAILED',
-        errorMessage: message.slice(0, 2000),
+        status: permanentlyFailed ? 'PERMANENTLY_FAILED' : 'FAILED',
+        errorMessage: classified.message.slice(0, 2000),
+        failureCategory: classified.category,
+        retryable: !permanentlyFailed,
+        nextRetryAt,
+        completedAt: permanentlyFailed ? new Date() : null,
       },
       select: {
         id: true,
@@ -156,13 +211,23 @@ export class TestnetStrategyActionService {
         side: true,
         level: true,
         actionKey: true,
+        attemptCount: true,
+        maxAttempts: true,
+        nextRetryAt: true,
+        failureCategory: true,
+        retryable: true,
+        status: true,
       },
     });
 
     this.notifications.publish({
-      event: 'TESTNET_STRATEGY_ACTION_FAILED',
-      message: `Testnet strategy action ${action.type} failed.`,
-      severity: 'CRITICAL',
+      event: permanentlyFailed
+        ? 'TESTNET_STRATEGY_ACTION_PERMANENTLY_FAILED'
+        : 'TESTNET_STRATEGY_ACTION_RETRY_SCHEDULED',
+      message: permanentlyFailed
+        ? `Testnet strategy action ${action.type} failed permanently.`
+        : `Testnet strategy action ${action.type} will be retried.`,
+      severity: permanentlyFailed ? 'CRITICAL' : 'WARNING',
       userId: action.userId,
       strategyId: action.strategyId,
       positionId: action.positionId ?? undefined,
@@ -172,7 +237,11 @@ export class TestnetStrategyActionService {
         actionKey: action.actionKey,
         side: action.side,
         level: action.level,
-        error: message.slice(0, 2000),
+        category: action.failureCategory,
+        attemptCount: action.attemptCount,
+        maxAttempts: action.maxAttempts,
+        nextRetryAt: action.nextRetryAt?.toISOString() ?? null,
+        error: classified.message.slice(0, 2000),
       },
     });
 
@@ -180,11 +249,105 @@ export class TestnetStrategyActionService {
   }
 
   listRecoverable(limit = 100) {
+    const now = new Date();
     return this.prisma.strategyAction.findMany({
-      where: { status: { in: ['PENDING', 'SUBMITTED'] } },
+      where: {
+        OR: [
+          { status: { in: ['PENDING', 'SUBMITTED'] } },
+          { status: 'FAILED', retryable: true, nextRetryAt: { lte: now } },
+        ],
+      },
       include: { strategy: true, position: true, order: true },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ nextRetryAt: 'asc' }, { createdAt: 'asc' }],
       take: Math.min(Math.max(limit, 1), 500),
     });
+  }
+
+  async claimRetry(actionId: string) {
+    const now = new Date();
+    const result = await this.prisma.strategyAction.updateMany({
+      where: {
+        id: actionId,
+        status: 'FAILED',
+        retryable: true,
+        nextRetryAt: { lte: now },
+      },
+      data: {
+        status: 'PENDING',
+        retryable: false,
+        nextRetryAt: null,
+        lastAttemptedAt: now,
+        attemptCount: { increment: 1 },
+      },
+    });
+
+    return result.count === 1;
+  }
+
+  private calculateNextRetryAt(attemptCount: number) {
+    const exponent = Math.max(attemptCount - 1, 0);
+    const delay = Math.min(this.baseRetryDelayMs * Math.pow(2, exponent), this.maxRetryDelayMs);
+    return new Date(Date.now() + delay);
+  }
+
+  private classifyFailure(error: unknown): ClassifiedFailure {
+    const message = error instanceof Error ? error.message : String(error ?? 'Unknown testnet strategy action failure');
+    const normalized = message.toLowerCase();
+    const statusCode = this.extractStatusCode(error);
+
+    if (normalized.includes('timeout') || normalized.includes('timed out') || statusCode === 408) {
+      return { category: 'TIMEOUT', retryable: true, message };
+    }
+    if (
+      normalized.includes('econnreset') ||
+      normalized.includes('econnrefused') ||
+      normalized.includes('enotfound') ||
+      normalized.includes('network') ||
+      normalized.includes('socket')
+    ) {
+      return { category: 'NETWORK', retryable: true, message };
+    }
+    if (statusCode === 429 || normalized.includes('rate limit') || normalized.includes('too many requests')) {
+      return { category: 'RATE_LIMIT', retryable: true, message };
+    }
+    if ((statusCode !== null && statusCode >= 500) || normalized.includes('temporarily unavailable')) {
+      return { category: 'EXCHANGE_TEMPORARY', retryable: true, message };
+    }
+    if (
+      statusCode === 401 ||
+      statusCode === 403 ||
+      normalized.includes('api key') ||
+      normalized.includes('signature') ||
+      normalized.includes('authentication') ||
+      normalized.includes('permission')
+    ) {
+      return { category: 'AUTHENTICATION', retryable: false, message };
+    }
+    if (normalized.includes('insufficient balance') || normalized.includes('insufficient funds')) {
+      return { category: 'INSUFFICIENT_BALANCE', retryable: false, message };
+    }
+    if (
+      normalized.includes('invalid') ||
+      normalized.includes('validation') ||
+      normalized.includes('quantity') ||
+      normalized.includes('notional') ||
+      normalized.includes('symbol')
+    ) {
+      return { category: 'VALIDATION', retryable: false, message };
+    }
+
+    return { category: 'UNKNOWN', retryable: false, message };
+  }
+
+  private extractStatusCode(error: unknown): number | null {
+    if (!error || typeof error !== 'object') return null;
+    const candidate = error as {
+      status?: unknown;
+      statusCode?: unknown;
+      response?: { status?: unknown };
+    };
+    const raw = candidate.statusCode ?? candidate.status ?? candidate.response?.status;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 }
