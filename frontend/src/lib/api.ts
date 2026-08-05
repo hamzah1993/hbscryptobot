@@ -91,6 +91,21 @@ export type BinanceAccountTestResponse = {
   permissions?: string[];
 };
 
+export type BinanceTestnetConnectionResponse = {
+  connected: boolean;
+  exchange: 'BINANCE';
+  environment: 'TESTNET';
+  canTrade: boolean;
+  accountType: string | null;
+};
+
+export type BinanceTestnetBalancesResponse = {
+  exchange: 'BINANCE';
+  environment: 'TESTNET';
+  canTrade: boolean;
+  balances: Array<{ asset: string; free: number; locked: number }>;
+};
+
 export type TradingStrategy = {
   id: string;
   name: string;
@@ -455,10 +470,16 @@ export const api = {
     request<ExchangeCredentialSummary[]>('/exchange/credentials', { headers: authHeaders(token) }),
   saveBinanceCredentials: (token: string, payload: { apiKey: string; apiSecret: string; environment: ExchangeEnvironment }) =>
     request<ExchangeCredentialSummary>('/exchange/credentials/binance', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  saveBinanceTestnetCredentials: (token: string, payload: { apiKey: string; apiSecret: string }) =>
+    request<ExchangeCredentialSummary>('/exchange/credentials/binance', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ ...payload, environment: 'TESTNET' }) }),
   deleteBinanceCredentials: (token: string, environment: ExchangeEnvironment) =>
     request<{ deleted: boolean }>(`/exchange/credentials/binance/${environment}`, { method: 'DELETE', headers: authHeaders(token) }),
   testBinanceConnection: (token: string, environment: ExchangeEnvironment) =>
     request<BinanceAccountTestResponse>('/exchange/binance/account/test', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ environment: toBinanceEnvironment(environment) }) }),
+  testBinanceTestnetConnection: (token: string) =>
+    request<BinanceTestnetConnectionResponse>('/exchange/credentials/binance/testnet/test-connection', { method: 'POST', headers: authHeaders(token) }),
+  getBinanceTestnetBalances: (token: string) =>
+    request<BinanceTestnetBalancesResponse>('/exchange/credentials/binance/testnet/balances', { headers: authHeaders(token) }),
   getMarketCandles: (token: string, symbol: string, interval: BinanceKlineInterval = '5m', limit = 200, environment: BinanceStreamEnvironment = 'live') =>
     request<MarketCandlesResponse>(`/market-data/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(String(limit))}&environment=${environment}`, { headers: authHeaders(token) }),
   subscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
