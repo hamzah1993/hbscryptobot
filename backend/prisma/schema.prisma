@@ -71,7 +71,19 @@ enum StrategyActionStatus {
   SUBMITTED
   COMPLETED
   FAILED
+  PERMANENTLY_FAILED
   CANCELLED
+}
+
+enum StrategyActionFailureCategory {
+  NETWORK
+  TIMEOUT
+  RATE_LIMIT
+  EXCHANGE_TEMPORARY
+  VALIDATION
+  AUTHENTICATION
+  INSUFFICIENT_BALANCE
+  UNKNOWN
 }
 
 enum NotificationSeverity {
@@ -234,146 +246,127 @@ model TradingOrder {
 }
 
 model StrategyAction {
-  id            String               @id @default(uuid())
-  userId        String
-  strategyId    String
-  positionId    String?
-  subPositionId String?
-  orderId       String?              @unique
-  actionKey     String               @unique
-  type          StrategyActionType
-  status        StrategyActionStatus @default(PENDING)
-  level         Int?
-  independent   Boolean              @default(false)
-  side          OrderSide
-  quantity      Decimal?             @db.Decimal(28, 12)
-  quoteAmount   Decimal?             @db.Decimal(28, 8)
-  triggerPrice  Decimal?             @db.Decimal(28, 12)
-  errorMessage  String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  completedAt   DateTime?
-  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  strategy      TradingStrategy      @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  position      TradingPosition?     @relation(fields: [positionId], references: [id], onDelete: Cascade)
-  subPosition   TradingSubPosition?  @relation(fields: [subPositionId], references: [id], onDelete: SetNull)
-  order         TradingOrder?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  id               String                        @id @default(uuid())
+  userId           String
+  strategyId       String
+  positionId       String?
+  subPositionId    String?
+  orderId          String?                       @unique
+  actionKey        String                        @unique
+  type             StrategyActionType
+  status           StrategyActionStatus          @default(PENDING)
+  failureCategory  StrategyActionFailureCategory?
+  retryable        Boolean                       @default(false)
+  attemptCount     Int                           @default(0)
+  maxAttempts      Int                           @default(5)
+  lastAttemptedAt  DateTime?
+  nextRetryAt      DateTime?
+  level            Int?
+  independent      Boolean                       @default(false)
+  side             OrderSide
+  quantity         Decimal?                      @db.Decimal(28, 12)
+  quoteAmount      Decimal?                      @db.Decimal(28, 8)
+  triggerPrice     Decimal?                      @db.Decimal(28, 12)
+  errorMessage     String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  completedAt      DateTime?
+  user             User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy         TradingStrategy               @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  position         TradingPosition?              @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  subPosition      TradingSubPosition?           @relation(fields: [subPositionId], references: [id], onDelete: SetNull)
+  order            TradingOrder?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@index([strategyId, status])
+  @@index([status, nextRetryAt])
   @@index([userId, createdAt])
-  @@index([positionId, status])
-  @@index([subPositionId, status])
-}
-
-model HistoricalCandle {
-  id        String       @id @default(uuid())
-  exchange  ExchangeName @default(BINANCE)
-  symbol    String
-  interval  String
-  openTime  DateTime
-  closeTime DateTime
-  open      Decimal      @db.Decimal(28, 12)
-  high      Decimal      @db.Decimal(28, 12)
-  low       Decimal      @db.Decimal(28, 12)
-  close     Decimal      @db.Decimal(28, 12)
-  volume    Decimal      @db.Decimal(36, 12)
-  createdAt DateTime     @default(now())
-
-  @@unique([exchange, symbol, interval, openTime])
-  @@index([symbol, interval, openTime])
-}
-
-model BacktestRun {
-  id                 String                @id @default(uuid())
-  userId             String
-  strategyId         String
-  exchange           ExchangeName          @default(BINANCE)
-  symbol             String
-  interval           String
-  startTime          DateTime
-  endTime            DateTime
-  status             BacktestRunStatus     @default(PENDING)
-  initialCapital     Decimal               @db.Decimal(28, 8)
-  endingCapital      Decimal?              @db.Decimal(28, 8)
-  realizedPnlQuote   Decimal?              @db.Decimal(28, 8)
-  returnPercent      Decimal?              @db.Decimal(12, 6)
-  maxDrawdownPercent Decimal?              @db.Decimal(12, 6)
-  tradeCount         Int                   @default(0)
-  errorMessage       String?
-  startedAt          DateTime?
-  completedAt        DateTime?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  strategy           TradingStrategy       @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  trades             BacktestTrade[]
-  equityPoints       BacktestEquityPoint[]
-
-  @@index([userId, createdAt])
-  @@index([strategyId, createdAt])
-  @@index([status, createdAt])
-}
-
-model BacktestTrade {
-  id               String            @id @default(uuid())
-  runId            String
-  type             BacktestTradeType
-  level            Int
-  independent      Boolean           @default(false)
-  executedAt       DateTime
-  price            Decimal           @db.Decimal(28, 12)
-  quantity         Decimal           @db.Decimal(28, 12)
-  quoteAmount      Decimal           @db.Decimal(28, 8)
-  feeQuote         Decimal           @default(0) @db.Decimal(28, 8)
-  realizedPnlQuote Decimal?          @db.Decimal(28, 8)
-  run              BacktestRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
-  createdAt        DateTime          @default(now())
-
-  @@index([runId, executedAt])
-  @@index([runId, type])
-}
-
-model BacktestEquityPoint {
-  id           String      @id @default(uuid())
-  runId        String
-  recordedAt   DateTime
-  equityQuote  Decimal     @db.Decimal(28, 8)
-  drawdownPercent Decimal  @db.Decimal(12, 6)
-  run          BacktestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  createdAt    DateTime    @default(now())
-
-  @@unique([runId, recordedAt])
-  @@index([runId, recordedAt])
 }
 
 model OperationalNotification {
   id         String               @id @default(uuid())
   userId     String
-  event      String
-  message    String
-  severity   NotificationSeverity
   strategyId String?
   positionId String?
   orderId    String?
+  event      String
+  message    String
+  severity   NotificationSeverity @default(INFO)
   metadata   Json?
+  readAt     DateTime?
   createdAt  DateTime             @default(now())
   user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
-  @@index([severity, createdAt])
+  @@index([strategyId, createdAt])
 }
 
-model NotificationWebhookMetricsSnapshot {
-  id             String   @id @default(uuid())
-  attempted      Int      @default(0)
-  delivered      Int      @default(0)
-  failed         Int      @default(0)
-  retried        Int      @default(0)
-  lastAttemptAt  DateTime?
-  lastSuccessAt  DateTime?
-  lastFailureAt  DateTime?
-  lastStatusCode Int?
-  recordedAt     DateTime @default(now())
+model BacktestRun {
+  id                String            @id @default(uuid())
+  userId            String
+  strategyId        String?
+  name              String
+  symbol            String
+  interval          String
+  startTime         DateTime
+  endTime           DateTime
+  initialCapital    Decimal           @db.Decimal(28, 8)
+  feePercent        Decimal           @default(0) @db.Decimal(10, 6)
+  slippagePercent   Decimal           @default(0) @db.Decimal(10, 6)
+  status            BacktestRunStatus @default(PENDING)
+  errorMessage      String?
+  finalEquity       Decimal?          @db.Decimal(28, 8)
+  totalReturnPercent Decimal?         @db.Decimal(18, 8)
+  maxDrawdownPercent Decimal?         @db.Decimal(18, 8)
+  totalTrades       Int               @default(0)
+  winningTrades     Int               @default(0)
+  losingTrades      Int               @default(0)
+  realizedPnlQuote  Decimal           @default(0) @db.Decimal(28, 8)
+  parameters        Json
+  trades            BacktestTrade[]
+  equityPoints      BacktestEquityPoint[]
+  strategy          TradingStrategy?  @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  completedAt       DateTime?
 
-  @@index([recordedAt])
+  @@index([userId, createdAt])
+  @@index([strategyId, createdAt])
+}
+
+model BacktestTrade {
+  id                 String            @id @default(uuid())
+  backtestRunId      String
+  sequence           Int
+  type               BacktestTradeType
+  side               OrderSide
+  level              Int
+  independent        Boolean           @default(false)
+  quantity           Decimal           @db.Decimal(28, 12)
+  price              Decimal           @db.Decimal(28, 12)
+  grossQuoteAmount   Decimal           @db.Decimal(28, 8)
+  feeQuoteAmount     Decimal           @default(0) @db.Decimal(28, 8)
+  netQuoteAmount     Decimal           @db.Decimal(28, 8)
+  realizedPnlQuote   Decimal           @default(0) @db.Decimal(28, 8)
+  executedAt         DateTime
+  metadata           Json?
+  backtestRun        BacktestRun       @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  createdAt          DateTime          @default(now())
+
+  @@unique([backtestRunId, sequence])
+  @@index([backtestRunId, executedAt])
+}
+
+model BacktestEquityPoint {
+  id            String      @id @default(uuid())
+  backtestRunId String
+  sequence      Int
+  recordedAt    DateTime
+  equityQuote   Decimal     @db.Decimal(28, 8)
+  drawdownPercent Decimal   @db.Decimal(18, 8)
+  backtestRun   BacktestRun @relation(fields: [backtestRunId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@unique([backtestRunId, sequence])
+  @@index([backtestRunId, recordedAt])
 }
