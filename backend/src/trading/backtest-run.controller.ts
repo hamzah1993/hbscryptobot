@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BacktestExecutionService } from './backtest-execution.service';
 import {
   BacktestRunService,
   type CreateBacktestRunInput,
@@ -31,7 +32,10 @@ type CreateBacktestRunBody = Omit<
 @Controller('backtests')
 @UseGuards(JwtAuthGuard)
 export class BacktestRunController {
-  constructor(private readonly runs: BacktestRunService) {}
+  constructor(
+    private readonly runs: BacktestRunService,
+    private readonly execution: BacktestExecutionService,
+  ) {}
 
   @Post()
   create(
@@ -43,6 +47,14 @@ export class BacktestRunController {
       startTime: new Date(body.startTime),
       endTime: new Date(body.endTime),
     });
+  }
+
+  @Post(':runId/start')
+  start(
+    @Req() request: AuthenticatedRequest,
+    @Param('runId') runId: string,
+  ) {
+    return this.execution.start(request.user.sub, runId);
   }
 
   @Get()
