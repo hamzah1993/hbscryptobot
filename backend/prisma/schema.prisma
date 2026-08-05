@@ -21,6 +21,12 @@ enum ExchangeEnvironment {
   LIVE
 }
 
+enum TradingMode {
+  PAPER
+  BINANCE_TESTNET
+  BINANCE_LIVE
+}
+
 enum StrategyStatus {
   STOPPED
   RUNNING
@@ -141,29 +147,37 @@ model ExchangeCredential {
 }
 
 model TradingStrategy {
-  id                    String               @id @default(uuid())
-  userId                String
-  name                  String
-  symbol                String
-  exchange              ExchangeName         @default(BINANCE)
-  environment           ExchangeEnvironment  @default(TESTNET)
-  status                StrategyStatus        @default(STOPPED)
-  paperTrading          Boolean               @default(true)
-  riskBudgetQuote       Decimal               @db.Decimal(28, 8)
-  baseOrderQuote        Decimal               @db.Decimal(28, 8)
-  maxDcaOrders          Int                   @default(8)
-  dcaStepPercent        Decimal               @db.Decimal(10, 4)
-  dcaMultiplier         Decimal               @default(1) @db.Decimal(10, 4)
-  takeProfitPercent     Decimal               @db.Decimal(10, 4)
-  independentFromLevel  Int                   @default(5)
-  positions             TradingPosition[]
-  actions               StrategyAction[]
-  backtestRuns          BacktestRun[]
-  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
+  id                           String               @id @default(uuid())
+  userId                       String
+  name                         String
+  symbol                       String
+  exchange                     ExchangeName         @default(BINANCE)
+  environment                  ExchangeEnvironment  @default(TESTNET)
+  mode                         TradingMode           @default(PAPER)
+  status                       StrategyStatus        @default(STOPPED)
+  paperTrading                 Boolean               @default(true)
+  riskBudgetQuote              Decimal               @db.Decimal(28, 8)
+  baseOrderQuote               Decimal               @db.Decimal(28, 8)
+  maxDcaOrders                 Int                   @default(8)
+  dcaStepPercent               Decimal               @db.Decimal(10, 4)
+  dcaMultiplier                Decimal               @default(1) @db.Decimal(10, 4)
+  takeProfitPercent            Decimal               @db.Decimal(10, 4)
+  independentFromLevel         Int                   @default(5)
+  maxStrategyExposureQuote     Decimal?              @db.Decimal(28, 8)
+  maxOrderQuote                Decimal?              @db.Decimal(28, 8)
+  maxDailyRealizedLossQuote    Decimal?              @db.Decimal(28, 8)
+  maxOpenParentPositions       Int                   @default(1)
+  maxOpenIndependentPositions  Int                   @default(20)
+  maxIndependentExposureQuote  Decimal?              @db.Decimal(28, 8)
+  positions                    TradingPosition[]
+  actions                      StrategyAction[]
+  backtestRuns                 BacktestRun[]
+  user                         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt                    DateTime              @default(now())
+  updatedAt                    DateTime              @updatedAt
 
   @@index([userId, status])
+  @@index([userId, mode, status])
   @@unique([userId, name])
 }
 
