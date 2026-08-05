@@ -4,6 +4,8 @@ import { BacktestExecutionService } from './backtest-execution.service';
 import { BacktestRunService } from './backtest-run.service';
 import { HistoricalCandleQueryService } from './historical-candle-query.service';
 
+const BACKTEST_CANDLE_PAGE_SIZE = 5000;
+
 @Injectable()
 export class BacktestCandleRunnerService {
   constructor(
@@ -18,14 +20,27 @@ export class BacktestCandleRunnerService {
     await this.execution.start(userId, run.id);
 
     try {
-      const candles = await this.candles.list({
-        exchange: run.exchange,
-        symbol: run.symbol,
-        interval: run.interval,
-        startTime: run.startTime,
-        endTime: run.endTime,
-        limit: 5000,
-      });
+      const candles = [];
+      let startTime = run.startTime;
+
+      while (startTime <= run.endTime) {
+        const page = await this.candles.list({
+          exchange: run.exchange,
+          symbol: run.symbol,
+          interval: run.interval,
+          startTime,
+          endTime: run.endTime,
+          limit: BACKTEST_CANDLE_PAGE_SIZE,
+        });
+
+        if (page.length === 0) break;
+        candles.push(...page);
+
+        if (page.length < BACKTEST_CANDLE_PAGE_SIZE) break;
+
+        const lastOpenTime = page[page.length - 1].openTime;
+        startTime = new Date(lastOpenTime.getTime() + 1);
+      }
 
       if (candles.length === 0) {
         throw new BadRequestException(
