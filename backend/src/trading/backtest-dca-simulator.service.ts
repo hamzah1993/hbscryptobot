@@ -12,6 +12,12 @@ export type BacktestDcaSimulationInput = {
   priceDeviationPercent: Prisma.Decimal | string | number;
   volumeMultiplier?: Prisma.Decimal | string | number;
   takeProfitPercent?: Prisma.Decimal | string | number;
+  independentFromLevel?: number;
+};
+
+type IndependentPosition = {
+  quantity: Prisma.Decimal;
+  costQuote: Prisma.Decimal;
 };
 
 @Injectable()
@@ -22,6 +28,17 @@ export class BacktestDcaSimulatorService {
     }
     if (!Number.isInteger(input.maxEntries) || input.maxEntries < 1) {
       throw new BadRequestException('maxEntries must be a positive integer');
+    }
+
+    const independentFromLevel = input.independentFromLevel ?? input.maxEntries + 1;
+    if (
+      !Number.isInteger(independentFromLevel) ||
+      independentFromLevel < 2 ||
+      independentFromLevel > input.maxEntries + 1
+    ) {
+      throw new BadRequestException(
+        'independentFromLevel must be an integer between 2 and maxEntries + 1',
+      );
     }
 
     const initialCapital = new Prisma.Decimal(input.initialCapital);
@@ -65,8 +82,9 @@ export class BacktestDcaSimulatorService {
     );
 
     let quoteBalance = initialCapital;
-    let baseQuantity = new Prisma.Decimal(0);
-    let positionCostQuote = new Prisma.Decimal(0);
+    let parentQuantity = new Prisma.Decimal(0);
+    let parentCostQuote = new Prisma.Decimal(0);
+    const independentPositions: IndependentPosition[] = [];
     let entries = 0;
     let exits = 0;
     let peakEquity = initialCapital;
@@ -74,7 +92,7 @@ export class BacktestDcaSimulatorService {
     const entryPrice = prices[0];
 
     for (const price of prices) {
-      while (entries < input.maxEntries && baseQuantity.isZero()) {
+      while (entries < input.maxEntries) {
         const triggerPrice = entryPrice.mul(
           new Prisma.Decimal(1).sub(
             priceDeviationPercent.mul(entries).div(100),
@@ -87,45 +105,53 @@ export class BacktestDcaSimulatorService {
         if (!spend.isPositive()) break;
 
         quoteBalance = quoteBalance.sub(spend);
-        baseQuantity = baseQuantity.add(spend.div(price));
-        positionCostQuote = positionCostQuote.add(spend);
+        const quantity = spend.div(price);
+        const level = entries + 1;
+
+        if (level >= independentFromLevel) {
+          independentPositions.push({ quantity, costQuote: spend });
+        } else {
+          parentQuantity = parentQuantity.add(quantity);
+          parentCostQuote = parentCostQuote.add(spend);
+        }
         entries += 1;
       }
 
-      while (entries < input.maxEntries && baseQuantity.isPositive()) {
-        const triggerPrice = entryPrice.mul(
-          new Prisma.Decimal(1).sub(
-            priceDeviationPercent.mul(entries).div(100),
-          ),
-        );
-        if (price.greaterThan(triggerPrice)) break;
+      if (takeProfitPercent !== null) {
+        if (
+          parentQuantity.isPositive() &&
+          price.greaterThanOrEqualTo(
+            parentCostQuote
+              .div(parentQuantity)
+              .mul(new Prisma.Decimal(1).add(takeProfitPercent.div(100))),
+          )
+        ) {
+          quoteBalance = quoteBalance.add(parentQuantity.mul(price));
+          parentQuantity = new Prisma.Decimal(0);
+          parentCostQuote = new Prisma.Decimal(0);
+          exits += 1;
+        }
 
-        const allocation = initialCapital.mul(weights[entries]).div(totalWeight);
-        const spend = Prisma.Decimal.min(allocation, quoteBalance);
-        if (!spend.isPositive()) break;
-
-        quoteBalance = quoteBalance.sub(spend);
-        baseQuantity = baseQuantity.add(spend.div(price));
-        positionCostQuote = positionCostQuote.add(spend);
-        entries += 1;
+        for (let index = independentPositions.length - 1; index >= 0; index -= 1) {
+          const position = independentPositions[index];
+          const takeProfitPrice = position.costQuote
+            .div(position.quantity)
+            .mul(new Prisma.Decimal(1).add(takeProfitPercent.div(100)));
+          if (price.greaterThanOrEqualTo(takeProfitPrice)) {
+            quoteBalance = quoteBalance.add(position.quantity.mul(price));
+            independentPositions.splice(index, 1);
+            exits += 1;
+          }
+        }
       }
 
-      if (
-        takeProfitPercent !== null &&
-        baseQuantity.isPositive() &&
-        price.greaterThanOrEqualTo(
-          positionCostQuote
-            .div(baseQuantity)
-            .mul(new Prisma.Decimal(1).add(takeProfitPercent.div(100))),
-        )
-      ) {
-        quoteBalance = quoteBalance.add(baseQuantity.mul(price));
-        baseQuantity = new Prisma.Decimal(0);
-        positionCostQuote = new Prisma.Decimal(0);
-        exits += 1;
-      }
-
-      const equity = quoteBalance.add(baseQuantity.mul(price));
+      const independentEquity = independentPositions.reduce(
+        (sum, position) => sum.add(position.quantity.mul(price)),
+        new Prisma.Decimal(0),
+      );
+      const equity = quoteBalance
+        .add(parentQuantity.mul(price))
+        .add(independentEquity);
       if (equity.greaterThan(peakEquity)) peakEquity = equity;
 
       const drawdownPercent = peakEquity
@@ -137,9 +163,14 @@ export class BacktestDcaSimulatorService {
       }
     }
 
-    const endingCapital = quoteBalance.add(
-      baseQuantity.mul(prices[prices.length - 1]),
+    const finalPrice = prices[prices.length - 1];
+    const independentEndingValue = independentPositions.reduce(
+      (sum, position) => sum.add(position.quantity.mul(finalPrice)),
+      new Prisma.Decimal(0),
     );
+    const endingCapital = quoteBalance
+      .add(parentQuantity.mul(finalPrice))
+      .add(independentEndingValue);
     const realizedPnlQuote = endingCapital.sub(initialCapital);
     const returnPercent = realizedPnlQuote.div(initialCapital).mul(100);
 
