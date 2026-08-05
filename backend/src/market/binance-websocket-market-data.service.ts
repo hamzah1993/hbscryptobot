@@ -78,7 +78,7 @@ export class BinanceWebsocketMarketDataService implements OnModuleDestroy {
       symbol: normalized,
       environment,
       subscribed: Boolean(state && !state.stopped),
-      connected: readyState === WebSocket.OPEN,
+      connected: readyState === 1,
       reconnectAttempts: state?.reconnectAttempts ?? 0,
       latestPrice: this.getLatestPrice(normalized, environment),
     };
