@@ -1,6 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { BacktestRunStatus } from '@prisma/client';
+import { BacktestRunStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import type {
+  BacktestSimulationEquityPoint,
+  BacktestSimulationResult,
+  BacktestSimulationTrade,
+} from './backtest-buy-hold-simulator.service';
 
 @Injectable()
 export class BacktestExecutionService {
@@ -42,18 +47,82 @@ export class BacktestExecutionService {
     return run;
   }
 
-  async complete(
+  private tradeData(runId: string, trade: BacktestSimulationTrade) {
+    return {
+      runId,
+      type: trade.type,
+      level: trade.level,
+      independent: trade.independent,
+      executedAt: trade.executedAt,
+      price: new Prisma.Decimal(trade.price),
+      quantity: new Prisma.Decimal(trade.quantity),
+      quoteAmount: new Prisma.Decimal(trade.quoteAmount),
+      feeQuote: new Prisma.Decimal(trade.feeQuote),
+      realizedPnlQuote:
+        trade.realizedPnlQuote === undefined
+          ? null
+          : new Prisma.Decimal(trade.realizedPnlQuote),
+    };
+  }
+
+  private equityData(runId: string, point: BacktestSimulationEquityPoint) {
+    return {
+      runId,
+      recordedAt: point.recordedAt,
+      equityQuote: new Prisma.Decimal(point.equityQuote),
+      drawdownPercent: new Prisma.Decimal(point.drawdownPercent),
+    };
+  }
+
+  async persistEvents(
     runId: string,
-    result: {
-      endingCapital: string | number;
-      realizedPnlQuote: string | number;
-      returnPercent: string | number;
-      maxDrawdownPercent: string | number;
-      tradeCount: number;
-    },
+    trades: BacktestSimulationTrade[] = [],
+    equityPoints: BacktestSimulationEquityPoint[] = [],
   ) {
     const normalizedRunId = runId.trim();
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.backtestTrade.deleteMany({ where: { runId: normalizedRunId } });
+      await tx.backtestEquityPoint.deleteMany({
+        where: { runId: normalizedRunId },
+      });
+
+      if (trades.length > 0) {
+        await tx.backtestTrade.createMany({
+          data: trades.map((trade) => this.tradeData(normalizedRunId, trade)),
+        });
+      }
+
+      if (equityPoints.length > 0) {
+        await tx.backtestEquityPoint.createMany({
+          data: equityPoints.map((point) =>
+            this.equityData(normalizedRunId, point),
+          ),
+        });
+      }
+
+      return {
+        tradeCount: trades.length,
+        equityPointCount: equityPoints.length,
+      };
+    });
+  }
+
+  async complete(runId: string, result: BacktestSimulationResult) {
+    const normalizedRunId = runId.trim();
     const completedAt = new Date();
+    const {
+      trades = [],
+      equityPoints = [],
+      endingCapital,
+      realizedPnlQuote,
+      returnPercent,
+      maxDrawdownPercent,
+      tradeCount,
+    } = result;
+
+    await this.persistEvents(normalizedRunId, trades, equityPoints);
+
     const transition = await this.prisma.backtestRun.updateMany({
       where: {
         id: normalizedRunId,
@@ -61,7 +130,11 @@ export class BacktestExecutionService {
       },
       data: {
         status: BacktestRunStatus.COMPLETED,
-        ...result,
+        endingCapital,
+        realizedPnlQuote,
+        returnPercent,
+        maxDrawdownPercent,
+        tradeCount,
         completedAt,
         errorMessage: null,
       },

@@ -1,13 +1,27 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BacktestTradeType, Prisma } from '@prisma/client';
 
 export type BacktestSimulationCandle = {
   close: Prisma.Decimal | string | number;
+  openTime?: Date;
 };
 
-export type BacktestBuyHoldSimulationInput = {
-  initialCapital: Prisma.Decimal | string | number;
-  candles: BacktestSimulationCandle[];
+export type BacktestSimulationTrade = {
+  type: BacktestTradeType;
+  level: number;
+  independent: boolean;
+  executedAt: Date;
+  price: string;
+  quantity: string;
+  quoteAmount: string;
+  feeQuote: string;
+  realizedPnlQuote?: string;
+};
+
+export type BacktestSimulationEquityPoint = {
+  recordedAt: Date;
+  equityQuote: string;
+  drawdownPercent: string;
 };
 
 export type BacktestSimulationResult = {
@@ -16,6 +30,13 @@ export type BacktestSimulationResult = {
   returnPercent: string;
   maxDrawdownPercent: string;
   tradeCount: number;
+  trades?: BacktestSimulationTrade[];
+  equityPoints?: BacktestSimulationEquityPoint[];
+};
+
+export type BacktestBuyHoldSimulationInput = {
+  initialCapital: Prisma.Decimal | string | number;
+  candles: BacktestSimulationCandle[];
 };
 
 @Injectable()
