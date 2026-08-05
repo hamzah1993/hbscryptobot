@@ -53,6 +53,8 @@ export type TestnetOrderStatus = 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'RE
 export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 export type TestnetActionStatus = 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
+export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type BacktestTradeType = 'PARENT_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 
 export type OperationalNotification = {
   id: string;
@@ -85,11 +87,7 @@ export type BinanceAccountTestResponse = {
   canDeposit?: boolean;
   updateTime?: number;
   accountType?: string;
-  balances?: Array<{
-    asset: string;
-    free: string;
-    locked: string;
-  }>;
+  balances?: Array<{ asset: string; free: string; locked: string }>;
   permissions?: string[];
 };
 
@@ -127,6 +125,77 @@ export type TradingPosition = {
   subPositions: TradingSubPosition[];
 };
 
+export type BacktestTrade = {
+  id: string;
+  runId: string;
+  type: BacktestTradeType;
+  level: number;
+  independent: boolean;
+  executedAt: string;
+  price: string;
+  quantity: string;
+  quoteAmount: string;
+  feeQuote: string;
+  realizedPnlQuote: string | null;
+};
+
+export type BacktestEquityPoint = {
+  id: string;
+  runId: string;
+  recordedAt: string;
+  equityQuote: string;
+  drawdownPercent: string;
+};
+
+export type BacktestRun = {
+  id: string;
+  userId: string;
+  strategyId: string;
+  exchange: 'BINANCE';
+  symbol: string;
+  interval: string;
+  startTime: string;
+  endTime: string;
+  status: BacktestRunStatus;
+  initialCapital: string;
+  endingCapital: string | null;
+  realizedPnlQuote: string | null;
+  returnPercent: string | null;
+  maxDrawdownPercent: string | null;
+  tradeCount: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  strategy?: TradingStrategy & { name?: string };
+  trades?: BacktestTrade[];
+  equityPoints?: BacktestEquityPoint[];
+};
+
+export type BacktestReport = {
+  run: BacktestRun & {
+    strategy: TradingStrategy & { name: string };
+    trades: BacktestTrade[];
+    equityPoints: BacktestEquityPoint[];
+  };
+  analytics: {
+    completedExitCount: number;
+    winningTradeCount: number;
+    losingTradeCount: number;
+    winRatePercent: string;
+    grossProfitQuote: string;
+    grossLossQuote: string;
+    averageWinQuote: string;
+    averageLossQuote: string;
+    profitFactor: string | null;
+    peakEquityQuote: string;
+    maximumDcaLevelUsed: number;
+    independentEntries: number;
+    independentExits: number;
+  };
+};
+
 export type TestnetOrder = {
   id: string;
   positionId: string;
@@ -151,11 +220,7 @@ export type TestnetOrder = {
     status: TradingPosition['status'];
     strategy: Pick<TradingStrategy, 'id' | 'name' | 'status' | 'environment' | 'paperTrading'>;
   };
-  subPosition: {
-    id: string;
-    level: number;
-    status: 'OPEN' | 'CLOSED';
-  } | null;
+  subPosition: { id: string; level: number; status: 'OPEN' | 'CLOSED' } | null;
   strategyAction: {
     id: string;
     type: TestnetActionType;
@@ -231,16 +296,8 @@ export type TestnetAction = {
   updatedAt: string;
   completedAt: string | null;
   strategy: Pick<TradingStrategy, 'id' | 'name' | 'symbol' | 'status' | 'environment' | 'paperTrading'>;
-  position: {
-    id: string;
-    symbol: string;
-    status: TradingPosition['status'];
-  } | null;
-  subPosition: {
-    id: string;
-    level: number;
-    status: 'OPEN' | 'CLOSED';
-  } | null;
+  position: { id: string; symbol: string; status: TradingPosition['status'] } | null;
+  subPosition: { id: string; level: number; status: 'OPEN' | 'CLOSED' } | null;
   order: {
     id: string;
     exchangeOrderId: string | null;
@@ -314,6 +371,15 @@ export type CreateStrategyPayload = {
   independentFromLevel: number;
 };
 
+export type CreateBacktestPayload = {
+  strategyId: string;
+  symbol: string;
+  interval: string;
+  startTime: string;
+  endTime: string;
+  initialCapital: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -342,118 +408,54 @@ export const api = {
   login: (payload: { email: string; password: string }) =>
     request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
   me: (token: string) => request<AuthUser>('/users/me', { headers: authHeaders(token) }),
-  listStrategies: (token: string) =>
-    request<TradingStrategy[]>('/strategies', { headers: authHeaders(token) }),
+  listStrategies: (token: string) => request<TradingStrategy[]>('/strategies', { headers: authHeaders(token) }),
   createStrategy: (token: string, payload: CreateStrategyPayload) =>
-    request<TradingStrategy>('/strategies', {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify(payload),
-    }),
+    request<TradingStrategy>('/strategies', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   setStrategyStatus: (token: string, strategyId: string, status: StrategyStatus) =>
-    request<TradingStrategy>(`/strategies/${strategyId}/status`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ status }),
-    }),
+    request<TradingStrategy>(`/strategies/${strategyId}/status`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ status }) }),
+  listBacktests: (token: string, limit = 100) =>
+    request<BacktestRun[]>(`/backtests?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
+  createBacktest: (token: string, payload: CreateBacktestPayload) =>
+    request<BacktestRun>('/backtests', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  startBacktest: (token: string, runId: string) =>
+    request<BacktestRun>(`/backtests/${encodeURIComponent(runId)}/start`, { method: 'POST', headers: authHeaders(token) }),
+  getBacktestReport: (token: string, runId: string) =>
+    request<BacktestReport>(`/backtests/${encodeURIComponent(runId)}/report`, { headers: authHeaders(token) }),
   listNotifications: (token: string, limit = 100) =>
-    request<OperationalNotification[]>(`/strategies/notifications?limit=${encodeURIComponent(String(limit))}`, {
-      headers: authHeaders(token),
-    }),
+    request<OperationalNotification[]>(`/strategies/notifications?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   listTestnetOrders: (token: string, limit = 100) =>
-    request<TestnetOrder[]>(`/strategies/testnet-orders?limit=${encodeURIComponent(String(limit))}`, {
-      headers: authHeaders(token),
-    }),
+    request<TestnetOrder[]>(`/strategies/testnet-orders?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   syncTestnetOrder: (token: string, tradingOrderId: string) =>
-    request<TestnetOrderSyncResponse>(`/strategies/testnet-orders/${tradingOrderId}/sync`, {
-      method: 'POST',
-      headers: authHeaders(token),
-    }),
+    request<TestnetOrderSyncResponse>(`/strategies/testnet-orders/${tradingOrderId}/sync`, { method: 'POST', headers: authHeaders(token) }),
   listTestnetPositions: (token: string, limit = 100) =>
-    request<TestnetPosition[]>(`/strategies/testnet-positions?limit=${encodeURIComponent(String(limit))}`, {
-      headers: authHeaders(token),
-    }),
+    request<TestnetPosition[]>(`/strategies/testnet-positions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   listTestnetActions: (token: string, limit = 100) =>
-    request<TestnetAction[]>(`/strategies/testnet-actions?limit=${encodeURIComponent(String(limit))}`, {
-      headers: authHeaders(token),
-    }),
+    request<TestnetAction[]>(`/strategies/testnet-actions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   stopTestnetStrategies: (token: string) =>
-    request<TestnetEmergencyStopResponse>('/strategies/testnet-emergency-stop', {
-      method: 'POST',
-      headers: authHeaders(token),
-    }),
+    request<TestnetEmergencyStopResponse>('/strategies/testnet-emergency-stop', { method: 'POST', headers: authHeaders(token) }),
   listExchangeCredentials: (token: string) =>
     request<ExchangeCredentialSummary[]>('/exchange/credentials', { headers: authHeaders(token) }),
-  saveBinanceCredentials: (
-    token: string,
-    payload: { apiKey: string; apiSecret: string; environment: ExchangeEnvironment },
-  ) =>
-    request<ExchangeCredentialSummary>('/exchange/credentials/binance', {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify(payload),
-    }),
+  saveBinanceCredentials: (token: string, payload: { apiKey: string; apiSecret: string; environment: ExchangeEnvironment }) =>
+    request<ExchangeCredentialSummary>('/exchange/credentials/binance', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   deleteBinanceCredentials: (token: string, environment: ExchangeEnvironment) =>
-    request<{ deleted: boolean }>(`/exchange/credentials/binance/${environment}`, {
-      method: 'DELETE',
-      headers: authHeaders(token),
-    }),
+    request<{ deleted: boolean }>(`/exchange/credentials/binance/${environment}`, { method: 'DELETE', headers: authHeaders(token) }),
   testBinanceConnection: (token: string, environment: ExchangeEnvironment) =>
-    request<BinanceAccountTestResponse>('/exchange/binance/account/test', {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ environment: toBinanceEnvironment(environment) }),
-    }),
-  getMarketCandles: (
-    token: string,
-    symbol: string,
-    interval: BinanceKlineInterval = '5m',
-    limit = 200,
-    environment: BinanceStreamEnvironment = 'live',
-  ) =>
-    request<MarketCandlesResponse>(
-      `/market-data/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(String(limit))}&environment=${environment}`,
-      { headers: authHeaders(token) },
-    ),
+    request<BinanceAccountTestResponse>('/exchange/binance/account/test', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ environment: toBinanceEnvironment(environment) }) }),
+  getMarketCandles: (token: string, symbol: string, interval: BinanceKlineInterval = '5m', limit = 200, environment: BinanceStreamEnvironment = 'live') =>
+    request<MarketCandlesResponse>(`/market-data/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(String(limit))}&environment=${environment}`, { headers: authHeaders(token) }),
   subscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
-    request<MarketStreamStatus>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
-      method: 'POST',
-      headers: authHeaders(token),
-    }),
+    request<MarketStreamStatus>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, { method: 'POST', headers: authHeaders(token) }),
   unsubscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
-    request<{ unsubscribed: boolean }>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
-      method: 'DELETE',
-      headers: authHeaders(token),
-    }),
+    request<{ unsubscribed: boolean }>(`/market-data/stream/subscribe?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, { method: 'DELETE', headers: authHeaders(token) }),
   getMarketStreamStatus: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
-    request<MarketStreamStatus>(`/market-data/stream/status?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
-      headers: authHeaders(token),
-    }),
+    request<MarketStreamStatus>(`/market-data/stream/status?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, { headers: authHeaders(token) }),
   getStreamedMarketPrice: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
-    request<StreamedMarketPrice | null>(`/market-data/stream/price?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, {
-      headers: authHeaders(token),
-    }),
+    request<StreamedMarketPrice | null>(`/market-data/stream/price?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, { headers: authHeaders(token) }),
   openPaperPosition: (token: string, strategyId: string, marketPrice: number) =>
-    request<TradingPosition>('/paper-trading/positions/open', {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ strategyId, marketPrice }),
-    }),
-  listPaperPositions: (token: string) =>
-    request<TradingPosition[]>('/paper-trading/positions', { headers: authHeaders(token) }),
+    request<TradingPosition>('/paper-trading/positions/open', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ strategyId, marketPrice }) }),
+  listPaperPositions: (token: string) => request<TradingPosition[]>('/paper-trading/positions', { headers: authHeaders(token) }),
   tickPaperPosition: (token: string, positionId: string, marketPrice: number) =>
-    request<{ action: 'DCA' | 'TAKE_PROFIT' | 'HOLD'; position: TradingPosition }>(
-      `/paper-trading/positions/${positionId}/tick`,
-      {
-        method: 'POST',
-        headers: authHeaders(token),
-        body: JSON.stringify({ marketPrice }),
-      },
-    ),
+    request<{ action: 'DCA' | 'TAKE_PROFIT' | 'HOLD'; position: TradingPosition }>(`/paper-trading/positions/${positionId}/tick`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ marketPrice }) }),
   closePaperPosition: (token: string, positionId: string, marketPrice: number) =>
-    request<TradingPosition>(`/paper-trading/positions/${positionId}/close`, {
-      method: 'POST',
-      headers: authHeaders(token),
-      body: JSON.stringify({ marketPrice }),
-    }),
+    request<TradingPosition>(`/paper-trading/positions/${positionId}/close`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ marketPrice }) }),
 };
