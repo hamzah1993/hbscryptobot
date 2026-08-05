@@ -10,8 +10,57 @@ export type FillAccountingContext = {
   averageFillPrice: number;
 };
 
+type TriggerValues = {
+  nextDcaPrice: number | null;
+  takeProfitPrice: number | null;
+};
+
 @Injectable()
 export class TestnetFillAccountingService {
+  calculateParentTriggers(
+    strategy: any,
+    averageEntryPrice: number,
+    dcaCount: number,
+  ): TriggerValues {
+    if (!Number.isFinite(averageEntryPrice) || averageEntryPrice <= 0) {
+      return { nextDcaPrice: null, takeProfitPrice: null };
+    }
+
+    const stepPercent = Number(strategy.dcaStepPercent);
+    const multiplier = Number(strategy.dcaMultiplier);
+    const takeProfitPercent = Number(strategy.takeProfitPercent);
+
+    if (!Number.isFinite(stepPercent) || stepPercent <= 0) {
+      throw new BadRequestException('DCA step percent must be greater than zero');
+    }
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      throw new BadRequestException('DCA multiplier must be greater than zero');
+    }
+    if (!Number.isFinite(takeProfitPercent) || takeProfitPercent <= 0) {
+      throw new BadRequestException('Take-profit percent must be greater than zero');
+    }
+
+    const nextStepMultiplier = Math.pow(multiplier, Math.max(dcaCount, 0));
+    const nextDcaPrice = averageEntryPrice * (1 - (stepPercent * nextStepMultiplier) / 100);
+    const takeProfitPrice = averageEntryPrice * (1 + takeProfitPercent / 100);
+
+    return {
+      nextDcaPrice: nextDcaPrice > 0 ? nextDcaPrice : null,
+      takeProfitPrice,
+    };
+  }
+
+  calculateIndependentTakeProfit(strategy: any, averageEntryPrice: number): number {
+    if (!Number.isFinite(averageEntryPrice) || averageEntryPrice <= 0) {
+      throw new BadRequestException('Independent average entry price must be greater than zero');
+    }
+    const takeProfitPercent = Number(strategy.takeProfitPercent);
+    if (!Number.isFinite(takeProfitPercent) || takeProfitPercent <= 0) {
+      throw new BadRequestException('Take-profit percent must be greater than zero');
+    }
+    return averageEntryPrice * (1 + takeProfitPercent / 100);
+  }
+
   async apply(tx: any, context: FillAccountingContext) {
     const { order, position, subPosition, strategy, deltaQuantity, deltaQuote, averageFillPrice } = context;
     if (!Number.isFinite(deltaQuantity) || deltaQuantity < 0) {
@@ -35,7 +84,7 @@ export class TestnetFillAccountingService {
       const quantity = previousQuantity + deltaQuantity;
       const costQuote = previousCost + deltaQuote;
       const entryPrice = quantity > 0 ? costQuote / quantity : averageFillPrice;
-      const takeProfitPrice = entryPrice * (1 + Number(strategy.takeProfitPercent) / 100);
+      const takeProfitPrice = this.calculateIndependentTakeProfit(strategy, entryPrice);
       const saved = existing
         ? await tx.tradingSubPosition.update({
             where: { id: existing.id },
@@ -57,13 +106,17 @@ export class TestnetFillAccountingService {
       const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
       const remainingCost = Math.max(previousCost - allocatedCost, 0);
       const closed = remainingQuantity <= 1e-12;
+      const remainingAverage = closed ? 0 : remainingCost / remainingQuantity;
       const saved = await tx.tradingSubPosition.update({
         where: { id: subPosition.id },
         data: {
           status: closed ? 'CLOSED' : 'OPEN',
           quantity: closed ? 0 : remainingQuantity,
           costQuote: closed ? 0 : remainingCost,
-          entryPrice: closed ? 0 : remainingCost / remainingQuantity,
+          entryPrice: remainingAverage,
+          takeProfitPrice: closed
+            ? null
+            : this.calculateIndependentTakeProfit(strategy, remainingAverage),
           realizedPnlQuote: Number(subPosition.realizedPnlQuote) + proceeds - allocatedCost,
           closedAt: closed ? new Date() : null,
         },
@@ -78,12 +131,17 @@ export class TestnetFillAccountingService {
       const totalCostQuote = previousCost + deltaQuote;
       const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
       const dcaCount = Number(position.dcaCount) + (order.level > 1 && Number(order.accountedFilledQuantity ?? 0) === 0 ? 1 : 0);
-      const nextStepMultiplier = Math.pow(Number(strategy.dcaMultiplier), dcaCount);
-      const nextDcaPrice = averageEntryPrice * (1 - (Number(strategy.dcaStepPercent) * nextStepMultiplier) / 100);
-      const takeProfitPrice = averageEntryPrice * (1 + Number(strategy.takeProfitPercent) / 100);
+      const triggers = this.calculateParentTriggers(strategy, averageEntryPrice, dcaCount);
       const saved = await tx.tradingPosition.update({
         where: { id: position.id },
-        data: { totalQuantity, totalCostQuote, averageEntryPrice, dcaCount, nextDcaPrice, takeProfitPrice },
+        data: {
+          totalQuantity,
+          totalCostQuote,
+          averageEntryPrice,
+          dcaCount,
+          nextDcaPrice: triggers.nextDcaPrice,
+          takeProfitPrice: triggers.takeProfitPrice,
+        },
       });
       return { position: saved, subPosition };
     }
@@ -97,7 +155,9 @@ export class TestnetFillAccountingService {
     const remainingCost = Math.max(previousCost - allocatedCost, 0);
     const closed = remainingQuantity <= 1e-12;
     const averageEntryPrice = closed ? 0 : remainingCost / remainingQuantity;
-    const nextStepMultiplier = Math.pow(Number(strategy.dcaMultiplier), Number(position.dcaCount));
+    const triggers = closed
+      ? { nextDcaPrice: null, takeProfitPrice: null }
+      : this.calculateParentTriggers(strategy, averageEntryPrice, Number(position.dcaCount));
     const saved = await tx.tradingPosition.update({
       where: { id: position.id },
       data: {
@@ -107,8 +167,8 @@ export class TestnetFillAccountingService {
         averageEntryPrice,
         realizedPnlQuote: Number(position.realizedPnlQuote) + proceeds - allocatedCost,
         closedAt: closed ? new Date() : null,
-        nextDcaPrice: closed ? null : averageEntryPrice * (1 - (Number(strategy.dcaStepPercent) * nextStepMultiplier) / 100),
-        takeProfitPrice: closed ? null : averageEntryPrice * (1 + Number(strategy.takeProfitPercent) / 100),
+        nextDcaPrice: triggers.nextDcaPrice,
+        takeProfitPrice: triggers.takeProfitPrice,
       },
     });
     return { position: saved, subPosition };
