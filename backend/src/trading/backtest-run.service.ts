@@ -39,7 +39,7 @@ export class BacktestRunService {
     if (input.startTime >= input.endTime) {
       throw new BadRequestException('startTime must be before endTime');
     }
-    if (!initialCapital.isPositive()) {
+    if (initialCapital.lessThanOrEqualTo(0)) {
       throw new BadRequestException('Initial capital must be positive');
     }
 
