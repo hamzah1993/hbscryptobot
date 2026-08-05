@@ -28,14 +28,16 @@ export class TestnetEmergencyStopService {
       const actions = await tx.strategyAction.updateMany({
         where: {
           userId,
-          status: 'PENDING',
+          status: { in: ['PENDING', 'FAILED'] },
           strategy: {
             environment: 'TESTNET',
             paperTrading: false,
           },
         },
         data: {
-          status: 'FAILED',
+          status: 'CANCELLED',
+          retryable: false,
+          nextRetryAt: null,
           errorMessage: 'Cancelled by Testnet emergency stop',
           completedAt: stoppedAt,
         },
@@ -43,7 +45,7 @@ export class TestnetEmergencyStopService {
 
       return {
         stoppedStrategies: strategies.count,
-        cancelledPendingActions: actions.count,
+        cancelledActions: actions.count,
       };
     });
 
@@ -115,6 +117,7 @@ export class TestnetEmergencyStopService {
       ...result,
       unresolvedOrders: unresolvedOrders.length,
       cancelledOrders: orderResults.filter((item) => item.outcome === 'CANCELLED').length,
+      alreadyFilledOrders: orderResults.filter((item) => item.outcome === 'ALREADY_FILLED').length,
       failedOrderCancellations: orderResults.filter((item) => item.outcome === 'FAILED').length,
       orderResults,
     };
@@ -129,9 +132,10 @@ export class TestnetEmergencyStopService {
       metadata: {
         stoppedAt: stoppedAt.toISOString(),
         stoppedStrategies: response.stoppedStrategies,
-        cancelledPendingActions: response.cancelledPendingActions,
+        cancelledActions: response.cancelledActions,
         unresolvedOrders: response.unresolvedOrders,
         cancelledOrders: response.cancelledOrders,
+        alreadyFilledOrders: response.alreadyFilledOrders,
         failedOrderCancellations: response.failedOrderCancellations,
       },
     });
