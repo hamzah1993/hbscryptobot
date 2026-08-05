@@ -70,6 +70,14 @@ export class BacktestRunController {
     return this.runs.list(request.user.sub, parsedLimit);
   }
 
+  @Get(':runId/report')
+  report(
+    @Req() request: AuthenticatedRequest,
+    @Param('runId') runId: string,
+  ) {
+    return this.runs.report(request.user.sub, runId);
+  }
+
   @Get(':runId')
   get(
     @Req() request: AuthenticatedRequest,
