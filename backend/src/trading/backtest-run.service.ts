@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BacktestRunStatus, ExchangeName, Prisma } from '@prisma/client';
+import {
+  BacktestRunStatus,
+  BacktestTradeType,
+  ExchangeName,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type CreateBacktestRunInput = {
@@ -61,7 +66,9 @@ export class BacktestRunService {
 
   list(userId: string, limit = 100) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
-      throw new BadRequestException('Backtest run limit must be an integer between 1 and 500');
+      throw new BadRequestException(
+        'Backtest run limit must be an integer between 1 and 500',
+      );
     }
 
     return this.prisma.backtestRun.findMany({
@@ -72,9 +79,7 @@ export class BacktestRunService {
   }
 
   async get(userId: string, runId: string) {
-    const normalizedRunId = runId.trim();
-    if (!normalizedRunId) throw new BadRequestException('Backtest run ID is required');
-
+    const normalizedRunId = this.normalizeRunId(runId);
     const run = await this.prisma.backtestRun.findFirst({
       where: { id: normalizedRunId, userId },
       include: {
@@ -91,5 +96,101 @@ export class BacktestRunService {
     });
     if (!run) throw new NotFoundException('Backtest run was not found');
     return run;
+  }
+
+  async report(userId: string, runId: string) {
+    const normalizedRunId = this.normalizeRunId(runId);
+    const run = await this.prisma.backtestRun.findFirst({
+      where: { id: normalizedRunId, userId },
+      include: {
+        strategy: {
+          select: {
+            name: true,
+            maxDcaOrders: true,
+            dcaStepPercent: true,
+            dcaMultiplier: true,
+            takeProfitPercent: true,
+            independentFromLevel: true,
+          },
+        },
+        trades: { orderBy: { executedAt: 'asc' } },
+        equityPoints: { orderBy: { recordedAt: 'asc' } },
+      },
+    });
+    if (!run) throw new NotFoundException('Backtest run was not found');
+
+    const exits = run.trades.filter(
+      (trade) =>
+        trade.type === BacktestTradeType.PARENT_EXIT ||
+        trade.type === BacktestTradeType.INDEPENDENT_EXIT,
+    );
+    const wins = exits.filter(
+      (trade) => trade.realizedPnlQuote?.greaterThan(0) ?? false,
+    );
+    const losses = exits.filter(
+      (trade) => trade.realizedPnlQuote?.lessThan(0) ?? false,
+    );
+    const grossProfit = wins.reduce(
+      (sum, trade) => sum.add(trade.realizedPnlQuote ?? 0),
+      new Prisma.Decimal(0),
+    );
+    const grossLoss = losses.reduce(
+      (sum, trade) =>
+        sum.add((trade.realizedPnlQuote ?? new Prisma.Decimal(0)).abs()),
+      new Prisma.Decimal(0),
+    );
+    const exitCount = exits.length;
+    const winRate =
+      exitCount === 0
+        ? new Prisma.Decimal(0)
+        : new Prisma.Decimal(wins.length).div(exitCount).mul(100);
+    const averageWin =
+      wins.length === 0 ? new Prisma.Decimal(0) : grossProfit.div(wins.length);
+    const averageLoss =
+      losses.length === 0
+        ? new Prisma.Decimal(0)
+        : grossLoss.div(losses.length);
+    const profitFactor = grossLoss.isZero() ? null : grossProfit.div(grossLoss);
+    const peakEquity = run.equityPoints.reduce(
+      (peak, point) => Prisma.Decimal.max(peak, point.equityQuote),
+      new Prisma.Decimal(run.initialCapital),
+    );
+    const maximumDcaLevelUsed = run.trades.reduce(
+      (maximum, trade) => Math.max(maximum, trade.level),
+      0,
+    );
+    const independentEntries = run.trades.filter(
+      (trade) => trade.type === BacktestTradeType.INDEPENDENT_ENTRY,
+    ).length;
+    const independentExits = run.trades.filter(
+      (trade) => trade.type === BacktestTradeType.INDEPENDENT_EXIT,
+    ).length;
+
+    return {
+      run,
+      analytics: {
+        completedExitCount: exitCount,
+        winningTradeCount: wins.length,
+        losingTradeCount: losses.length,
+        winRatePercent: winRate.toFixed(6),
+        grossProfitQuote: grossProfit.toFixed(8),
+        grossLossQuote: grossLoss.toFixed(8),
+        averageWinQuote: averageWin.toFixed(8),
+        averageLossQuote: averageLoss.toFixed(8),
+        profitFactor: profitFactor?.toFixed(6) ?? null,
+        peakEquityQuote: peakEquity.toFixed(8),
+        maximumDcaLevelUsed,
+        independentEntries,
+        independentExits,
+      },
+    };
+  }
+
+  private normalizeRunId(runId: string) {
+    const normalizedRunId = runId.trim();
+    if (!normalizedRunId) {
+      throw new BadRequestException('Backtest run ID is required');
+    }
+    return normalizedRunId;
   }
 }
