@@ -43,6 +43,26 @@ describe('BacktestDcaSimulatorService', () => {
     expect(result.returnPercent).toBe('8.163265');
   });
 
+  it('applies entry and exit fees plus adverse slippage', () => {
+    expect(
+      service.simulate({
+        initialCapital: 1000,
+        candles: [{ close: 100 }, { close: 110 }],
+        maxEntries: 1,
+        priceDeviationPercent: 5,
+        takeProfitPercent: 5,
+        feePercent: 1,
+        slippagePercent: 1,
+      }),
+    ).toEqual({
+      endingCapital: '1056.65346535',
+      realizedPnlQuote: '56.65346535',
+      returnPercent: '5.665347',
+      maxDrawdownPercent: '1.980198',
+      tradeCount: 2,
+    });
+  });
+
   it('executes only the initial entry when later triggers are not reached', () => {
     expect(
       service.simulate({
@@ -189,6 +209,30 @@ describe('BacktestDcaSimulatorService', () => {
         takeProfitPercent,
       }),
     ).toThrow('Take profit percent must be positive');
+  });
+
+  it.each([-1, 100])('rejects invalid fee percent: %s', (feePercent) => {
+    expect(() =>
+      service.simulate({
+        initialCapital: 1000,
+        candles: [{ close: 100 }],
+        maxEntries: 1,
+        priceDeviationPercent: 5,
+        feePercent,
+      }),
+    ).toThrow('Fee percent must be between 0 and 100');
+  });
+
+  it.each([-1, 100])('rejects invalid slippage percent: %s', (slippagePercent) => {
+    expect(() =>
+      service.simulate({
+        initialCapital: 1000,
+        candles: [{ close: 100 }],
+        maxEntries: 1,
+        priceDeviationPercent: 5,
+        slippagePercent,
+      }),
+    ).toThrow('Slippage percent must be between 0 and 100');
   });
 
   it.each([0, -1])('rejects non-positive candle prices: %s', (close) => {
