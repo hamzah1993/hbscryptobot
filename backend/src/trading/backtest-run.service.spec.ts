@@ -180,45 +180,36 @@ describe('BacktestRunService', () => {
     expect(backtestRun.create).not.toHaveBeenCalled();
   });
 
-  it('rejects invalid dates, reversed ranges, and non-positive capital', async () => {
-    const { service, tradingStrategy, backtestRun } = createService();
-    const base = {
-      strategyId: 'strategy-1',
-      symbol: 'BTCUSDT',
-      interval: '5m',
+  it.each([
+    {
+      startTime: new Date('invalid'),
+      endTime: new Date('2026-08-02T00:00:00.000Z'),
       initialCapital: 1000,
-    };
+    },
+    {
+      startTime: new Date('2026-08-01T00:00:00.000Z'),
+      endTime: new Date('invalid'),
+      initialCapital: 1000,
+    },
+    {
+      startTime: new Date('2026-08-02T00:00:00.000Z'),
+      endTime: new Date('2026-08-01T00:00:00.000Z'),
+      initialCapital: 1000,
+    },
+    {
+      startTime: new Date('2026-08-01T00:00:00.000Z'),
+      endTime: new Date('2026-08-02T00:00:00.000Z'),
+      initialCapital: 0,
+    },
+  ])('rejects invalid creation inputs %#', async (invalid) => {
+    const { service, tradingStrategy, backtestRun } = createService();
 
     await expect(
       service.create('user-1', {
-        ...base,
-        startTime: new Date('invalid'),
-        endTime: new Date('2026-08-02T00:00:00.000Z'),
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    await expect(
-      service.create('user-1', {
-        ...base,
-        startTime: new Date('2026-08-01T00:00:00.000Z'),
-        endTime: new Date('invalid'),
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    await expect(
-      service.create('user-1', {
-        ...base,
-        startTime: new Date('2026-08-02T00:00:00.000Z'),
-        endTime: new Date('2026-08-01T00:00:00.000Z'),
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    await expect(
-      service.create('user-1', {
-        ...base,
-        startTime: new Date('2026-08-01T00:00:00.000Z'),
-        endTime: new Date('2026-08-02T00:00:00.000Z'),
-        initialCapital: 0,
+        strategyId: 'strategy-1',
+        symbol: 'BTCUSDT',
+        interval: '5m',
+        ...invalid,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
