@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BinanceModule } from '../exchange/binance/binance.module';
 import { MarketDataModule } from '../market/market-data.module';
+import { BacktestRunService } from './backtest-run.service';
 import { BinanceHistoricalCandleImporterService } from './binance-historical-candle-importer.service';
 import { HistoricalCandleController } from './historical-candle.controller';
 import { HistoricalCandleIngestionService } from './historical-candle-ingestion.service';
@@ -38,6 +39,7 @@ import { TradingEngineService } from './trading-engine.service';
     HistoricalCandleIngestionService,
     HistoricalCandleQueryService,
     BinanceHistoricalCandleImporterService,
+    BacktestRunService,
     PaperStrategyRunnerService,
     PaperStrategySchedulerService,
     TestnetStrategyExecutionService,
@@ -56,6 +58,7 @@ import { TradingEngineService } from './trading-engine.service';
     HistoricalCandleIngestionService,
     HistoricalCandleQueryService,
     BinanceHistoricalCandleImporterService,
+    BacktestRunService,
     PaperStrategyRunnerService,
     TestnetStrategyExecutionService,
     TestnetStrategyActionService,
