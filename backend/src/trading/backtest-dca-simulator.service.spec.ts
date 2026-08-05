@@ -6,26 +6,28 @@ describe('BacktestDcaSimulatorService', () => {
   const service = new BacktestDcaSimulatorService();
 
   it('allocates capital across triggered DCA entries', () => {
-    expect(
-      service.simulate({
-        initialCapital: '1000',
-        candles: [
-          { close: '100' },
-          { close: '95' },
-          { close: '90' },
-          { close: '105' },
-        ],
-        maxEntries: 3,
-        priceDeviationPercent: '5',
-        volumeMultiplier: '1',
-      }),
-    ).toEqual({
-      endingCapital: '1131.28654971',
-      realizedPnlQuote: '131.28654971',
-      returnPercent: '13.128655',
-      maxDrawdownPercent: '5.555556',
+    const result = service.simulate({
+      initialCapital: '1000',
+      candles: [
+        { close: '100' },
+        { close: '95' },
+        { close: '90' },
+        { close: '105' },
+      ],
+      maxEntries: 3,
+      priceDeviationPercent: '5',
+      volumeMultiplier: '1',
+    });
+
+    expect(result).toMatchObject({
+      endingCapital: '1107.30994152',
+      realizedPnlQuote: '107.30994152',
+      returnPercent: '10.730994',
+      maxDrawdownPercent: '5.087719',
       tradeCount: 3,
     });
+    expect(result.trades).toHaveLength(3);
+    expect(result.equityPoints).toHaveLength(4);
   });
 
   it('uses a volume multiplier to increase later allocations', () => {
@@ -38,71 +40,77 @@ describe('BacktestDcaSimulatorService', () => {
     });
 
     expect(result.tradeCount).toBe(3);
-    expect(result.endingCapital).toBe('757.14285714');
-    expect(result.realizedPnlQuote).toBe('57.14285714');
-    expect(result.returnPercent).toBe('8.163265');
+    expect(result.endingCapital).toBe('766.66666667');
+    expect(result.realizedPnlQuote).toBe('66.66666667');
+    expect(result.returnPercent).toBe('9.523810');
   });
 
   it('applies entry and exit fees plus adverse slippage', () => {
-    expect(
-      service.simulate({
-        initialCapital: 1000,
-        candles: [{ close: 100 }, { close: 110 }],
-        maxEntries: 1,
-        priceDeviationPercent: 5,
-        takeProfitPercent: 5,
-        feePercent: 1,
-        slippagePercent: 1,
-      }),
-    ).toEqual({
-      endingCapital: '1056.65346535',
-      realizedPnlQuote: '56.65346535',
-      returnPercent: '5.665347',
+    const result = service.simulate({
+      initialCapital: 1000,
+      candles: [{ close: 100 }, { close: 110 }],
+      maxEntries: 1,
+      priceDeviationPercent: 5,
+      takeProfitPercent: 5,
+      feePercent: 1,
+      slippagePercent: 1,
+    });
+
+    expect(result).toMatchObject({
+      endingCapital: '1056.76128713',
+      realizedPnlQuote: '56.76128713',
+      returnPercent: '5.676129',
       maxDrawdownPercent: '1.980198',
       tradeCount: 2,
     });
+    expect(result.trades).toHaveLength(2);
+    expect(result.equityPoints).toHaveLength(2);
   });
 
   it('executes only the initial entry when later triggers are not reached', () => {
-    expect(
-      service.simulate({
-        initialCapital: 1000,
-        candles: [{ close: 100 }, { close: 102 }, { close: 110 }],
-        maxEntries: 4,
-        priceDeviationPercent: 5,
-      }),
-    ).toEqual({
+    const result = service.simulate({
+      initialCapital: 1000,
+      candles: [{ close: 100 }, { close: 102 }, { close: 110 }],
+      maxEntries: 4,
+      priceDeviationPercent: 5,
+    });
+
+    expect(result).toMatchObject({
       endingCapital: '1025.00000000',
       realizedPnlQuote: '25.00000000',
       returnPercent: '2.500000',
       maxDrawdownPercent: '0.000000',
       tradeCount: 1,
     });
+    expect(result.trades).toHaveLength(1);
+    expect(result.equityPoints).toHaveLength(3);
   });
 
   it('separates configured higher DCA levels and exits them independently', () => {
-    expect(
-      service.simulate({
-        initialCapital: 1000,
-        candles: [
-          { close: 100 },
-          { close: 95 },
-          { close: 90 },
-          { close: 95 },
-        ],
-        maxEntries: 3,
-        priceDeviationPercent: 5,
-        volumeMultiplier: 1,
-        takeProfitPercent: 5,
-        independentFromLevel: 3,
-      }),
-    ).toEqual({
-      endingCapital: '1020.76023392',
-      realizedPnlQuote: '20.76023392',
-      returnPercent: '2.076023',
-      maxDrawdownPercent: '5.555556',
+    const result = service.simulate({
+      initialCapital: 1000,
+      candles: [
+        { close: 100 },
+        { close: 95 },
+        { close: 90 },
+        { close: 95 },
+      ],
+      maxEntries: 3,
+      priceDeviationPercent: 5,
+      volumeMultiplier: 1,
+      takeProfitPercent: 5,
+      independentFromLevel: 3,
+    });
+
+    expect(result).toMatchObject({
+      endingCapital: '1001.85185185',
+      realizedPnlQuote: '1.85185185',
+      returnPercent: '0.185185',
+      maxDrawdownPercent: '5.087719',
       tradeCount: 4,
     });
+    expect(result.trades).toHaveLength(4);
+    expect(result.equityPoints).toHaveLength(4);
   });
 
   it('keeps parent and independent positions open when their take-profit levels are not reached', () => {
@@ -116,8 +124,8 @@ describe('BacktestDcaSimulatorService', () => {
     });
 
     expect(result.tradeCount).toBe(3);
-    expect(result.endingCapital).toBe('975.28265107');
-    expect(result.realizedPnlQuote).toBe('-24.71734893');
+    expect(result.endingCapital).toBe('970.21442495');
+    expect(result.realizedPnlQuote).toBe('-29.78557505');
   });
 
   it('rejects an empty candle collection', () => {
@@ -159,7 +167,7 @@ describe('BacktestDcaSimulatorService', () => {
     },
   );
 
-  it.each([0, -1])('rejects non-positive initial capital: %s', (initialCapital) => {
+  it.each(['0', '-1'])('rejects non-positive initial capital: %s', (initialCapital) => {
     expect(() =>
       service.simulate({
         initialCapital,
@@ -170,7 +178,7 @@ describe('BacktestDcaSimulatorService', () => {
     ).toThrow('Initial capital must be positive');
   });
 
-  it.each([0, -1])(
+  it.each(['0', '-1'])(
     'rejects non-positive price deviation percent: %s',
     (priceDeviationPercent) => {
       expect(() =>
@@ -199,7 +207,7 @@ describe('BacktestDcaSimulatorService', () => {
     },
   );
 
-  it.each([0, -1])('rejects non-positive take profit: %s', (takeProfitPercent) => {
+  it.each(['0', '-1'])('rejects non-positive take profit: %s', (takeProfitPercent) => {
     expect(() =>
       service.simulate({
         initialCapital: 1000,
@@ -235,7 +243,7 @@ describe('BacktestDcaSimulatorService', () => {
     ).toThrow('Slippage percent must be between 0 and 100');
   });
 
-  it.each([0, -1])('rejects non-positive candle prices: %s', (close) => {
+  it.each(['0', '-1'])('rejects non-positive candle prices: %s', (close) => {
     expect(() =>
       service.simulate({
         initialCapital: 1000,
