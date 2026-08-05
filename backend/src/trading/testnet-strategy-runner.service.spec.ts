@@ -19,10 +19,18 @@ describe('TestnetStrategyRunnerService', () => {
     price: number,
     executionResult: any = {},
     lockAcquired = true,
+    pendingOrder: any = null,
+    pendingAction: any = null,
   ) {
     const prisma = {
       tradingStrategy: {
         findMany: jest.fn().mockResolvedValue(strategies),
+      },
+      tradingOrder: {
+        findFirst: jest.fn().mockResolvedValue(pendingOrder),
+      },
+      strategyAction: {
+        findFirst: jest.fn().mockResolvedValue(pendingAction),
       },
     } as any;
     const marketData = {
@@ -227,6 +235,30 @@ describe('TestnetStrategyRunnerService', () => {
     const result = await service.runUserStrategies(userId);
 
     expect(result[0]).toMatchObject({ action: 'ERROR', message: 'Binance unavailable' });
+    expect(redisLock.release).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['pending order', { id: 'order-1' }, null],
+    ['pending strategy action', null, { id: 'action-1' }],
+  ])('skips execution when a %s exists', async (_label, pendingOrder, pendingAction) => {
+    const { service, marketData, testnetExecution, redisLock } = createService(
+      [baseStrategy],
+      50,
+      {},
+      true,
+      pendingOrder,
+      pendingAction,
+    );
+
+    const result = await service.runUserStrategies(userId);
+
+    expect(result[0]).toMatchObject({
+      action: 'SKIP',
+      message: 'A Testnet order or strategy action is still pending',
+    });
+    expect(marketData.getQuote).not.toHaveBeenCalled();
+    expect(testnetExecution.executeMarketOrder).not.toHaveBeenCalled();
     expect(redisLock.release).toHaveBeenCalledTimes(1);
   });
 
