@@ -60,6 +60,46 @@ describe('BacktestDcaSimulatorService', () => {
     });
   });
 
+  it('separates configured higher DCA levels and exits them independently', () => {
+    expect(
+      service.simulate({
+        initialCapital: 1000,
+        candles: [
+          { close: 100 },
+          { close: 95 },
+          { close: 90 },
+          { close: 95 },
+        ],
+        maxEntries: 3,
+        priceDeviationPercent: 5,
+        volumeMultiplier: 1,
+        takeProfitPercent: 5,
+        independentFromLevel: 3,
+      }),
+    ).toEqual({
+      endingCapital: '1020.76023392',
+      realizedPnlQuote: '20.76023392',
+      returnPercent: '2.076023',
+      maxDrawdownPercent: '5.555556',
+      tradeCount: 4,
+    });
+  });
+
+  it('keeps parent and independent positions open when their take-profit levels are not reached', () => {
+    const result = service.simulate({
+      initialCapital: 1000,
+      candles: [{ close: 100 }, { close: 95 }, { close: 90 }, { close: 92 }],
+      maxEntries: 3,
+      priceDeviationPercent: 5,
+      takeProfitPercent: 5,
+      independentFromLevel: 3,
+    });
+
+    expect(result.tradeCount).toBe(3);
+    expect(result.endingCapital).toBe('975.28265107');
+    expect(result.realizedPnlQuote).toBe('-24.71734893');
+  });
+
   it('rejects an empty candle collection', () => {
     expect(() =>
       service.simulate({
@@ -81,6 +121,23 @@ describe('BacktestDcaSimulatorService', () => {
       }),
     ).toThrow('maxEntries must be a positive integer');
   });
+
+  it.each([1, 1.5, 5])(
+    'rejects invalid independentFromLevel: %s',
+    (independentFromLevel) => {
+      expect(() =>
+        service.simulate({
+          initialCapital: 1000,
+          candles: [{ close: 100 }],
+          maxEntries: 3,
+          priceDeviationPercent: 5,
+          independentFromLevel,
+        }),
+      ).toThrow(
+        'independentFromLevel must be an integer between 2 and maxEntries + 1',
+      );
+    },
+  );
 
   it.each([0, -1])('rejects non-positive initial capital: %s', (initialCapital) => {
     expect(() =>
@@ -121,6 +178,18 @@ describe('BacktestDcaSimulatorService', () => {
       ).toThrow('Volume multiplier must be at least 1');
     },
   );
+
+  it.each([0, -1])('rejects non-positive take profit: %s', (takeProfitPercent) => {
+    expect(() =>
+      service.simulate({
+        initialCapital: 1000,
+        candles: [{ close: 100 }],
+        maxEntries: 3,
+        priceDeviationPercent: 5,
+        takeProfitPercent,
+      }),
+    ).toThrow('Take profit percent must be positive');
+  });
 
   it.each([0, -1])('rejects non-positive candle prices: %s', (close) => {
     expect(() =>
