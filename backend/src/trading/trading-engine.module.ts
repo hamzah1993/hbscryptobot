@@ -15,6 +15,7 @@ import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { PaperStrategySchedulerService } from './paper-strategy-scheduler.service';
 import { PaperTradingController } from './paper-trading.controller';
 import { PaperTradingService } from './paper-trading.service';
+import { RiskAwareTestnetStrategyExecutionService } from './risk-aware-testnet-strategy-execution.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { StrategyController } from './strategy.controller';
 import { StrategyService } from './strategy.service';
@@ -57,7 +58,11 @@ import { TradingEngineService } from './trading-engine.service';
     PaperStrategySchedulerService,
     TestnetFillAccountingService,
     TestnetStrategyRiskService,
-    TestnetStrategyExecutionService,
+    RiskAwareTestnetStrategyExecutionService,
+    {
+      provide: TestnetStrategyExecutionService,
+      useExisting: RiskAwareTestnetStrategyExecutionService,
+    },
     TestnetOrderSyncSchedulerService,
     TestnetStrategyActionService,
     TestnetActionRetrySchedulerService,
