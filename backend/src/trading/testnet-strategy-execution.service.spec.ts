@@ -171,7 +171,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
 
     expect(tradingPosition.update).not.toHaveBeenCalled();
     expect(tradingSubPosition.create).toHaveBeenCalledWith({
-      data: {
+      data: expect.objectContaining({
         positionId: 'position-1',
         level: 5,
         status: 'OPEN',
@@ -179,7 +179,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         costQuote: 50,
         entryPrice: 100,
         takeProfitPrice: 110.00000000000001,
-      },
+      }),
     });
     expect(tradingOrder.update).toHaveBeenCalledWith({
       where: { id: 'order-1' },
@@ -188,6 +188,47 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         subPositionId: 'sub-1',
         accountedFilledQuantity: 0.5,
         accountedQuoteAmount: 50,
+      }),
+    });
+  });
+
+  it('recalculates independent average and take-profit from cumulative fills', async () => {
+    const existingSubPosition = {
+      id: 'sub-1',
+      positionId: 'position-1',
+      level: 5,
+      status: 'OPEN',
+      quantity: 1,
+      costQuote: 100,
+      entryPrice: 100,
+      takeProfitPrice: 110,
+      realizedPnlQuote: 0,
+    };
+    const { service, tradingSubPosition, tradingPosition } = createService({
+      independent: true,
+      level: 5,
+      subPositionId: 'sub-1',
+      subPosition: existingSubPosition,
+      filledQuantity: 1,
+      quoteAmount: 100,
+      accountedFilledQuantity: 1,
+      accountedQuoteAmount: 100,
+    }, {
+      status: 'FILLED',
+      executedQty: '2',
+      cummulativeQuoteQty: '180',
+    });
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingPosition.update).not.toHaveBeenCalled();
+    expect(tradingSubPosition.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: expect.objectContaining({
+        quantity: 2,
+        costQuote: 180,
+        entryPrice: 90,
+        takeProfitPrice: 99.00000000000001,
       }),
     });
   });
@@ -230,6 +271,49 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         costQuote: 150,
         entryPrice: 100,
         realizedPnlQuote: 10,
+      }),
+    });
+  });
+
+  it('closes only the selected independent sub-position and accumulates realized P&L', async () => {
+    const subPosition = {
+      id: 'sub-1',
+      positionId: 'position-1',
+      level: 5,
+      status: 'OPEN',
+      quantity: 1.5,
+      costQuote: 150,
+      entryPrice: 100,
+      takeProfitPrice: 110,
+      realizedPnlQuote: 10,
+    };
+    const { service, tradingSubPosition, tradingPosition } = createService({
+      side: 'SELL',
+      independent: true,
+      subPositionId: 'sub-1',
+      subPosition,
+      filledQuantity: 0,
+      quoteAmount: 0,
+      accountedFilledQuantity: 0,
+      accountedQuoteAmount: 0,
+    }, {
+      status: 'FILLED',
+      executedQty: '1.5',
+      cummulativeQuoteQty: '180',
+    });
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingPosition.update).not.toHaveBeenCalled();
+    expect(tradingSubPosition.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: expect.objectContaining({
+        status: 'CLOSED',
+        quantity: 0,
+        costQuote: 0,
+        entryPrice: 0,
+        realizedPnlQuote: 40,
+        closedAt: expect.any(Date),
       }),
     });
   });
