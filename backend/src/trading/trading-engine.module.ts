@@ -3,6 +3,7 @@ import { BinanceModule } from '../exchange/binance/binance.module';
 import { MarketDataModule } from '../market/market-data.module';
 import { BacktestBuyHoldSimulatorService } from './backtest-buy-hold-simulator.service';
 import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
+import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
 import { BacktestExecutionService } from './backtest-execution.service';
 import { BacktestRunController } from './backtest-run.controller';
 import { BacktestRunService } from './backtest-run.service';
@@ -48,6 +49,7 @@ import { TradingEngineService } from './trading-engine.service';
     BacktestExecutionService,
     BacktestCandleRunnerService,
     BacktestBuyHoldSimulatorService,
+    BacktestDcaSimulatorService,
     PaperStrategyRunnerService,
     PaperStrategySchedulerService,
     TestnetStrategyExecutionService,
@@ -70,6 +72,7 @@ import { TradingEngineService } from './trading-engine.service';
     BacktestExecutionService,
     BacktestCandleRunnerService,
     BacktestBuyHoldSimulatorService,
+    BacktestDcaSimulatorService,
     PaperStrategyRunnerService,
     TestnetStrategyExecutionService,
     TestnetStrategyActionService,
