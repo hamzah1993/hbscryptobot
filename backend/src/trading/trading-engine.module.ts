@@ -18,6 +18,7 @@ import { PaperTradingService } from './paper-trading.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { StrategyController } from './strategy.controller';
 import { StrategyService } from './strategy.service';
+import { TestnetActionRetrySchedulerService } from './testnet-action-retry-scheduler.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
 import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
 import { TestnetFillAccountingService } from './testnet-fill-accounting.service';
@@ -57,6 +58,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetStrategyExecutionService,
     TestnetOrderSyncSchedulerService,
     TestnetStrategyActionService,
+    TestnetActionRetrySchedulerService,
     TestnetActionTimelineService,
     TestnetEmergencyStopService,
     TestnetStrategyRunnerService,
