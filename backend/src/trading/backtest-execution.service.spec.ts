@@ -9,11 +9,29 @@ describe('BacktestExecutionService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     };
-    const prisma = { backtestRun } as any;
+    const backtestTrade = {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    };
+    const backtestEquityPoint = {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+    };
+    const prisma = {
+      backtestRun,
+      backtestTrade,
+      backtestEquityPoint,
+      $transaction: jest.fn(async (callback: (tx: any) => unknown) =>
+        callback({ backtestRun, backtestTrade, backtestEquityPoint }),
+      ),
+    } as any;
 
     return {
       service: new BacktestExecutionService(prisma),
       backtestRun,
+      backtestTrade,
+      backtestEquityPoint,
+      prisma,
     };
   }
 
@@ -77,7 +95,8 @@ describe('BacktestExecutionService', () => {
   });
 
   it('atomically completes a running run with calculated metrics', async () => {
-    const { service, backtestRun } = createService();
+    const { service, backtestRun, backtestTrade, backtestEquityPoint, prisma } =
+      createService();
     const result = {
       endingCapital: '1125.50',
       realizedPnlQuote: '125.50',
@@ -94,6 +113,16 @@ describe('BacktestExecutionService', () => {
     backtestRun.findFirst.mockResolvedValue(completed);
 
     await expect(service.complete(' run-1 ', result)).resolves.toEqual(completed);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(backtestTrade.deleteMany).toHaveBeenCalledWith({
+      where: { runId: 'run-1' },
+    });
+    expect(backtestEquityPoint.deleteMany).toHaveBeenCalledWith({
+      where: { runId: 'run-1' },
+    });
+    expect(backtestTrade.createMany).not.toHaveBeenCalled();
+    expect(backtestEquityPoint.createMany).not.toHaveBeenCalled();
 
     expect(backtestRun.updateMany).toHaveBeenCalledWith({
       where: {
