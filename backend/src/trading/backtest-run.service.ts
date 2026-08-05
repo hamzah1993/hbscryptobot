@@ -77,6 +77,17 @@ export class BacktestRunService {
 
     const run = await this.prisma.backtestRun.findFirst({
       where: { id: normalizedRunId, userId },
+      include: {
+        strategy: {
+          select: {
+            maxDcaOrders: true,
+            dcaStepPercent: true,
+            dcaMultiplier: true,
+            takeProfitPercent: true,
+            independentFromLevel: true,
+          },
+        },
+      },
     });
     if (!run) throw new NotFoundException('Backtest run was not found');
     return run;
