@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nes
 import { ExchangeEnvironment } from '@prisma/client';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { ExchangeAccountManagementService } from './exchange-account-management.service';
 import { ExchangeCredentialsService } from './exchange-credentials.service';
 
 type AuthenticatedRequest = Request & { user: { sub: string } };
@@ -9,7 +10,10 @@ type AuthenticatedRequest = Request & { user: { sub: string } };
 @Controller('exchange/credentials')
 @UseGuards(JwtAuthGuard)
 export class ExchangeCredentialsController {
-  constructor(private readonly credentials: ExchangeCredentialsService) {}
+  constructor(
+    private readonly credentials: ExchangeCredentialsService,
+    private readonly accounts: ExchangeAccountManagementService,
+  ) {}
 
   @Get()
   list(@Req() request: AuthenticatedRequest) {
@@ -26,12 +30,23 @@ export class ExchangeCredentialsController {
       environment?: ExchangeEnvironment;
     },
   ) {
+    this.accounts.assertTestnetOnly(body.environment);
     return this.credentials.upsertBinance(
       request.user.sub,
       body.apiKey,
       body.apiSecret,
-      body.environment ?? ExchangeEnvironment.TESTNET,
+      ExchangeEnvironment.TESTNET,
     );
+  }
+
+  @Post('binance/testnet/test-connection')
+  testBinanceTestnetConnection(@Req() request: AuthenticatedRequest) {
+    return this.accounts.testBinanceTestnetConnection(request.user.sub);
+  }
+
+  @Get('binance/testnet/balances')
+  getBinanceTestnetBalances(@Req() request: AuthenticatedRequest) {
+    return this.accounts.getBinanceTestnetBalances(request.user.sub);
   }
 
   @Delete('binance/:environment')
@@ -39,6 +54,10 @@ export class ExchangeCredentialsController {
     @Req() request: AuthenticatedRequest,
     @Param('environment') environment: ExchangeEnvironment,
   ) {
-    return this.credentials.removeBinance(request.user.sub, environment);
+    this.accounts.assertTestnetOnly(environment);
+    return this.credentials.removeBinance(
+      request.user.sub,
+      ExchangeEnvironment.TESTNET,
+    );
   }
 }
