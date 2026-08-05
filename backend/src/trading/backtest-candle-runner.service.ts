@@ -54,6 +54,7 @@ export class BacktestCandleRunnerService {
         maxEntries: run.strategy.maxDcaOrders + 1,
         priceDeviationPercent: run.strategy.dcaStepPercent,
         volumeMultiplier: run.strategy.dcaMultiplier,
+        takeProfitPercent: run.strategy.takeProfitPercent,
       });
 
       return this.execution.complete(run.id, result);
