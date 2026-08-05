@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import WebSocket from 'ws';
+import { WebSocket } from 'ws';
 
 export type BinanceStreamEnvironment = 'testnet' | 'live';
 
