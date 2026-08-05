@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Param,
   Post,
   Query,
@@ -70,12 +71,44 @@ export class BacktestRunController {
     return this.runs.list(request.user.sub, parsedLimit);
   }
 
+  @Get('compare')
+  compare(
+    @Req() request: AuthenticatedRequest,
+    @Query('runIds') runIds?: string,
+  ) {
+    if (!runIds) {
+      throw new BadRequestException('runIds query parameter is required');
+    }
+    return this.runs.compare(
+      request.user.sub,
+      runIds.split(',').map((runId) => runId.trim()),
+    );
+  }
+
   @Get(':runId/report')
   report(
     @Req() request: AuthenticatedRequest,
     @Param('runId') runId: string,
   ) {
     return this.runs.report(request.user.sub, runId);
+  }
+
+  @Get(':runId/export/trades.csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  exportTrades(
+    @Req() request: AuthenticatedRequest,
+    @Param('runId') runId: string,
+  ) {
+    return this.runs.exportTradesCsv(request.user.sub, runId);
+  }
+
+  @Get(':runId/export/equity.csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  exportEquity(
+    @Req() request: AuthenticatedRequest,
+    @Param('runId') runId: string,
+  ) {
+    return this.runs.exportEquityCsv(request.user.sub, runId);
   }
 
   @Get(':runId')
