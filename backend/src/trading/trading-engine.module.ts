@@ -25,6 +25,7 @@ import { TestnetFillAccountingService } from './testnet-fill-accounting.service'
 import { TestnetOrderSyncSchedulerService } from './testnet-order-sync-scheduler.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+import { TestnetStrategyRiskService } from './testnet-strategy-risk.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
 import { TestnetStrategySchedulerService } from './testnet-strategy-scheduler.service';
 import { TradingEngineController } from './trading-engine.controller';
@@ -55,6 +56,7 @@ import { TradingEngineService } from './trading-engine.service';
     PaperStrategyRunnerService,
     PaperStrategySchedulerService,
     TestnetFillAccountingService,
+    TestnetStrategyRiskService,
     TestnetStrategyExecutionService,
     TestnetOrderSyncSchedulerService,
     TestnetStrategyActionService,
@@ -79,6 +81,7 @@ import { TradingEngineService } from './trading-engine.service';
     BacktestDcaSimulatorService,
     PaperStrategyRunnerService,
     TestnetFillAccountingService,
+    TestnetStrategyRiskService,
     TestnetStrategyExecutionService,
     TestnetStrategyActionService,
     TestnetActionTimelineService,
