@@ -71,7 +71,19 @@ enum StrategyActionStatus {
   SUBMITTED
   COMPLETED
   FAILED
+  PERMANENTLY_FAILED
   CANCELLED
+}
+
+enum StrategyActionFailureCategory {
+  NETWORK
+  TIMEOUT
+  RATE_LIMIT
+  EXCHANGE_TEMPORARY
+  VALIDATION
+  AUTHENTICATION
+  INSUFFICIENT_BALANCE
+  UNKNOWN
 }
 
 enum NotificationSeverity {
@@ -234,32 +246,39 @@ model TradingOrder {
 }
 
 model StrategyAction {
-  id            String               @id @default(uuid())
-  userId        String
-  strategyId    String
-  positionId    String?
-  subPositionId String?
-  orderId       String?              @unique
-  actionKey     String               @unique
-  type          StrategyActionType
-  status        StrategyActionStatus @default(PENDING)
-  level         Int?
-  independent   Boolean              @default(false)
-  side          OrderSide
-  quantity      Decimal?             @db.Decimal(28, 12)
-  quoteAmount   Decimal?             @db.Decimal(28, 8)
-  triggerPrice  Decimal?             @db.Decimal(28, 12)
-  errorMessage  String?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  completedAt   DateTime?
-  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  strategy      TradingStrategy      @relation(fields: [strategyId], references: [id], onDelete: Cascade)
-  position      TradingPosition?     @relation(fields: [positionId], references: [id], onDelete: Cascade)
-  subPosition   TradingSubPosition?  @relation(fields: [subPositionId], references: [id], onDelete: SetNull)
-  order         TradingOrder?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  id               String                        @id @default(uuid())
+  userId           String
+  strategyId       String
+  positionId       String?
+  subPositionId    String?
+  orderId          String?                       @unique
+  actionKey        String                        @unique
+  type             StrategyActionType
+  status           StrategyActionStatus          @default(PENDING)
+  failureCategory  StrategyActionFailureCategory?
+  retryable        Boolean                       @default(false)
+  attemptCount     Int                           @default(0)
+  maxAttempts      Int                           @default(5)
+  lastAttemptedAt  DateTime?
+  nextRetryAt      DateTime?
+  level            Int?
+  independent      Boolean                       @default(false)
+  side             OrderSide
+  quantity         Decimal?                      @db.Decimal(28, 12)
+  quoteAmount      Decimal?                      @db.Decimal(28, 8)
+  triggerPrice     Decimal?                      @db.Decimal(28, 12)
+  errorMessage     String?
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  completedAt      DateTime?
+  user             User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy         TradingStrategy               @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  position         TradingPosition?              @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  subPosition      TradingSubPosition?           @relation(fields: [subPositionId], references: [id], onDelete: SetNull)
+  order            TradingOrder?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   @@index([strategyId, status])
+  @@index([status, nextRetryAt])
   @@index([userId, createdAt])
   @@index([positionId, status])
   @@index([subPositionId, status])
