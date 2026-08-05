@@ -50,10 +50,21 @@ describe('BacktestCandleRunnerService', () => {
     };
   }
 
+  function createCandles(count: number, startTime: Date) {
+    return Array.from({ length: count }, (_, index) => ({
+      openTime: new Date(startTime.getTime() + index * 60_000),
+      close: '100',
+    }));
+  }
+
   it('starts, simulates with strategy DCA parameters, and completes the run', async () => {
     const { service, runs, execution, candles, simulator } = createService();
     const run = createRun();
-    const historicalCandles = [{ close: '100' }, { close: '90' }, { close: '110' }];
+    const historicalCandles = [
+      { openTime: run.startTime, close: '100' },
+      { openTime: new Date(run.startTime.getTime() + 60_000), close: '90' },
+      { openTime: new Date(run.startTime.getTime() + 120_000), close: '110' },
+    ];
     const result = {
       endingCapital: '1150.00000000',
       realizedPnlQuote: '150.00000000',
@@ -90,6 +101,93 @@ describe('BacktestCandleRunnerService', () => {
     });
     expect(execution.complete).toHaveBeenCalledWith('run-1', result);
     expect(execution.fail).not.toHaveBeenCalled();
+  });
+
+  it('loads every full candle page without duplicating page boundaries', async () => {
+    const { service, runs, execution, candles, simulator } = createService();
+    const startTime = new Date('2026-01-01T00:00:00.000Z');
+    const firstPage = createCandles(5000, startTime);
+    const lastOpenTime = firstPage[firstPage.length - 1].openTime;
+    const secondPage = createCandles(
+      2,
+      new Date(lastOpenTime.getTime() + 1),
+    );
+    const run = createRun({
+      startTime,
+      endTime: new Date(secondPage[1].openTime.getTime() + 60_000),
+    });
+    const result = {
+      endingCapital: '1000.00000000',
+      realizedPnlQuote: '0.00000000',
+      returnPercent: '0.000000',
+      maxDrawdownPercent: '0.000000',
+      tradeCount: 1,
+    };
+
+    runs.get.mockResolvedValue(run);
+    execution.start.mockResolvedValue({ ...run, status: 'RUNNING' });
+    candles.list
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce(secondPage);
+    simulator.simulate.mockReturnValue(result);
+    execution.complete.mockResolvedValue({ id: run.id, status: 'COMPLETED' });
+
+    await service.run('user-1', run.id);
+
+    expect(candles.list).toHaveBeenNthCalledWith(1, {
+      exchange: run.exchange,
+      symbol: run.symbol,
+      interval: run.interval,
+      startTime,
+      endTime: run.endTime,
+      limit: 5000,
+    });
+    expect(candles.list).toHaveBeenNthCalledWith(2, {
+      exchange: run.exchange,
+      symbol: run.symbol,
+      interval: run.interval,
+      startTime: new Date(lastOpenTime.getTime() + 1),
+      endTime: run.endTime,
+      limit: 5000,
+    });
+    expect(candles.list).toHaveBeenCalledTimes(2);
+    expect(simulator.simulate).toHaveBeenCalledWith({
+      initialCapital: run.initialCapital,
+      candles: [...firstPage, ...secondPage],
+      maxEntries: 4,
+      priceDeviationPercent: '5',
+      volumeMultiplier: '1.5',
+    });
+  });
+
+  it('stops pagination when a full page is followed by no candles', async () => {
+    const { service, runs, execution, candles, simulator } = createService();
+    const startTime = new Date('2026-01-01T00:00:00.000Z');
+    const firstPage = createCandles(5000, startTime);
+    const run = createRun({
+      startTime,
+      endTime: new Date('2026-12-31T00:00:00.000Z'),
+    });
+    const result = {
+      endingCapital: '1000.00000000',
+      realizedPnlQuote: '0.00000000',
+      returnPercent: '0.000000',
+      maxDrawdownPercent: '0.000000',
+      tradeCount: 1,
+    };
+
+    runs.get.mockResolvedValue(run);
+    execution.start.mockResolvedValue({ ...run, status: 'RUNNING' });
+    candles.list.mockResolvedValueOnce(firstPage).mockResolvedValueOnce([]);
+    simulator.simulate.mockReturnValue(result);
+    execution.complete.mockResolvedValue({ id: run.id, status: 'COMPLETED' });
+
+    await service.run('user-1', run.id);
+
+    expect(candles.list).toHaveBeenCalledTimes(2);
+    expect(simulator.simulate).toHaveBeenCalledWith(
+      expect.objectContaining({ candles: firstPage }),
+    );
   });
 
   it('marks the run failed when no historical candles are available', async () => {
@@ -135,7 +233,9 @@ describe('BacktestCandleRunnerService', () => {
   it('marks the run failed when DCA simulation throws', async () => {
     const { service, runs, execution, candles, simulator } = createService();
     const run = createRun();
-    const historicalCandles = [{ close: '100' }];
+    const historicalCandles = [
+      { openTime: run.startTime, close: '100' },
+    ];
     const error = new Error('Simulation failed');
 
     runs.get.mockResolvedValue(run);
