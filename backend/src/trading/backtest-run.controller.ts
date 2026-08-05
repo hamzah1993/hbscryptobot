@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { BacktestExecutionService } from './backtest-execution.service';
+import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
 import {
   BacktestRunService,
   type CreateBacktestRunInput,
@@ -34,7 +34,7 @@ type CreateBacktestRunBody = Omit<
 export class BacktestRunController {
   constructor(
     private readonly runs: BacktestRunService,
-    private readonly execution: BacktestExecutionService,
+    private readonly runner: BacktestCandleRunnerService,
   ) {}
 
   @Post()
@@ -54,7 +54,7 @@ export class BacktestRunController {
     @Req() request: AuthenticatedRequest,
     @Param('runId') runId: string,
   ) {
-    return this.execution.start(request.user.sub, runId);
+    return this.runner.run(request.user.sub, runId);
   }
 
   @Get()
