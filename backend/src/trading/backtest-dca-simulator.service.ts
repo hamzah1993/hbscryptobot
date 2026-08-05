@@ -56,16 +56,19 @@ export class BacktestDcaSimulatorService {
     const feePercent = new Prisma.Decimal(input.feePercent ?? 0);
     const slippagePercent = new Prisma.Decimal(input.slippagePercent ?? 0);
 
-    if (!initialCapital.isPositive()) {
+    if (initialCapital.lessThanOrEqualTo(0)) {
       throw new BadRequestException('Initial capital must be positive');
     }
-    if (!priceDeviationPercent.isPositive()) {
+    if (priceDeviationPercent.lessThanOrEqualTo(0)) {
       throw new BadRequestException('Price deviation percent must be positive');
     }
     if (volumeMultiplier.lessThan(1)) {
       throw new BadRequestException('Volume multiplier must be at least 1');
     }
-    if (takeProfitPercent !== null && !takeProfitPercent.isPositive()) {
+    if (
+      takeProfitPercent !== null &&
+      takeProfitPercent.lessThanOrEqualTo(0)
+    ) {
       throw new BadRequestException('Take profit percent must be positive');
     }
     if (feePercent.isNegative() || feePercent.greaterThanOrEqualTo(100)) {
@@ -76,7 +79,7 @@ export class BacktestDcaSimulatorService {
     }
 
     const prices = input.candles.map((candle) => new Prisma.Decimal(candle.close));
-    if (prices.some((price) => !price.isPositive())) {
+    if (prices.some((price) => price.lessThanOrEqualTo(0))) {
       throw new BadRequestException(
         'Historical candle close prices must be positive',
       );
