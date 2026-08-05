@@ -7,6 +7,7 @@ describe('BacktestExecutionService', () => {
     const backtestRun = {
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     };
     const prisma = { backtestRun } as any;
 
@@ -16,44 +17,63 @@ describe('BacktestExecutionService', () => {
     };
   }
 
-  it('starts a user-owned pending run', async () => {
+  it('atomically starts a user-owned pending run', async () => {
     const { service, backtestRun } = createService();
-    backtestRun.findFirst.mockResolvedValue({ id: 'run-1' });
-    backtestRun.update.mockResolvedValue({
+    const started = {
       id: 'run-1',
       status: BacktestRunStatus.RUNNING,
-    });
+    };
 
-    await expect(service.start('user-1', ' run-1 ')).resolves.toEqual({
-      id: 'run-1',
-      status: BacktestRunStatus.RUNNING,
-    });
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue(started);
 
-    expect(backtestRun.findFirst).toHaveBeenCalledWith({
+    await expect(service.start('user-1', ' run-1 ')).resolves.toEqual(started);
+
+    expect(backtestRun.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'run-1',
         userId: 'user-1',
         status: BacktestRunStatus.PENDING,
       },
-    });
-    expect(backtestRun.update).toHaveBeenCalledWith({
-      where: { id: 'run-1' },
       data: {
         status: BacktestRunStatus.RUNNING,
         startedAt: expect.any(Date),
         errorMessage: null,
       },
     });
+
+    const startedAt = backtestRun.updateMany.mock.calls[0][0].data.startedAt;
+    expect(backtestRun.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'run-1',
+        userId: 'user-1',
+        status: BacktestRunStatus.RUNNING,
+        startedAt,
+      },
+    });
+    expect(backtestRun.update).not.toHaveBeenCalled();
   });
 
-  it('rejects a missing or non-pending run', async () => {
+  it('rejects a missing, foreign-owned, or non-pending run', async () => {
     const { service, backtestRun } = createService();
-    backtestRun.findFirst.mockResolvedValue(null);
+    backtestRun.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(service.start('user-1', 'run-2')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+
+    expect(backtestRun.findFirst).not.toHaveBeenCalled();
     expect(backtestRun.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the transitioned run cannot be reloaded', async () => {
+    const { service, backtestRun } = createService();
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue(null);
+
+    await expect(service.start('user-1', 'run-1')).rejects.toThrow(
+      'Started backtest run was not found',
+    );
   });
 
   it('completes a run with calculated metrics', async () => {
