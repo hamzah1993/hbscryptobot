@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BacktestTradeType, Prisma } from '@prisma/client';
 import type {
   BacktestSimulationCandle,
+  BacktestSimulationEquityPoint,
   BacktestSimulationResult,
+  BacktestSimulationTrade,
 } from './backtest-buy-hold-simulator.service';
 
 export type BacktestDcaSimulationInput = {
@@ -18,6 +20,7 @@ export type BacktestDcaSimulationInput = {
 };
 
 type IndependentPosition = {
+  level: number;
   quantity: Prisma.Decimal;
   costQuote: Prisma.Decimal;
 };
@@ -44,9 +47,7 @@ export class BacktestDcaSimulatorService {
     }
 
     const initialCapital = new Prisma.Decimal(input.initialCapital);
-    const priceDeviationPercent = new Prisma.Decimal(
-      input.priceDeviationPercent,
-    );
+    const priceDeviationPercent = new Prisma.Decimal(input.priceDeviationPercent);
     const volumeMultiplier = new Prisma.Decimal(input.volumeMultiplier ?? 1);
     const takeProfitPercent =
       input.takeProfitPercent === undefined
@@ -74,9 +75,7 @@ export class BacktestDcaSimulatorService {
       throw new BadRequestException('Slippage percent must be between 0 and 100');
     }
 
-    const prices = input.candles.map(
-      (candle) => new Prisma.Decimal(candle.close),
-    );
+    const prices = input.candles.map((candle) => new Prisma.Decimal(candle.close));
     if (prices.some((price) => !price.isPositive())) {
       throw new BadRequestException(
         'Historical candle close prices must be positive',
@@ -98,13 +97,19 @@ export class BacktestDcaSimulatorService {
     let parentQuantity = new Prisma.Decimal(0);
     let parentCostQuote = new Prisma.Decimal(0);
     const independentPositions: IndependentPosition[] = [];
+    const trades: BacktestSimulationTrade[] = [];
+    const equityPoints: BacktestSimulationEquityPoint[] = [];
     let entries = 0;
     let exits = 0;
     let peakEquity = initialCapital;
     let maxDrawdownPercent = new Prisma.Decimal(0);
     const entryPrice = prices[0];
 
-    for (const marketPrice of prices) {
+    for (let candleIndex = 0; candleIndex < prices.length; candleIndex += 1) {
+      const marketPrice = prices[candleIndex];
+      const executedAt =
+        input.candles[candleIndex].openTime ?? new Date(candleIndex);
+
       while (entries < input.maxEntries) {
         const triggerPrice = entryPrice.mul(
           new Prisma.Decimal(1).sub(
@@ -125,13 +130,27 @@ export class BacktestDcaSimulatorService {
         quoteBalance = quoteBalance.sub(spend);
         const quantity = quoteForAsset.div(executionPrice);
         const level = entries + 1;
+        const independent = level >= independentFromLevel;
 
-        if (level >= independentFromLevel) {
-          independentPositions.push({ quantity, costQuote: spend });
+        if (independent) {
+          independentPositions.push({ level, quantity, costQuote: spend });
         } else {
           parentQuantity = parentQuantity.add(quantity);
           parentCostQuote = parentCostQuote.add(spend);
         }
+
+        trades.push({
+          type: independent
+            ? BacktestTradeType.INDEPENDENT_ENTRY
+            : BacktestTradeType.PARENT_ENTRY,
+          level,
+          independent,
+          executedAt,
+          price: executionPrice.toFixed(12),
+          quantity: quantity.toFixed(12),
+          quoteAmount: spend.toFixed(8),
+          feeQuote: feeQuote.toFixed(8),
+        });
         entries += 1;
       }
 
@@ -146,7 +165,21 @@ export class BacktestDcaSimulatorService {
         ) {
           const executionPrice = marketPrice.mul(sellSlippageFactor);
           const grossProceeds = parentQuantity.mul(executionPrice);
-          quoteBalance = quoteBalance.add(grossProceeds.sub(grossProceeds.mul(feeRate)));
+          const feeQuote = grossProceeds.mul(feeRate);
+          const netProceeds = grossProceeds.sub(feeQuote);
+          const realizedPnlQuote = netProceeds.sub(parentCostQuote);
+          quoteBalance = quoteBalance.add(netProceeds);
+          trades.push({
+            type: BacktestTradeType.PARENT_EXIT,
+            level: Math.max(1, Math.min(entries, independentFromLevel - 1)),
+            independent: false,
+            executedAt,
+            price: executionPrice.toFixed(12),
+            quantity: parentQuantity.toFixed(12),
+            quoteAmount: grossProceeds.toFixed(8),
+            feeQuote: feeQuote.toFixed(8),
+            realizedPnlQuote: realizedPnlQuote.toFixed(8),
+          });
           parentQuantity = new Prisma.Decimal(0);
           parentCostQuote = new Prisma.Decimal(0);
           exits += 1;
@@ -160,7 +193,21 @@ export class BacktestDcaSimulatorService {
           if (marketPrice.greaterThanOrEqualTo(takeProfitPrice)) {
             const executionPrice = marketPrice.mul(sellSlippageFactor);
             const grossProceeds = position.quantity.mul(executionPrice);
-            quoteBalance = quoteBalance.add(grossProceeds.sub(grossProceeds.mul(feeRate)));
+            const feeQuote = grossProceeds.mul(feeRate);
+            const netProceeds = grossProceeds.sub(feeQuote);
+            const realizedPnlQuote = netProceeds.sub(position.costQuote);
+            quoteBalance = quoteBalance.add(netProceeds);
+            trades.push({
+              type: BacktestTradeType.INDEPENDENT_EXIT,
+              level: position.level,
+              independent: true,
+              executedAt,
+              price: executionPrice.toFixed(12),
+              quantity: position.quantity.toFixed(12),
+              quoteAmount: grossProceeds.toFixed(8),
+              feeQuote: feeQuote.toFixed(8),
+              realizedPnlQuote: realizedPnlQuote.toFixed(8),
+            });
             independentPositions.splice(index, 1);
             exits += 1;
           }
@@ -183,6 +230,12 @@ export class BacktestDcaSimulatorService {
       if (drawdownPercent.greaterThan(maxDrawdownPercent)) {
         maxDrawdownPercent = drawdownPercent;
       }
+
+      equityPoints.push({
+        recordedAt: executedAt,
+        equityQuote: equity.toFixed(8),
+        drawdownPercent: drawdownPercent.toFixed(6),
+      });
     }
 
     const finalPrice = prices[prices.length - 1];
@@ -202,6 +255,8 @@ export class BacktestDcaSimulatorService {
       returnPercent: returnPercent.toFixed(6),
       maxDrawdownPercent: maxDrawdownPercent.toFixed(6),
       tradeCount: entries + exits,
+      trades,
+      equityPoints,
     };
   }
 }
