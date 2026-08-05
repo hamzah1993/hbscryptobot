@@ -231,7 +231,7 @@ export function BacktestDashboardPanel({ token }: Props) {
                       {report.run.trades.map((trade) => (
                         <tr key={trade.id} className="border-t border-white/5">
                           <td className="px-4 py-3 text-slate-400">{new Date(trade.executedAt).toLocaleString()}</td>
-                          <td className="px-4 py-3">{trade.type.replaceAll('_', ' ')}</td>
+                          <td className="px-4 py-3">{trade.type.replace(/_/g, ' ')}</td>
                           <td className="px-4 py-3">{trade.level}</td>
                           <td className="px-4 py-3">{formatNumber(trade.price, 8)}</td>
                           <td className="px-4 py-3">{formatNumber(trade.quoteAmount)}</td>
