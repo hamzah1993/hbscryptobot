@@ -25,7 +25,7 @@ export class TestnetEmergencyStopService {
         data: { status: 'STOPPED' },
       });
 
-      const actions = await tx.strategyAction.updateMany({
+      const pendingActions = await tx.strategyAction.updateMany({
         where: {
           userId,
           status: 'PENDING',
@@ -35,15 +35,37 @@ export class TestnetEmergencyStopService {
           },
         },
         data: {
-          status: 'FAILED',
+          status: 'CANCELLED',
+          retryable: false,
+          nextRetryAt: null,
           errorMessage: 'Cancelled by Testnet emergency stop',
+          completedAt: stoppedAt,
+        },
+      });
+
+      const scheduledRetries = await tx.strategyAction.updateMany({
+        where: {
+          userId,
+          status: 'FAILED',
+          retryable: true,
+          strategy: {
+            environment: 'TESTNET',
+            paperTrading: false,
+          },
+        },
+        data: {
+          status: 'CANCELLED',
+          retryable: false,
+          nextRetryAt: null,
+          errorMessage: 'Scheduled retry cancelled by Testnet emergency stop',
           completedAt: stoppedAt,
         },
       });
 
       return {
         stoppedStrategies: strategies.count,
-        cancelledPendingActions: actions.count,
+        cancelledPendingActions: pendingActions.count,
+        cancelledScheduledRetries: scheduledRetries.count,
       };
     });
 
@@ -130,6 +152,7 @@ export class TestnetEmergencyStopService {
         stoppedAt: stoppedAt.toISOString(),
         stoppedStrategies: response.stoppedStrategies,
         cancelledPendingActions: response.cancelledPendingActions,
+        cancelledScheduledRetries: response.cancelledScheduledRetries,
         unresolvedOrders: response.unresolvedOrders,
         cancelledOrders: response.cancelledOrders,
         failedOrderCancellations: response.failedOrderCancellations,
