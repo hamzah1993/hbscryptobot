@@ -119,11 +119,10 @@ export class BacktestRunService {
     });
     if (!run) throw new NotFoundException('Backtest run was not found');
 
-    const exits = run.trades.filter((trade) =>
-      [
-        BacktestTradeType.PARENT_EXIT,
-        BacktestTradeType.INDEPENDENT_EXIT,
-      ].includes(trade.type),
+    const exits = run.trades.filter(
+      (trade) =>
+        trade.type === BacktestTradeType.PARENT_EXIT ||
+        trade.type === BacktestTradeType.INDEPENDENT_EXIT,
     );
     const wins = exits.filter(
       (trade) => trade.realizedPnlQuote?.greaterThan(0) ?? false,
@@ -136,13 +135,21 @@ export class BacktestRunService {
       new Prisma.Decimal(0),
     );
     const grossLoss = losses.reduce(
-      (sum, trade) => sum.add((trade.realizedPnlQuote ?? new Prisma.Decimal(0)).abs()),
+      (sum, trade) =>
+        sum.add((trade.realizedPnlQuote ?? new Prisma.Decimal(0)).abs()),
       new Prisma.Decimal(0),
     );
     const exitCount = exits.length;
-    const winRate = exitCount === 0 ? new Prisma.Decimal(0) : new Prisma.Decimal(wins.length).div(exitCount).mul(100);
-    const averageWin = wins.length === 0 ? new Prisma.Decimal(0) : grossProfit.div(wins.length);
-    const averageLoss = losses.length === 0 ? new Prisma.Decimal(0) : grossLoss.div(losses.length);
+    const winRate =
+      exitCount === 0
+        ? new Prisma.Decimal(0)
+        : new Prisma.Decimal(wins.length).div(exitCount).mul(100);
+    const averageWin =
+      wins.length === 0 ? new Prisma.Decimal(0) : grossProfit.div(wins.length);
+    const averageLoss =
+      losses.length === 0
+        ? new Prisma.Decimal(0)
+        : grossLoss.div(losses.length);
     const profitFactor = grossLoss.isZero() ? null : grossProfit.div(grossLoss);
     const peakEquity = run.equityPoints.reduce(
       (peak, point) => Prisma.Decimal.max(peak, point.equityQuote),
