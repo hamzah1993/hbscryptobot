@@ -52,28 +52,73 @@ export class BacktestExecutionService {
       tradeCount: number;
     },
   ) {
-    return this.prisma.backtestRun.update({
-      where: { id: runId },
+    const normalizedRunId = runId.trim();
+    const completedAt = new Date();
+    const transition = await this.prisma.backtestRun.updateMany({
+      where: {
+        id: normalizedRunId,
+        status: BacktestRunStatus.RUNNING,
+      },
       data: {
         status: BacktestRunStatus.COMPLETED,
         ...result,
-        completedAt: new Date(),
+        completedAt,
         errorMessage: null,
       },
     });
+
+    if (transition.count !== 1) {
+      throw new NotFoundException('Running backtest run was not found');
+    }
+
+    const run = await this.prisma.backtestRun.findFirst({
+      where: {
+        id: normalizedRunId,
+        status: BacktestRunStatus.COMPLETED,
+        completedAt,
+      },
+    });
+
+    if (!run) {
+      throw new NotFoundException('Completed backtest run was not found');
+    }
+
+    return run;
   }
 
   async fail(runId: string, error: unknown) {
+    const normalizedRunId = runId.trim();
+    const completedAt = new Date();
     const message =
       error instanceof Error ? error.message : 'Backtest execution failed';
-
-    return this.prisma.backtestRun.update({
-      where: { id: runId },
+    const transition = await this.prisma.backtestRun.updateMany({
+      where: {
+        id: normalizedRunId,
+        status: BacktestRunStatus.RUNNING,
+      },
       data: {
         status: BacktestRunStatus.FAILED,
         errorMessage: message,
-        completedAt: new Date(),
+        completedAt,
       },
     });
+
+    if (transition.count !== 1) {
+      throw new NotFoundException('Running backtest run was not found');
+    }
+
+    const run = await this.prisma.backtestRun.findFirst({
+      where: {
+        id: normalizedRunId,
+        status: BacktestRunStatus.FAILED,
+        completedAt,
+      },
+    });
+
+    if (!run) {
+      throw new NotFoundException('Failed backtest run was not found');
+    }
+
+    return run;
   }
 }
