@@ -1,16 +1,16 @@
 # HBS Trading Platform
 
-A full-stack cryptocurrency trading platform focused on safe paper trading, Binance Spot Testnet execution, configurable DCA strategies, Royal Q-style independent sub-positions, operational reliability, and backtesting foundations.
+A full-stack cryptocurrency trading platform focused on safe paper trading, Binance Spot Testnet execution, configurable DCA strategies, Royal Q-style independent sub-positions, operational reliability, and historical backtesting.
 
-> **Safety status:** Live-money order execution is disabled. The platform currently supports paper trading, public Binance market data, and controlled Binance Spot Testnet execution only.
+> **Safety status:** Live-money order execution is disabled. The platform supports paper trading, public Binance market data, historical backtesting, and controlled Binance Spot Testnet execution only.
 
 ## Current project status
 
-**Latest completed numbered feature commit:** 118  
-**Current milestone:** Backtesting and analytics foundation  
-**Estimated overall completion:** approximately 85–87%
+**Latest completed numbered roadmap commit:** 173  
+**Current milestone:** Core v1 release readiness  
+**Estimated overall completion:** approximately 94–96% for paper trading, Binance Spot Testnet, historical data, and backtesting.
 
-The core paper-trading and Binance Spot Testnet workflows are implemented. API throttling, Redis-backed distributed locking, scheduler recovery, notification persistence, and configurable lock TTLs are also in place. Historical candle storage, ingestion, and the first Binance importer foundation have now been added.
+Core paper-trading, Binance Spot Testnet, historical candle ingestion, Royal Q-style DCA simulation, backtest analytics, persisted trades/equity curves, CSV exports, and dashboard comparison are implemented. Remaining work is primarily operational hardening, deployment guidance, durable background delivery, and broader integration testing.
 
 ### Milestone progress
 
@@ -21,12 +21,12 @@ The core paper-trading and Binance Spot Testnet workflows are implemented. API t
 | DCA and fixed risk-budget logic | Complete | 100% |
 | Royal Q-style independent sub-positions | Complete | 100% |
 | Binance Spot Testnet execution | Complete | 100% |
-| Dashboard, charting, and Testnet markers | Complete | 95–100% |
-| Notifications and webhook reliability | Complete | 100% |
+| Dashboard and charting | Complete | 95–100% |
+| Notifications and webhook reliability | Complete | 95% |
 | API rate limiting | Complete | 100% |
 | Distributed locking and scheduler recovery | Complete | 95–100% |
-| Backtesting and analytics | In progress | 15–20% |
-| Deployment, monitoring, and backups | Upcoming | 20–30% |
+| Historical data and backtesting | Complete | 95–100% |
+| Deployment, monitoring, backups, and runbooks | In progress | 35–45% |
 | Live-execution safeguards | Future | Not started |
 | Bybit and OKX integration | Future | Not started |
 
@@ -37,21 +37,20 @@ The core paper-trading and Binance Spot Testnet workflows are implemented. API t
 - Paper positions, DCA, take profit, realized P&L, and automatic strategy scheduling
 - Binance Spot Testnet market-order execution and reconciliation
 - Persistent Testnet orders, positions, fills, and idempotent strategy actions
-- Royal Q-style independent entries and independent take-profit exits
+- Royal Q-style parent positions and independent entries/exits
 - Fixed quote-currency risk budgets instead of whole-account balance sizing
-- Automatic Testnet strategy and order-sync schedulers
 - Redis-backed scheduler and per-strategy distributed locks
-- Token-protected atomic lock release and lock-expiry recovery
-- Configurable Redis lock TTLs with safe fallbacks
 - Binance WebSocket market-price streaming
-- TradingView charting with live candles and Testnet markers
-- Testnet orders, positions, account status, and action-timeline panels
-- Testnet emergency stop and unresolved-order cancellation attempts
-- Persistent operational notifications and webhook metrics
-- Signed webhook delivery with retries, restart restoration, and retention cleanup
-- Historical candle Prisma model
-- Historical candle batch ingestion and deduplicating upserts
-- Binance historical candle importer service foundation
+- Trading dashboard, charts, Testnet orders, positions, notifications, and emergency controls
+- Historical candle storage, date-range imports, pagination, and chronological queries
+- Backtest run lifecycle with atomic start and terminal transitions
+- Candle-by-candle DCA simulation with parent and independent take-profit exits
+- Configurable fees and adverse slippage
+- Persisted trade events and equity/drawdown points
+- Analytics including return, drawdown, win rate, profit factor, peak equity, and DCA depth
+- Backtest dashboard with equity chart and trade history
+- Run comparison for 2–10 backtests
+- Trade and equity CSV exports
 - GitHub Actions validation for backend, frontend, Prisma, tests, and Docker
 
 ## Architecture
@@ -85,139 +84,45 @@ Paper strategies simulate initial entries, DCA orders, average-price changes, pa
 
 ### Binance Spot Testnet
 
-Testnet strategies can place controlled Binance Spot Testnet market orders using encrypted user credentials. Supported execution includes:
-
-- Initial entries
-- Parent DCA entries
-- Parent take-profit exits
-- Independent entries from the configured level
-- Independent take-profit exits
-- Persistent order and fill reconciliation
-- Idempotent strategy actions
-- Automatic scheduled execution
-- Multi-instance execution protection through Redis locks
+Testnet strategies can place controlled Binance Spot Testnet market orders using encrypted user credentials. Supported execution includes initial entries, parent DCA entries, parent and independent take-profit exits, persistent reconciliation, idempotent actions, scheduled execution, and Redis lock protection.
 
 ### Live trading
 
-Live Binance public market data and historical candles may be read, but live order placement and cancellation are explicitly disabled.
+Live Binance public market data and historical candles may be read, but live order placement and cancellation remain explicitly disabled.
 
-## DCA and independent sub-position model
+## Backtesting
 
-Each strategy uses a fixed quote-currency risk budget.
+The backtesting workflow supports:
 
-Configurable strategy fields include:
+- Authenticated creation and execution of backtest runs
+- Historical candle pagination over a requested date range
+- Strategy-driven DCA parameters
+- Parent averaging before the independent threshold
+- Independent positions from `independentFromLevel`
+- Parent and independent take-profit exits
+- Fees and adverse execution slippage
+- Persisted trade events
+- Persisted equity and drawdown points
+- Summary analytics and chronological reports
+- Comparison of 2–10 runs
+- Trade and equity CSV exports
+- Dashboard run form, history, metrics, equity chart, comparison table, and export controls
 
-- Base order size
-- Maximum DCA orders
-- DCA step percentage
-- DCA multiplier
-- Take-profit percentage
-- Independent-sub-position starting level
-- Exchange environment
-- Paper or Testnet mode
+Backtest execution uses historical candle close prices. Results are deterministic for the same stored candles and inputs, but they remain simulations and do not guarantee real execution performance.
 
-Before the independent threshold, DCA entries update the parent position. From the configured independent level onward, new entries are tracked as separate sub-positions with their own quantity, cost, entry price, take-profit price, status, and realized P&L.
+## Main backtest API
 
-## Reliability and distributed locking
-
-Redis locks protect:
-
-- Testnet strategy scheduler ticks
-- Testnet order synchronization
-- Paper-strategy scheduler ticks
-- Notification-retention cleanup
-- Individual Testnet strategy execution
-
-The lock service uses:
-
-- `SET NX PX` acquisition
-- Unique ownership tokens
-- Atomic compare-and-delete release
-- Expiry-based crash recovery
-- Graceful handling of acquisition and release failures
-
-Relevant environment variables:
-
-```env
-REDIS_URL=redis://redis:6379
-TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS=30000
-TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS=30000
-PAPER_STRATEGY_SCHEDULER_LOCK_TTL_MS=30000
-NOTIFICATION_RETENTION_SCHEDULER_LOCK_TTL_MS=300000
-TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS=30000
-```
-
-## API rate limiting
-
-```env
-API_RATE_LIMIT_TTL_MS=60000
-API_RATE_LIMIT_MAX_REQUESTS=120
-AUTH_RATE_LIMIT_TTL_MS=60000
-AUTH_REGISTER_RATE_LIMIT_MAX_REQUESTS=5
-AUTH_LOGIN_RATE_LIMIT_MAX_REQUESTS=10
-```
-
-Invalid, zero, or negative values fall back to safe defaults.
-
-## Historical candle and backtesting foundation
-
-The current data foundation includes:
-
-- `HistoricalCandle` Prisma model
-- Exchange, symbol, interval, OHLC, volume, open time, and close time
-- Unique exchange/symbol/interval/open-time constraint
-- Chronological query index
-- Batch ingestion through Prisma transactions
-- Upserts that update existing candle values instead of creating duplicates
-- Binance public-kline importer foundation supporting standard Binance intervals
-
-The importer currently exists as a service foundation. Registration, API access, pagination, date-range importing, backtest execution, metrics, and dashboard reporting remain upcoming work.
-
-## Notifications and operational alerts
-
-Current notification capabilities include:
-
-- Persistent user-scoped history in PostgreSQL
-- INFO, WARNING, and CRITICAL severities
-- Dashboard history, unread badge, toast, browser alerts, and optional sound
-- Configurable webhook URL, minimum severity, HMAC signing, timeout, and retries
-- Delivery metrics for attempts, successes, failures, retries, timestamps, and HTTP status
-- Persistent metrics snapshots restored after restart
-- Scheduled retention cleanup protected by a Redis lock
-
-```env
-NOTIFICATION_RETENTION_DAYS=30
-NOTIFICATION_WEBHOOK_URL=
-NOTIFICATION_WEBHOOK_SECRET=
-NOTIFICATION_WEBHOOK_MIN_SEVERITY=WARNING
-NOTIFICATION_WEBHOOK_MAX_ATTEMPTS=3
-NOTIFICATION_WEBHOOK_METRICS_RETENTION_DAYS=30
-```
-
-## Repository structure
+All endpoints require JWT authentication.
 
 ```text
-hbstrading/
-├── backend/
-│   ├── prisma/                 Prisma schema
-│   └── src/
-│       ├── auth/               Authentication and JWT guards
-│       ├── exchange/           Binance and credential services
-│       ├── market/             REST cache and WebSocket market data
-│       ├── notifications/      Alerts, webhooks, metrics, retention
-│       ├── prisma/             Prisma service
-│       ├── redis/              Distributed lock module and service
-│       └── trading/            Strategies, execution, candles, safety
-├── frontend/
-│   └── src/
-│       ├── auth/
-│       ├── components/
-│       ├── lib/
-│       └── pages/
-├── .github/workflows/
-├── docker-compose.yml
-├── .env.example
-└── README.md
+POST /api/backtests
+POST /api/backtests/:runId/start
+GET  /api/backtests
+GET  /api/backtests/compare?runIds=id1,id2
+GET  /api/backtests/:runId
+GET  /api/backtests/:runId/report
+GET  /api/backtests/:runId/export/trades.csv
+GET  /api/backtests/:runId/export/equity.csv
 ```
 
 ## Quick start with Docker
@@ -256,208 +161,90 @@ docker compose exec backend npx prisma generate
 docker compose restart backend
 ```
 
-## Local development
-
-### Backend
+## Local validation
 
 ```bash
 cd backend
 npm install
 npx prisma generate
-npm run start:dev
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Validation
-
-```bash
-cd backend
 npm run build
 npm test
 
 cd ../frontend
+npm install
 npm run build
 ```
 
-## Main API areas
+## Release-readiness checklist
 
-All endpoints except registration, login, and health require JWT authentication.
+Before using the platform outside local development:
 
-```text
-POST /api/auth/register
-POST /api/auth/login
-GET  /api/users/me
-
-GET    /api/strategies
-POST   /api/strategies
-PATCH  /api/strategies/:strategyId
-POST   /api/strategies/:strategyId/status
-DELETE /api/strategies/:strategyId
-
-GET  /api/paper-trading/positions
-POST /api/strategies/run-paper-tick
-
-GET  /api/strategies/testnet-orders
-GET  /api/strategies/testnet-positions
-GET  /api/strategies/testnet-actions
-POST /api/strategies/testnet-emergency-stop
-
-GET /api/notifications
-GET /api/notifications/webhook-metrics
-
-GET  /api/market-data/quote
-GET  /api/market-data/stream/status
-GET  /api/market-data/stream/price
-```
-
-No historical-candle import endpoint is exposed yet.
-
-## Numbered roadmap
-
-### Current documentation commit
-
-**Commit 119 — Refresh project status and numbered roadmap**
-
-- Align README with implemented Redis reliability work
-- Document the historical candle foundation
-- Correct outdated limitations and milestone status
-- Publish the next numbered delivery sequence
-
-### Historical data and backtesting
-
-**Commit 120 — Register Binance historical candle importer**
-
-- Add the importer to `TradingEngineModule`
-- Export it for controller and scheduler use
-
-**Commit 121 — Test historical candle ingestion**
-
-- Symbol normalization
-- Decimal conversion
-- Transactional upserts
-- Duplicate-candle updates
-- Empty batch behavior
-
-**Commit 122 — Test Binance historical candle importer**
-
-- Request validation
-- Kline mapping
-- Live public-data environment
-- Import counts and error propagation
-
-**Commit 123 — Add authenticated candle import endpoint**
-
-- Manual symbol, interval, and limit import
-- Validation and structured result
-- No exchange credentials required for public data
-
-**Commit 124 — Add Binance kline pagination parameters**
-
-- Optional start and end time
-- Cursor-safe page retrieval
-- Maximum batch boundaries
-
-**Commit 125 — Add date-range historical importer**
-
-- Multi-page imports
-- Deduplication through existing upserts
-- Progress and imported-count reporting
-
-**Commit 126 — Add historical candle query service**
-
-- Chronological range queries
-- Symbol and interval filtering
-- Bounded result sizes
-
-**Commit 127 — Add backtest run data model**
-
-- Run status and configuration snapshot
-- Start/end range
-- Initial capital and strategy parameters
-- Summary result fields
-
-**Commit 128 — Add backtest execution engine foundation**
-
-- Deterministic candle-by-candle processing
-- Isolated state from paper and Testnet execution
-
-**Commit 129 — Simulate initial entries and parent DCA**
-
-**Commit 130 — Simulate independent sub-position entries and exits**
-
-**Commit 131 — Calculate realized and unrealized P&L**
-
-**Commit 132 — Calculate win rate and average trade duration**
-
-**Commit 133 — Calculate maximum drawdown and equity curve**
-
-**Commit 134 — Add backtest result API**
-
-**Commit 135 — Add backtest dashboard and charts**
-
-**Commit 136 — Add CSV export and run comparison**
-
-### Deployment and operations
-
-**Commits 137–145**
-
-- Health checks for PostgreSQL and Redis
-- Structured application metrics
-- Scheduler and stale-action monitoring
-- Database backup and restore procedures
-- Deployment documentation
-- Administrator runbook
-- Durable webhook delivery queue
-
-### Live-execution safeguards
-
-**Commits 146–154**
-
-- Explicit live-trading feature flag
-- User approval and confirmation workflow
-- Daily loss and exposure limits
-- Preflight balance, symbol, and permission checks
-- Live emergency controls
-- Audit logging and production-readiness checklist
-
-### Additional exchanges
-
-**Commit 155 onward**
-
-- Exchange adapter abstraction
-- Bybit integration
-- OKX integration
-- Cross-exchange normalization and testing
-
-The final roadmap is expected to reach approximately **160–175 numbered commits**, depending on the depth of analytics, production operations, and additional exchange support.
+1. Replace all example secrets and generate a strong `EXCHANGE_CREDENTIALS_KEY`.
+2. Keep live execution disabled.
+3. Use Binance Spot Testnet credentials without withdrawal permission.
+4. Apply the Prisma schema and verify PostgreSQL and Redis health.
+5. Run backend tests, backend build, frontend build, and Docker validation.
+6. Test backtest creation, report loading, comparison, and CSV exports.
+7. Test Testnet emergency-stop behavior and unresolved-order reconciliation.
+8. Configure backups, log retention, external monitoring, and restart policies.
+9. Review lock TTLs for the deployed workload.
+10. Do not treat simulated or Testnet results as proof of profitable live performance.
 
 ## Known limitations
 
-- Live-money execution remains disabled.
-- Historical candle importing currently has service foundations only; no public API, pagination, or scheduled importer exists yet.
-- Backtest execution and reporting are not implemented yet.
-- Emergency stop does not liquidate open positions.
+- Live-money order placement and cancellation are disabled.
 - Bybit and OKX are not integrated.
-- Webhook retries are process-local; there is no durable delivery queue yet.
-- Production monitoring, backup automation, and operational runbooks remain incomplete.
-- The platform is not ready for unattended production trading.
+- Backtests use candle close prices rather than intrabar high/low execution.
+- Gap-through DCA levels execute at the candle close, not each theoretical trigger price.
+- Historical candles are accumulated before simulation, which can increase memory usage for very large ranges.
+- Backtest execution is synchronous and can be heavy for long ranges.
+- Webhook delivery is not backed by a fully durable external queue.
+- Fixed Redis lock TTLs do not currently renew during long-running operations.
+- Emergency stop does not liquidate already-open positions.
+- Production monitoring, automated backups, restore drills, and administrator runbooks still need completion.
+- The platform is not approved for unattended live production trading.
 
 ## Security guidance
 
 - Never commit `.env`, API keys, encryption keys, webhook secrets, or private URLs.
 - Create Binance API keys without withdrawal permission.
-- Use separate Testnet and Live credentials.
-- Keep live execution disabled until safeguards are completed and reviewed.
+- Use separate Testnet and Live credential records.
 - Back up `EXCHANGE_CREDENTIALS_KEY` securely.
-- Test all emergency and concurrency behavior on Binance Spot Testnet.
+- Restrict database and Redis access to trusted networks.
+- Keep live execution disabled until dedicated safeguards are implemented and reviewed.
+
+## Numbered roadmap status
+
+The accelerated core roadmap reached **Commit 173**:
+
+- 165: Complete Royal Q-style backtest engine
+- 166: Add backtest fees and slippage
+- 167: Add trade and equity persistence models
+- 168: Persist simulator trade and equity events
+- 169: Add analytics report endpoint
+- 170: Add comparison and CSV export APIs
+- 171: Add comparison/export frontend client methods
+- 172: Add dashboard comparison and export controls
+- 173: Add analytics, comparison, and export tests
+
+### Remaining core-v1 work
+
+- Operational integration and reliability test suite
+- Deployment and production operations package
+- Backup and restore documentation
+- Administrator runbook and troubleshooting guide
+- Durable notification delivery architecture
+- Final user manual and release checklist
+
+### Version 2 candidates
+
+- Explicitly gated live-execution safeguards
+- Daily loss and exposure controls
+- Preflight balance and permission checks
+- Bybit adapter and integration
+- OKX adapter and integration
+- Cross-exchange normalization
 
 ## Disclaimer
 
-This software is under active development and is not financial advice. Cryptocurrency trading can result in substantial financial loss. Use paper trading and exchange Testnets for validation. Do not treat the current codebase as approved for live or unattended production trading.
+This software is under active development and is not financial advice. Cryptocurrency trading can result in substantial financial loss. Use paper trading and exchange Testnets for validation. Do not treat backtests, simulations, or Testnet results as guarantees of future performance, and do not treat the current codebase as approved for live or unattended production trading.
