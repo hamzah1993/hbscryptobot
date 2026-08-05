@@ -26,6 +26,8 @@ export type TestnetStrategyRunnerResult = {
 };
 
 const DEFAULT_TESTNET_STRATEGY_EXECUTION_LOCK_TTL_MS = 30_000;
+const ACTIVE_ORDER_STATUSES = ['PENDING', 'PARTIALLY_FILLED'] as const;
+const ACTIVE_ACTION_STATUSES = ['PENDING', 'SUBMITTED'] as const;
 
 const getLockTtlMilliseconds = (): number => {
   const value = Number.parseInt(
@@ -80,6 +82,32 @@ export class TestnetStrategyRunnerService {
     return results;
   }
 
+  private async hasPendingExecution(
+    userId: string,
+    strategyId: string,
+  ): Promise<boolean> {
+    const [activeOrder, activeAction] = await Promise.all([
+      this.prisma.tradingOrder.findFirst({
+        where: {
+          userId,
+          status: { in: [...ACTIVE_ORDER_STATUSES] },
+          position: { strategyId },
+        },
+        select: { id: true },
+      }),
+      this.prisma.strategyAction.findFirst({
+        where: {
+          userId,
+          strategyId,
+          status: { in: [...ACTIVE_ACTION_STATUSES] },
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    return Boolean(activeOrder || activeAction);
+  }
+
   private async runStrategy(userId: string, strategy: any): Promise<TestnetStrategyRunnerResult> {
     if (this.runningStrategies.has(strategy.id)) {
       return {
@@ -105,6 +133,15 @@ export class TestnetStrategyRunnerService {
           symbol: strategy.symbol,
           action: 'SKIP',
           message: 'Strategy tick is already running on another instance',
+        };
+      }
+
+      if (await this.hasPendingExecution(userId, strategy.id)) {
+        return {
+          strategyId: strategy.id,
+          symbol: strategy.symbol,
+          action: 'SKIP',
+          message: 'A Testnet order or strategy action is still pending',
         };
       }
 
