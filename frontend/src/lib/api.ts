@@ -398,6 +398,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestText(path: string, token: string): Promise<string> {
+  const response = await fetch(`${API_URL}${path}`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+    throw new Error(message ?? 'Request failed');
+  }
+  return response.text();
+}
+
 const authHeaders = (token: string) => ({ Authorization: `Bearer ${token}` });
 const toBinanceEnvironment = (environment: ExchangeEnvironment): BinanceStreamEnvironment =>
   environment === 'LIVE' ? 'live' : 'testnet';
@@ -421,6 +433,12 @@ export const api = {
     request<BacktestRun>(`/backtests/${encodeURIComponent(runId)}/start`, { method: 'POST', headers: authHeaders(token) }),
   getBacktestReport: (token: string, runId: string) =>
     request<BacktestReport>(`/backtests/${encodeURIComponent(runId)}/report`, { headers: authHeaders(token) }),
+  compareBacktests: (token: string, runIds: string[]) =>
+    request<BacktestReport[]>(`/backtests/compare?runIds=${encodeURIComponent(runIds.join(','))}`, { headers: authHeaders(token) }),
+  exportBacktestTradesCsv: (token: string, runId: string) =>
+    requestText(`/backtests/${encodeURIComponent(runId)}/export/trades.csv`, token),
+  exportBacktestEquityCsv: (token: string, runId: string) =>
+    requestText(`/backtests/${encodeURIComponent(runId)}/export/equity.csv`, token),
   listNotifications: (token: string, limit = 100) =>
     request<OperationalNotification[]>(`/strategies/notifications?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   listTestnetOrders: (token: string, limit = 100) =>
