@@ -4,6 +4,10 @@ import { NotificationRetentionScheduler } from './notification-retention.schedul
 import type { NotificationsService } from './notifications.service';
 
 describe('NotificationRetentionScheduler', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   const createNotifications = (notificationsDeleted = 0, metricsSnapshotsDeleted = 0) =>
     ({
       cleanupExpired: jest.fn().mockResolvedValue(notificationsDeleted),
