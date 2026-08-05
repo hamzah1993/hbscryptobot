@@ -7,26 +7,39 @@ export class BacktestExecutionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async start(userId: string, runId: string) {
-    const run = await this.prisma.backtestRun.findFirst({
+    const normalizedRunId = runId.trim();
+    const startedAt = new Date();
+    const transition = await this.prisma.backtestRun.updateMany({
       where: {
-        id: runId.trim(),
+        id: normalizedRunId,
         userId,
         status: BacktestRunStatus.PENDING,
+      },
+      data: {
+        status: BacktestRunStatus.RUNNING,
+        startedAt,
+        errorMessage: null,
+      },
+    });
+
+    if (transition.count !== 1) {
+      throw new NotFoundException('Pending backtest run was not found');
+    }
+
+    const run = await this.prisma.backtestRun.findFirst({
+      where: {
+        id: normalizedRunId,
+        userId,
+        status: BacktestRunStatus.RUNNING,
+        startedAt,
       },
     });
 
     if (!run) {
-      throw new NotFoundException('Pending backtest run was not found');
+      throw new NotFoundException('Started backtest run was not found');
     }
 
-    return this.prisma.backtestRun.update({
-      where: { id: run.id },
-      data: {
-        status: BacktestRunStatus.RUNNING,
-        startedAt: new Date(),
-        errorMessage: null,
-      },
-    });
+    return run;
   }
 
   async complete(
