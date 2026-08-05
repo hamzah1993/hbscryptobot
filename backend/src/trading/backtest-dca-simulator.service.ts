@@ -11,6 +11,7 @@ export type BacktestDcaSimulationInput = {
   maxEntries: number;
   priceDeviationPercent: Prisma.Decimal | string | number;
   volumeMultiplier?: Prisma.Decimal | string | number;
+  takeProfitPercent?: Prisma.Decimal | string | number;
 };
 
 @Injectable()
@@ -28,6 +29,10 @@ export class BacktestDcaSimulatorService {
       input.priceDeviationPercent,
     );
     const volumeMultiplier = new Prisma.Decimal(input.volumeMultiplier ?? 1);
+    const takeProfitPercent =
+      input.takeProfitPercent === undefined
+        ? null
+        : new Prisma.Decimal(input.takeProfitPercent);
 
     if (!initialCapital.isPositive()) {
       throw new BadRequestException('Initial capital must be positive');
@@ -37,6 +42,9 @@ export class BacktestDcaSimulatorService {
     }
     if (volumeMultiplier.lessThan(1)) {
       throw new BadRequestException('Volume multiplier must be at least 1');
+    }
+    if (takeProfitPercent !== null && !takeProfitPercent.isPositive()) {
+      throw new BadRequestException('Take profit percent must be positive');
     }
 
     const prices = input.candles.map(
@@ -58,13 +66,15 @@ export class BacktestDcaSimulatorService {
 
     let quoteBalance = initialCapital;
     let baseQuantity = new Prisma.Decimal(0);
+    let positionCostQuote = new Prisma.Decimal(0);
     let entries = 0;
+    let exits = 0;
     let peakEquity = initialCapital;
     let maxDrawdownPercent = new Prisma.Decimal(0);
     const entryPrice = prices[0];
 
     for (const price of prices) {
-      while (entries < input.maxEntries) {
+      while (entries < input.maxEntries && baseQuantity.isZero()) {
         const triggerPrice = entryPrice.mul(
           new Prisma.Decimal(1).sub(
             priceDeviationPercent.mul(entries).div(100),
@@ -78,7 +88,41 @@ export class BacktestDcaSimulatorService {
 
         quoteBalance = quoteBalance.sub(spend);
         baseQuantity = baseQuantity.add(spend.div(price));
+        positionCostQuote = positionCostQuote.add(spend);
         entries += 1;
+      }
+
+      while (entries < input.maxEntries && baseQuantity.isPositive()) {
+        const triggerPrice = entryPrice.mul(
+          new Prisma.Decimal(1).sub(
+            priceDeviationPercent.mul(entries).div(100),
+          ),
+        );
+        if (price.greaterThan(triggerPrice)) break;
+
+        const allocation = initialCapital.mul(weights[entries]).div(totalWeight);
+        const spend = Prisma.Decimal.min(allocation, quoteBalance);
+        if (!spend.isPositive()) break;
+
+        quoteBalance = quoteBalance.sub(spend);
+        baseQuantity = baseQuantity.add(spend.div(price));
+        positionCostQuote = positionCostQuote.add(spend);
+        entries += 1;
+      }
+
+      if (
+        takeProfitPercent !== null &&
+        baseQuantity.isPositive() &&
+        price.greaterThanOrEqualTo(
+          positionCostQuote
+            .div(baseQuantity)
+            .mul(new Prisma.Decimal(1).add(takeProfitPercent.div(100))),
+        )
+      ) {
+        quoteBalance = quoteBalance.add(baseQuantity.mul(price));
+        baseQuantity = new Prisma.Decimal(0);
+        positionCostQuote = new Prisma.Decimal(0);
+        exits += 1;
       }
 
       const equity = quoteBalance.add(baseQuantity.mul(price));
@@ -104,7 +148,7 @@ export class BacktestDcaSimulatorService {
       realizedPnlQuote: realizedPnlQuote.toFixed(8),
       returnPercent: returnPercent.toFixed(6),
       maxDrawdownPercent: maxDrawdownPercent.toFixed(6),
-      tradeCount: entries,
+      tradeCount: entries + exits,
     };
   }
 }
