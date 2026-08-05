@@ -59,7 +59,7 @@ describe('BacktestBuyHoldSimulatorService', () => {
     ).toThrow(BadRequestException);
   });
 
-  it.each([0, -1])('rejects non-positive initial capital: %s', (initialCapital) => {
+  it.each(['0', '-1'])('rejects non-positive initial capital: %s', (initialCapital) => {
     expect(() =>
       service.simulate({
         initialCapital,
@@ -68,7 +68,7 @@ describe('BacktestBuyHoldSimulatorService', () => {
     ).toThrow('Initial capital must be positive');
   });
 
-  it.each([0, -1])('rejects non-positive candle close prices: %s', (close) => {
+  it.each(['0', '-1'])('rejects non-positive candle close prices: %s', (close) => {
     expect(() =>
       service.simulate({
         initialCapital: 1000,
