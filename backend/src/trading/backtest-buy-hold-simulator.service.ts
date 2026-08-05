@@ -47,12 +47,12 @@ export class BacktestBuyHoldSimulatorService {
     }
 
     const initialCapital = new Prisma.Decimal(input.initialCapital);
-    if (!initialCapital.isPositive()) {
+    if (initialCapital.lessThanOrEqualTo(0)) {
       throw new BadRequestException('Initial capital must be positive');
     }
 
     const prices = input.candles.map((candle) => new Prisma.Decimal(candle.close));
-    if (prices.some((price) => !price.isPositive())) {
+    if (prices.some((price) => price.lessThanOrEqualTo(0))) {
       throw new BadRequestException('Historical candle close prices must be positive');
     }
 
