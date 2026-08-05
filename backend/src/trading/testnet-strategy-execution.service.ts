@@ -458,7 +458,7 @@ export class TestnetStrategyExecutionService {
     const deltaQuote = Math.max(quoteAmount - accountedQuote, 0);
 
     const result = await this.prisma.$transaction(async (tx) => {
-      let updatedPosition = order.position;
+      let updatedPosition: any = order.position;
       let updatedSubPosition = order.subPosition;
 
       if (deltaQuantity > 0) {
@@ -521,27 +521,35 @@ export class TestnetStrategyExecutionService {
             averageEntryPrice,
             dcaCount,
           );
-          updatedPosition = await tx.tradingPosition.update({
-            where: { id: order.positionId },
-            data: {
-              totalQuantity,
-              totalCostQuote,
-              averageEntryPrice,
-              dcaCount,
-              nextDcaPrice: parentTriggers.nextDcaPrice,
-              takeProfitPrice: parentTriggers.takeProfitPrice,
-            },
-          });
-        } else {
-          updatedPosition = await this.applyParentSellFill(tx, {
-            order,
-            position: updatedPosition,
-            subPosition: null,
+          updatedPosition = {
+            ...updatedPosition,
+            ...(await tx.tradingPosition.update({
+              where: { id: order.positionId },
+              data: {
+                totalQuantity,
+                totalCostQuote,
+                averageEntryPrice,
+                dcaCount,
+                nextDcaPrice: parentTriggers.nextDcaPrice,
+                takeProfitPrice: parentTriggers.takeProfitPrice,
+              },
+            })),
             strategy: order.position.strategy,
-            deltaQuantity,
-            deltaQuote,
-            averageFillPrice,
-          });
+          };
+        } else {
+          updatedPosition = {
+            ...updatedPosition,
+            ...(await this.applyParentSellFill(tx, {
+              order,
+              position: updatedPosition,
+              subPosition: null,
+              strategy: order.position.strategy,
+              deltaQuantity,
+              deltaQuote,
+              averageFillPrice,
+            })),
+            strategy: order.position.strategy,
+          };
         }
       }
 
@@ -613,12 +621,12 @@ export class TestnetStrategyExecutionService {
   }
 
   private async applyParentSellFill(tx: any, context: FillAccountingContext) {
-    const previousQuantity = Number(context.position.totalQuantity);
-    const previousCost = Number(context.position.totalCostQuote);
-    const soldQuantity = Math.min(context.deltaQuantity, previousQuantity);
+    const { position, strategy, deltaQuantity, deltaQuote, averageFillPrice } = context;
+    const previousQuantity = Number(position.totalQuantity);
+    const previousCost = Number(position.totalCostQuote);
+    const soldQuantity = Math.min(deltaQuantity, previousQuantity);
     const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
-    const proceeds = context.deltaQuote > 0 ? context.deltaQuote : soldQuantity * context.averageFillPrice;
-    const realizedPnlQuote = Number(context.position.realizedPnlQuote) + proceeds - allocatedCost;
+    const proceeds = deltaQuote > 0 ? deltaQuote : soldQuantity * averageFillPrice;
     const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
     const remainingCost = Math.max(previousCost - allocatedCost, 0);
     const closed = remainingQuantity <= 1e-12;
@@ -626,21 +634,21 @@ export class TestnetStrategyExecutionService {
     const parentTriggers = closed
       ? { nextDcaPrice: null, takeProfitPrice: null }
       : this.calculateParentTriggers(
-          context.strategy,
+          strategy,
           remainingQuantity,
           remainingCost,
           remainingAverage,
-          Number(context.position.dcaCount),
+          Number(position.dcaCount),
         );
 
     return tx.tradingPosition.update({
-      where: { id: context.position.id },
+      where: { id: position.id },
       data: {
         status: closed ? 'CLOSED' : 'OPEN',
         totalQuantity: closed ? 0 : remainingQuantity,
         totalCostQuote: closed ? 0 : remainingCost,
         averageEntryPrice: remainingAverage,
-        realizedPnlQuote,
+        realizedPnlQuote: Number(position.realizedPnlQuote) + proceeds - allocatedCost,
         closedAt: closed ? new Date() : null,
         nextDcaPrice: parentTriggers.nextDcaPrice,
         takeProfitPrice: parentTriggers.takeProfitPrice,
@@ -649,68 +657,59 @@ export class TestnetStrategyExecutionService {
   }
 
   private async applyIndependentSellFill(tx: any, context: FillAccountingContext) {
-    const previousQuantity = Number(context.subPosition.quantity);
-    const previousCost = Number(context.subPosition.costQuote);
-    const soldQuantity = Math.min(context.deltaQuantity, previousQuantity);
+    const { subPosition, deltaQuantity, deltaQuote, averageFillPrice } = context;
+    const previousQuantity = Number(subPosition.quantity);
+    const previousCost = Number(subPosition.costQuote);
+    const soldQuantity = Math.min(deltaQuantity, previousQuantity);
     const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
-    const proceeds = context.deltaQuote > 0 ? context.deltaQuote : soldQuantity * context.averageFillPrice;
+    const proceeds = deltaQuote > 0 ? deltaQuote : soldQuantity * averageFillPrice;
     const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
     const remainingCost = Math.max(previousCost - allocatedCost, 0);
     const closed = remainingQuantity <= 1e-12;
 
     return tx.tradingSubPosition.update({
-      where: { id: context.subPosition.id },
+      where: { id: subPosition.id },
       data: {
         status: closed ? 'CLOSED' : 'OPEN',
         quantity: closed ? 0 : remainingQuantity,
         costQuote: closed ? 0 : remainingCost,
         entryPrice: closed ? 0 : remainingCost / remainingQuantity,
-        realizedPnlQuote:
-          Number(context.subPosition.realizedPnlQuote) + proceeds - allocatedCost,
+        realizedPnlQuote: Number(subPosition.realizedPnlQuote) + proceeds - allocatedCost,
         closedAt: closed ? new Date() : null,
       },
     });
   }
 
+  private calculateAverageFillPrice(order: BinanceOrderResponse, executedQuantity: number, quoteAmount: number) {
+    if (executedQuantity > 0 && quoteAmount > 0) return quoteAmount / executedQuantity;
+    const fills = order.fills ?? [];
+    const totalQuantity = fills.reduce((sum, fill) => sum + Number(fill.qty ?? 0), 0);
+    const totalQuote = fills.reduce(
+      (sum, fill) => sum + Number(fill.price ?? 0) * Number(fill.qty ?? 0),
+      0,
+    );
+    if (totalQuantity > 0 && totalQuote > 0) return totalQuote / totalQuantity;
+    return Number(order.price ?? 0);
+  }
+
   private mapOrderStatus(status?: string) {
-    switch (status?.toUpperCase()) {
-      case 'FILLED':
-        return 'FILLED' as const;
+    switch ((status ?? '').toUpperCase()) {
+      case 'NEW':
+      case 'PENDING_NEW':
+        return 'PENDING' as const;
       case 'PARTIALLY_FILLED':
         return 'PARTIALLY_FILLED' as const;
+      case 'FILLED':
+        return 'FILLED' as const;
       case 'CANCELED':
       case 'CANCELLED':
         return 'CANCELLED' as const;
       case 'REJECTED':
       case 'EXPIRED':
         return 'REJECTED' as const;
-      case 'NEW':
       default:
-        return 'PENDING' as const;
+        return 'FAILED' as const;
     }
-  }
-
-  private calculateAverageFillPrice(order: BinanceOrderResponse, executedQuantity: number, quoteAmount: number) {
-    if (executedQuantity > 0 && quoteAmount > 0) return quoteAmount / executedQuantity;
-
-    if (order.fills?.length) {
-      const totals = order.fills.reduce(
-        (result, fill) => {
-          const price = Number(fill.price ?? 0);
-          const quantity = Number(fill.qty ?? 0);
-          if (!Number.isFinite(price) || !Number.isFinite(quantity)) return result;
-          return {
-            quantity: result.quantity + quantity,
-            quote: result.quote + price * quantity,
-          };
-        },
-        { quantity: 0, quote: 0 },
-      );
-      if (totals.quantity > 0) return totals.quote / totals.quantity;
-    }
-
-    const fallbackPrice = Number(order.price ?? 0);
-    return Number.isFinite(fallbackPrice) ? fallbackPrice : 0;
   }
 
   private calculateParentTriggers(
@@ -719,21 +718,24 @@ export class TestnetStrategyExecutionService {
       dcaMultiplier: unknown;
       takeProfitPercent: unknown;
     },
-    quantity: number,
-    costQuote: number,
+    totalQuantity: number,
+    totalCostQuote: number,
     averageEntryPrice: number,
     dcaCount: number,
   ) {
+    if (totalQuantity <= 0 || totalCostQuote <= 0 || averageEntryPrice <= 0) {
+      return { nextDcaPrice: null, takeProfitPrice: null };
+    }
+
     const dcaStepPercent = Number(strategy.dcaStepPercent);
     const dcaMultiplier = Number(strategy.dcaMultiplier);
     const takeProfitPercent = Number(strategy.takeProfitPercent);
     const nextStepMultiplier = Math.pow(dcaMultiplier, dcaCount);
-    const nextDcaPrice = averageEntryPrice * (1 - (dcaStepPercent * nextStepMultiplier) / 100);
-    const takeProfitPrice = averageEntryPrice * (1 + takeProfitPercent / 100);
-
     return {
-      nextDcaPrice: quantity > 0 && costQuote > 0 ? nextDcaPrice : null,
-      takeProfitPrice: quantity > 0 && costQuote > 0 ? takeProfitPrice : null,
+      nextDcaPrice:
+        averageEntryPrice * (1 - (dcaStepPercent * nextStepMultiplier) / 100),
+      takeProfitPrice:
+        averageEntryPrice * (1 + takeProfitPercent / 100),
     };
   }
 }
