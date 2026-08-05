@@ -263,6 +263,114 @@ export class TestnetStrategyActionService {
     });
   }
 
+  async listUserRecoverable(userId: string, limit = 100) {
+    return this.prisma.strategyAction.findMany({
+      where: {
+        userId,
+        strategy: { environment: 'TESTNET', paperTrading: false },
+        status: { in: ['PENDING', 'SUBMITTED', 'FAILED', 'PERMANENTLY_FAILED'] },
+      },
+      include: { strategy: true, position: true, order: true, subPosition: true },
+      orderBy: [{ nextRetryAt: 'asc' }, { createdAt: 'asc' }],
+      take: Math.min(Math.max(limit, 1), 500),
+    });
+  }
+
+  async manualRetry(userId: string, actionId: string) {
+    const action = await this.prisma.strategyAction.findFirst({
+      where: {
+        id: actionId,
+        userId,
+        strategy: { environment: 'TESTNET', paperTrading: false },
+      },
+      include: { order: true },
+    });
+    if (!action) throw new BadRequestException('Testnet strategy action not found');
+    if (!['FAILED', 'PERMANENTLY_FAILED'].includes(action.status)) {
+      throw new BadRequestException('Only failed Testnet actions can be retried manually');
+    }
+    if (action.order?.status === 'PENDING' || action.order?.status === 'PARTIALLY_FILLED') {
+      throw new BadRequestException('The linked Testnet order is still unresolved');
+    }
+
+    const updated = await this.prisma.strategyAction.update({
+      where: { id: action.id },
+      data: {
+        status: 'PENDING',
+        retryable: false,
+        failureCategory: null,
+        errorMessage: null,
+        nextRetryAt: null,
+        completedAt: null,
+        lastAttemptedAt: new Date(),
+        attemptCount: { increment: 1 },
+      },
+    });
+
+    this.notifications.publish({
+      event: 'TESTNET_STRATEGY_ACTION_MANUAL_RETRY',
+      message: `Manual retry requested for Testnet strategy action ${action.type}.`,
+      severity: 'WARNING',
+      userId,
+      strategyId: action.strategyId,
+      positionId: action.positionId ?? undefined,
+      orderId: action.orderId ?? undefined,
+      metadata: { actionId: action.id, actionKey: action.actionKey },
+    });
+
+    return updated;
+  }
+
+  async cancelRetry(userId: string, actionId: string) {
+    const action = await this.prisma.strategyAction.findFirst({
+      where: {
+        id: actionId,
+        userId,
+        strategy: { environment: 'TESTNET', paperTrading: false },
+      },
+    });
+    if (!action) throw new BadRequestException('Testnet strategy action not found');
+    if (!['FAILED', 'PENDING'].includes(action.status)) {
+      throw new BadRequestException('Only pending or retryable failed actions can be cancelled');
+    }
+
+    return this.prisma.strategyAction.update({
+      where: { id: action.id },
+      data: {
+        status: 'CANCELLED',
+        retryable: false,
+        nextRetryAt: null,
+        completedAt: new Date(),
+        errorMessage: 'Cancelled manually',
+      },
+    });
+  }
+
+  async acknowledgePermanentFailure(userId: string, actionId: string) {
+    const action = await this.prisma.strategyAction.findFirst({
+      where: {
+        id: actionId,
+        userId,
+        status: 'PERMANENTLY_FAILED',
+        strategy: { environment: 'TESTNET', paperTrading: false },
+      },
+    });
+    if (!action) throw new BadRequestException('Permanent Testnet failure not found');
+
+    this.notifications.publish({
+      event: 'TESTNET_STRATEGY_ACTION_FAILURE_ACKNOWLEDGED',
+      message: `Permanent failure acknowledged for Testnet action ${action.type}.`,
+      severity: 'INFO',
+      userId,
+      strategyId: action.strategyId,
+      positionId: action.positionId ?? undefined,
+      orderId: action.orderId ?? undefined,
+      metadata: { actionId: action.id, actionKey: action.actionKey },
+    });
+
+    return { acknowledged: true, actionId: action.id };
+  }
+
   async claimRetry(actionId: string) {
     const now = new Date();
     const result = await this.prisma.strategyAction.updateMany({
