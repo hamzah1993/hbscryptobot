@@ -6,6 +6,7 @@ import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
 import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
+import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
 interface AuthenticatedRequest extends Request {
@@ -20,6 +21,7 @@ export class StrategyController {
     private readonly runner: PaperStrategyRunnerService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
     private readonly testnetTimeline: TestnetActionTimelineService,
+    private readonly testnetActions: TestnetStrategyActionService,
     private readonly testnetEmergencyStop: TestnetEmergencyStopService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -64,6 +66,38 @@ export class StrategyController {
     @Query('limit') limit?: string,
   ) {
     return this.testnetTimeline.list(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Get('testnet-recovery')
+  listTestnetRecovery(
+    @Req() request: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    return this.testnetActions.listUserRecoverable(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Post('testnet-actions/:actionId/retry')
+  retryTestnetAction(
+    @Req() request: AuthenticatedRequest,
+    @Param('actionId') actionId: string,
+  ) {
+    return this.testnetActions.manualRetry(request.user.sub, actionId);
+  }
+
+  @Post('testnet-actions/:actionId/cancel-retry')
+  cancelTestnetActionRetry(
+    @Req() request: AuthenticatedRequest,
+    @Param('actionId') actionId: string,
+  ) {
+    return this.testnetActions.cancelRetry(request.user.sub, actionId);
+  }
+
+  @Post('testnet-actions/:actionId/acknowledge')
+  acknowledgeTestnetFailure(
+    @Req() request: AuthenticatedRequest,
+    @Param('actionId') actionId: string,
+  ) {
+    return this.testnetActions.acknowledgePermanentFailure(request.user.sub, actionId);
   }
 
   @Post('testnet-emergency-stop')
