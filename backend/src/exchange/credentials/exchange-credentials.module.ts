@@ -1,11 +1,18 @@
 import { Module } from '@nestjs/common';
+import { BinanceModule } from '../binance/binance.module';
 import { CredentialCryptoService } from './credential-crypto.service';
+import { ExchangeAccountManagementService } from './exchange-account-management.service';
 import { ExchangeCredentialsController } from './exchange-credentials.controller';
 import { ExchangeCredentialsService } from './exchange-credentials.service';
 
 @Module({
+  imports: [BinanceModule],
   controllers: [ExchangeCredentialsController],
-  providers: [CredentialCryptoService, ExchangeCredentialsService],
-  exports: [ExchangeCredentialsService],
+  providers: [
+    CredentialCryptoService,
+    ExchangeCredentialsService,
+    ExchangeAccountManagementService,
+  ],
+  exports: [ExchangeCredentialsService, ExchangeAccountManagementService],
 })
 export class ExchangeCredentialsModule {}
