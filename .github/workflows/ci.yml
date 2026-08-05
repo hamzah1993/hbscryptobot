@@ -5,11 +5,13 @@ on:
     branches:
       - main
       - "feature/**"
+      - "test/**"
+      - "chore/**"
   pull_request:
 
 jobs:
   backend:
-    name: Backend build
+    name: Backend build and test
     runs-on: ubuntu-latest
 
     services:
@@ -59,6 +61,9 @@ jobs:
 
       - name: Build backend
         run: npm run build
+
+      - name: Run backend tests
+        run: npm test -- --runInBand
 
   frontend:
     name: Frontend build
