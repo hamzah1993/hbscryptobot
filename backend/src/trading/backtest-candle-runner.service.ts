@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { BacktestBuyHoldSimulatorService } from './backtest-buy-hold-simulator.service';
+import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
 import { BacktestExecutionService } from './backtest-execution.service';
 import { BacktestRunService } from './backtest-run.service';
 import { HistoricalCandleQueryService } from './historical-candle-query.service';
@@ -10,7 +10,7 @@ export class BacktestCandleRunnerService {
     private readonly runs: BacktestRunService,
     private readonly execution: BacktestExecutionService,
     private readonly candles: HistoricalCandleQueryService,
-    private readonly simulator: BacktestBuyHoldSimulatorService,
+    private readonly simulator: BacktestDcaSimulatorService,
   ) {}
 
   async run(userId: string, runId: string) {
@@ -36,6 +36,9 @@ export class BacktestCandleRunnerService {
       const result = this.simulator.simulate({
         initialCapital: run.initialCapital,
         candles,
+        maxEntries: run.strategy.maxDcaOrders + 1,
+        priceDeviationPercent: run.strategy.dcaStepPercent,
+        volumeMultiplier: run.strategy.dcaMultiplier,
       });
 
       return this.execution.complete(run.id, result);
