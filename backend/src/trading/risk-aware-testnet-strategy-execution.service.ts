@@ -20,25 +20,22 @@ import { TestnetStrategyRiskService } from './testnet-strategy-risk.service';
 @Injectable()
 export class RiskAwareTestnetStrategyExecutionService extends TestnetStrategyExecutionService {
   constructor(
-    prisma: PrismaService,
+    private readonly riskPrisma: PrismaService,
     testnetOrders: BinanceTestnetOrderService,
     strategyActions: TestnetStrategyActionService,
     notifications: NotificationsService,
     private readonly risk: TestnetStrategyRiskService,
   ) {
-    super(prisma, testnetOrders, strategyActions, notifications);
-    this.prisma = prisma;
+    super(riskPrisma, testnetOrders, strategyActions, notifications);
   }
 
-  private readonly prisma: PrismaService;
-
   override async executeMarketOrder(userId: string, input: ExecuteTestnetStrategyInput) {
-    const strategy = await this.prisma.tradingStrategy.findFirst({
+    const strategy = await this.riskPrisma.tradingStrategy.findFirst({
       where: { id: input.strategyId, userId },
     });
     if (!strategy) throw new NotFoundException('Strategy not found');
 
-    const openPosition = await this.prisma.tradingPosition.findFirst({
+    const openPosition = await this.riskPrisma.tradingPosition.findFirst({
       where: { strategyId: strategy.id, userId, status: 'OPEN' },
       orderBy: { openedAt: 'desc' },
     });
