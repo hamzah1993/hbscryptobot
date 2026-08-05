@@ -76,7 +76,7 @@ describe('BacktestExecutionService', () => {
     );
   });
 
-  it('completes a run with calculated metrics', async () => {
+  it('atomically completes a running run with calculated metrics', async () => {
     const { service, backtestRun } = createService();
     const result = {
       endingCapital: '1125.50',
@@ -85,18 +85,21 @@ describe('BacktestExecutionService', () => {
       maxDrawdownPercent: '4.25',
       tradeCount: 9,
     };
-    backtestRun.update.mockResolvedValue({
+    const completed = {
       id: 'run-1',
       status: BacktestRunStatus.COMPLETED,
-    });
+    };
 
-    await expect(service.complete('run-1', result)).resolves.toEqual({
-      id: 'run-1',
-      status: BacktestRunStatus.COMPLETED,
-    });
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue(completed);
 
-    expect(backtestRun.update).toHaveBeenCalledWith({
-      where: { id: 'run-1' },
+    await expect(service.complete(' run-1 ', result)).resolves.toEqual(completed);
+
+    expect(backtestRun.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'run-1',
+        status: BacktestRunStatus.RUNNING,
+      },
       data: {
         status: BacktestRunStatus.COMPLETED,
         ...result,
@@ -104,45 +107,126 @@ describe('BacktestExecutionService', () => {
         errorMessage: null,
       },
     });
+
+    const completedAt = backtestRun.updateMany.mock.calls[0][0].data.completedAt;
+    expect(backtestRun.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'run-1',
+        status: BacktestRunStatus.COMPLETED,
+        completedAt,
+      },
+    });
+    expect(backtestRun.update).not.toHaveBeenCalled();
   });
 
-  it('marks a run failed with an Error message', async () => {
+  it('rejects completion when the run is not running', async () => {
     const { service, backtestRun } = createService();
-    backtestRun.update.mockResolvedValue({
-      id: 'run-1',
-      status: BacktestRunStatus.FAILED,
-    });
+    backtestRun.updateMany.mockResolvedValue({ count: 0 });
 
     await expect(
-      service.fail('run-1', new Error('Historical candles are unavailable')),
-    ).resolves.toEqual({
+      service.complete('run-1', {
+        endingCapital: '1000',
+        realizedPnlQuote: '0',
+        returnPercent: '0',
+        maxDrawdownPercent: '0',
+        tradeCount: 1,
+      }),
+    ).rejects.toThrow('Running backtest run was not found');
+
+    expect(backtestRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects when a completed run cannot be reloaded', async () => {
+    const { service, backtestRun } = createService();
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.complete('run-1', {
+        endingCapital: '1000',
+        realizedPnlQuote: '0',
+        returnPercent: '0',
+        maxDrawdownPercent: '0',
+        tradeCount: 1,
+      }),
+    ).rejects.toThrow('Completed backtest run was not found');
+  });
+
+  it('atomically marks a running run failed with an Error message', async () => {
+    const { service, backtestRun } = createService();
+    const failed = {
       id: 'run-1',
       status: BacktestRunStatus.FAILED,
-    });
+    };
 
-    expect(backtestRun.update).toHaveBeenCalledWith({
-      where: { id: 'run-1' },
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue(failed);
+
+    await expect(
+      service.fail(' run-1 ', new Error('Historical candles are unavailable')),
+    ).resolves.toEqual(failed);
+
+    expect(backtestRun.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'run-1',
+        status: BacktestRunStatus.RUNNING,
+      },
       data: {
         status: BacktestRunStatus.FAILED,
         errorMessage: 'Historical candles are unavailable',
         completedAt: expect.any(Date),
       },
     });
+
+    const completedAt = backtestRun.updateMany.mock.calls[0][0].data.completedAt;
+    expect(backtestRun.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'run-1',
+        status: BacktestRunStatus.FAILED,
+        completedAt,
+      },
+    });
+    expect(backtestRun.update).not.toHaveBeenCalled();
   });
 
   it('uses a safe fallback message for unknown failure values', async () => {
     const { service, backtestRun } = createService();
-    backtestRun.update.mockResolvedValue({ id: 'run-1' });
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue({ id: 'run-1' });
 
     await service.fail('run-1', { reason: 'unknown' });
 
-    expect(backtestRun.update).toHaveBeenCalledWith({
-      where: { id: 'run-1' },
+    expect(backtestRun.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'run-1',
+        status: BacktestRunStatus.RUNNING,
+      },
       data: {
         status: BacktestRunStatus.FAILED,
         errorMessage: 'Backtest execution failed',
         completedAt: expect.any(Date),
       },
     });
+  });
+
+  it('rejects failure when the run is not running', async () => {
+    const { service, backtestRun } = createService();
+    backtestRun.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.fail('run-1', new Error('failed'))).rejects.toThrow(
+      'Running backtest run was not found',
+    );
+
+    expect(backtestRun.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects when a failed run cannot be reloaded', async () => {
+    const { service, backtestRun } = createService();
+    backtestRun.updateMany.mockResolvedValue({ count: 1 });
+    backtestRun.findFirst.mockResolvedValue(null);
+
+    await expect(service.fail('run-1', new Error('failed'))).rejects.toThrow(
+      'Failed backtest run was not found',
+    );
   });
 });
