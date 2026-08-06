@@ -54,22 +54,21 @@ export class TestnetActionRetrySchedulerService {
       let failed = 0;
       for (const action of dueActions) {
         try {
-          const claimed = await this.actions.claimRetry(action.id);
-          if (!claimed) continue;
           if (action.order?.status === 'PENDING' || action.order?.status === 'PARTIALLY_FILLED') {
-            await this.actions.markFailed(action.id, new Error('Linked Testnet order is still unresolved'));
-            failed += 1;
             continue;
           }
+          const claimed = await this.actions.claimRetry(action.id);
+          if (!claimed) continue;
           await this.execution.executeMarketOrder(action.userId, {
             strategyId: action.strategyId,
             side: action.side,
             quantity: Number(action.quantity ?? 0),
             actionType: action.type,
-            actionKey: `${action.actionKey}:retry:${action.attemptCount + 1}`,
+            actionKey: action.actionKey,
             level: action.level,
             triggerPrice: action.triggerPrice ? Number(action.triggerPrice) : null,
             allowRunningStrategy: true,
+            retryActionId: action.id,
           });
           retried += 1;
         } catch (error: unknown) {
