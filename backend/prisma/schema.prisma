@@ -257,6 +257,7 @@ model TradingOrder {
   price                    Decimal?             @db.Decimal(28, 12)
   filledQuantity           Decimal              @default(0) @db.Decimal(28, 12)
   quoteAmount              Decimal              @default(0) @db.Decimal(28, 8)
+  feeQuote                 Decimal?             @db.Decimal(28, 8)
   averageFillPrice         Decimal?             @db.Decimal(28, 12)
   accountedFilledQuantity  Decimal              @default(0) @db.Decimal(28, 12)
   accountedQuoteAmount     Decimal              @default(0) @db.Decimal(28, 8)
