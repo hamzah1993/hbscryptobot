@@ -23,6 +23,7 @@ import {
   type TestnetPosition,
   type TradingPosition,
 } from '../lib/api';
+import { subscribeSharedMarketPrice } from '../lib/sharedMarketPriceFeed';
 import { useTradingEnvironment } from '../trading/TradingEnvironmentContext';
 
 const navigation = ['Overview', 'Backtests', 'Bots', 'Positions', 'Strategies', 'Notifications', 'Exchange accounts', 'Trade history', 'Profile'];
@@ -124,28 +125,18 @@ export function DashboardPage() {
     const symbols = [...new Set(active.map((position) => position.symbol))];
     if (symbols.length === 0) return;
     let cancelled = false;
-    const refresh = async () => {
-      const results = await Promise.allSettled(symbols.map(async (symbol) => {
-        const streamed = await api.getStreamedMarketPrice(token, symbol, 'testnet');
-        if (streamed?.price && Number.isFinite(streamed.price)) return [symbol, streamed.price] as const;
-        const candles = await api.getMarketCandles(token, symbol, '1m', 1, 'testnet');
-        const latest = candles.candles[candles.candles.length - 1];
-        return [symbol, latest?.close ?? 0] as const;
-      }));
-      if (cancelled) return;
-      setPrices((current) => {
-        const next = { ...current };
-        for (const result of results) {
-          if (result.status === 'fulfilled' && result.value[1] > 0) next[result.value[0]] = result.value[1];
-        }
-        return next;
-      });
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
+    const unsubscribes = symbols.map((symbol) => subscribeSharedMarketPrice(
+      token,
+      symbol,
+      'testnet',
+      (streamed) => {
+        if (cancelled || !streamed?.price || !Number.isFinite(streamed.price)) return;
+        setPrices((current) => ({ ...current, [symbol]: streamed.price }));
+      },
+    ));
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
   }, [token, mode, paperPositions, testnetPositions]);
 
