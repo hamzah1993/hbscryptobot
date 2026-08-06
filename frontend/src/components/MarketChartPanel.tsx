@@ -16,7 +16,8 @@ import {
 
 type Props = {
   token: string;
-  defaultEnvironment?: BinanceStreamEnvironment;
+  environment: BinanceStreamEnvironment;
+  showTestnetOverlays?: boolean;
 };
 
 const intervals: BinanceKlineInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
@@ -47,11 +48,10 @@ const markerLabel = (order: TestnetOrder) => {
   }
 };
 
-export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Props) {
+export function MarketChartPanel({ token, environment, showTestnetOverlays = false }: Props) {
   const [symbolInput, setSymbolInput] = useState('BTCUSDT');
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [interval, setInterval] = useState<BinanceKlineInterval>('5m');
-  const [environment, setEnvironment] = useState<BinanceStreamEnvironment>(defaultEnvironment);
   const [candles, setCandles] = useState<MarketCandle[]>([]);
   const [positions, setPositions] = useState<TestnetPosition[]>([]);
   const [orders, setOrders] = useState<TestnetOrder[]>([]);
@@ -62,8 +62,6 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
   const [streaming, setStreaming] = useState(false);
   const [streamStale, setStreamStale] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
-
-  useEffect(() => setEnvironment(defaultEnvironment), [defaultEnvironment]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -89,7 +87,7 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
         if (!cancelled) setMarketError(reason instanceof Error ? reason.message : 'Unable to load market candles');
       }
 
-      if (environment === 'testnet') {
+      if (showTestnetOverlays && environment === 'testnet') {
         const [positionResult, orderResult] = await Promise.allSettled([
           api.listTestnetPositions(token, 100),
           api.listTestnetOrders(token, 300),
@@ -97,7 +95,9 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
         if (!cancelled) {
           setPositions(positionResult.status === 'fulfilled' ? positionResult.value.filter((position) => position.symbol === normalizedSymbol) : []);
           setOrders(orderResult.status === 'fulfilled' ? orderResult.value.filter((order) => order.position.symbol === normalizedSymbol) : []);
-          if (positionResult.status === 'rejected' || orderResult.status === 'rejected') setAccountDataError('Candles loaded, but some Testnet position or order overlays are unavailable.');
+          if (positionResult.status === 'rejected' || orderResult.status === 'rejected') {
+            setAccountDataError('Candles loaded, but some Testnet position or order overlays are unavailable.');
+          }
         }
       } else if (!cancelled) {
         setPositions([]);
@@ -116,7 +116,7 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
       cancelled = true;
       if (autoTimer) window.clearInterval(autoTimer);
     };
-  }, [token, symbol, interval, environment, refreshKey]);
+  }, [token, symbol, interval, environment, showTestnetOverlays, refreshKey]);
 
   useEffect(() => {
     const bucketSize = intervalSeconds[interval];
@@ -146,8 +146,24 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
               if (current.length === 0) return current;
               const last = current[current.length - 1];
               if (candleTime < last.time) return current;
-              if (candleTime === last.time) return [...current.slice(0, -1), { ...last, high: Math.max(last.high, streamed.price), low: Math.min(last.low, streamed.price), close: streamed.price, closeTime: (candleTime + bucketSize) * 1000 - 1 }];
-              return [...current.slice(-299), { time: candleTime, open: last.close, high: streamed.price, low: streamed.price, close: streamed.price, volume: 0, closeTime: (candleTime + bucketSize) * 1000 - 1 }];
+              if (candleTime === last.time) {
+                return [...current.slice(0, -1), {
+                  ...last,
+                  high: Math.max(last.high, streamed.price),
+                  low: Math.min(last.low, streamed.price),
+                  close: streamed.price,
+                  closeTime: (candleTime + bucketSize) * 1000 - 1,
+                }];
+              }
+              return [...current.slice(-299), {
+                time: candleTime,
+                open: last.close,
+                high: streamed.price,
+                low: streamed.price,
+                close: streamed.price,
+                volume: 0,
+                closeTime: (candleTime + bucketSize) * 1000 - 1,
+              }];
             });
           } else if (!cancelled && lastSuccessfulPoll > 0 && Date.now() - lastSuccessfulPoll > 10_000) {
             setStreamStale(true);
@@ -155,7 +171,7 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
         } catch {
           if (!cancelled) { setStreaming(false); setStreamStale(true); }
         } finally {
-          if (!cancelled) pollTimer = window.setTimeout(poll, 2000);
+          if (!cancelled) pollTimer = window.setTimeout(poll, 1000);
         }
       };
       void poll();
@@ -171,7 +187,14 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
     };
   }, [token, symbol, interval, environment]);
 
-  const chartData = useMemo<TradingViewCandle[]>(() => candles.map((candle) => ({ time: candle.time as TradingViewCandle['time'], open: candle.open, high: candle.high, low: candle.low, close: candle.close })), [candles]);
+  const chartData = useMemo<TradingViewCandle[]>(() => candles.map((candle) => ({
+    time: candle.time as TradingViewCandle['time'],
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+  })), [candles]);
+
   const positionLevels = useMemo<TradingViewPriceLevel[]>(() => positions.flatMap((position) => [
     { label: 'Average entry', value: Number(position.averageEntryPrice), kind: 'ENTRY' as const },
     { label: 'Next DCA', value: Number(position.nextDcaPrice ?? 0), kind: 'DCA' as const },
@@ -188,9 +211,18 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
     const last = candles[candles.length - 1].time;
     return orders.filter((order) => order.status === 'FILLED').flatMap((order) => {
       const eventTime = Date.parse(order.strategyAction?.completedAt ?? order.updatedAt);
-      const candle = candles.reduce<MarketCandle | null>((closest, candidate) => !closest || Math.abs(candidate.time * 1000 - eventTime) < Math.abs(closest.time * 1000 - eventTime) ? candidate : closest, null);
+      const candle = candles.reduce<MarketCandle | null>((closest, candidate) =>
+        !closest || Math.abs(candidate.time * 1000 - eventTime) < Math.abs(closest.time * 1000 - eventTime)
+          ? candidate
+          : closest,
+      null);
       if (!candle || candle.time < first || candle.time > last) return [];
-      return [{ time: candle.time as TradingViewOrderMarker['time'], side: order.side, label: markerLabel(order), kind: markerKind(order) }];
+      return [{
+        time: candle.time as TradingViewOrderMarker['time'],
+        side: order.side,
+        label: markerLabel(order),
+        kind: markerKind(order),
+      }];
     });
   }, [candles, orders]);
 
@@ -200,19 +232,41 @@ export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Prop
   return (
     <section className="mt-6 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
       <div className="flex flex-col gap-4 border-b border-white/10 p-5 xl:flex-row xl:items-center xl:justify-between">
-        <div><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold">TradingView market chart</h3><span className="rounded-full border border-white/10 bg-slate-950/30 px-2.5 py-1 text-xs uppercase tracking-wider text-slate-400">Auto-refresh 30s</span><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${streaming && !streamStale ? 'bg-emerald-400/15 text-emerald-300' : streamStale ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-400'}`}>{streamLabel}</span></div><p className="mt-2 text-sm text-slate-400">Latest price updates every 2 seconds; complete candles and Testnet overlays refresh every 30 seconds.</p></div>
-        <div className="grid gap-3 sm:grid-cols-[minmax(140px,1fr)_110px_130px_auto]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-semibold">TradingView market chart</h3>
+            <span className="rounded-full border border-white/10 bg-slate-950/30 px-2.5 py-1 text-xs uppercase tracking-wider text-slate-400">Price refresh 1s</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${streaming && !streamStale ? 'bg-emerald-400/15 text-emerald-300' : streamStale ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-400'}`}>{streamLabel}</span>
+          </div>
+          <p className="mt-2 text-sm text-slate-400">The active candle updates every second. Full candle history and Testnet overlays refresh every 30 seconds.</p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[minmax(140px,1fr)_110px_auto]">
           <input aria-label="Chart symbol" value={symbolInput} onChange={(event) => setSymbolInput(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-2.5 text-sm outline-none ring-cyan-400/40 focus:ring" placeholder="BTCUSDT" />
           <select value={interval} onChange={(event) => setInterval(event.target.value as BinanceKlineInterval)} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-sm">{intervals.map((item) => <option key={item} value={item}>{item}</option>)}</select>
-          <select value={environment} onChange={(event) => setEnvironment(event.target.value as BinanceStreamEnvironment)} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2.5 text-sm"><option value="testnet">Testnet</option><option value="live">Live public data</option></select>
           <button disabled={loading} onClick={() => setRefreshKey((current) => current + 1)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{loading ? 'Loading…' : 'Refresh now'}</button>
         </div>
       </div>
       {marketError && <div className="mx-5 mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{marketError}</div>}
       {accountDataError && <div className="mx-5 mt-5 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">{accountDataError}</div>}
       <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <TradingViewChart data={chartData} priceLevels={environment === 'testnet' ? positionLevels : []} orderMarkers={environment === 'testnet' ? orderMarkers : []} loading={loading && candles.length === 0} emptyMessage={marketError ? 'Market candles could not be loaded.' : 'No candles returned for this market.'} />
-        <aside className="rounded-2xl border border-white/10 bg-slate-950/30 p-5"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Latest candle</p><p className="mt-2 text-lg font-semibold">{symbol}</p><dl className="mt-5 space-y-3 text-sm"><div className="flex justify-between"><dt className="text-slate-500">Open</dt><dd>{latest ? latest.open.toLocaleString() : '—'}</dd></div><div className="flex justify-between"><dt className="text-slate-500">High</dt><dd>{latest ? latest.high.toLocaleString() : '—'}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Low</dt><dd>{latest ? latest.low.toLocaleString() : '—'}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Close</dt><dd>{latest ? latest.close.toLocaleString() : '—'}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Candles</dt><dd>{candles.length}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Updated</dt><dd>{lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</dd></div>{environment === 'testnet' && <><div className="flex justify-between"><dt className="text-slate-500">Markers</dt><dd>{orderMarkers.length}</dd></div><div className="flex justify-between"><dt className="text-slate-500">Levels</dt><dd>{positionLevels.length}</dd></div></>}</dl></aside>
+        <TradingViewChart data={chartData} priceLevels={showTestnetOverlays ? positionLevels : []} orderMarkers={showTestnetOverlays ? orderMarkers : []} loading={loading && candles.length === 0} emptyMessage={marketError ? 'Market candles could not be loaded.' : 'No candles returned for this market.'} />
+        <aside className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Latest candle</p>
+          <p className="mt-2 text-lg font-semibold">{symbol}</p>
+          <dl className="mt-5 space-y-3 text-sm">
+            <div className="flex justify-between"><dt className="text-slate-500">Environment</dt><dd>{environment === 'testnet' ? 'Testnet' : 'Live public'}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Open</dt><dd>{latest ? latest.open.toLocaleString() : '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">High</dt><dd>{latest ? latest.high.toLocaleString() : '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Low</dt><dd>{latest ? latest.low.toLocaleString() : '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Close</dt><dd>{latest ? latest.close.toLocaleString() : '—'}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Candles</dt><dd>{candles.length}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Updated</dt><dd>{lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</dd></div>
+            {showTestnetOverlays && <>
+              <div className="flex justify-between"><dt className="text-slate-500">Markers</dt><dd>{orderMarkers.length}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Levels</dt><dd>{positionLevels.length}</dd></div>
+            </>}
+          </dl>
+        </aside>
       </div>
     </section>
   );
