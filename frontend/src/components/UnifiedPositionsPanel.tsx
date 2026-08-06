@@ -197,6 +197,24 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     }
   }
 
+  async function closeTestnet(position: UnifiedPosition, subPositionId?: string) {
+    const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
+    const subPosition = subPositionId ? position.subPositions.find((item) => item.id === subPositionId) : null;
+    const quantity = Number(subPosition?.quantity ?? position.totalQuantity);
+    const estimatedValue = quantity * currentPrice;
+    const target = subPosition ? `independent level #${subPosition.level}` : 'parent position';
+    if (!window.confirm(`Close ${target} for ${position.symbol}?\n\nQuantity: ${number(quantity)}\nEstimated value: ${money(estimatedValue)}\n\nThis submits a Binance Testnet SELL market order. The bot must be paused and no order may be pending.`)) return;
+    setBusyId(subPositionId ?? position.id);
+    try {
+      await api.closeTestnetPosition(token, position.id, subPositionId);
+      await load(true);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Unable to close Testnet position');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function syncTestnet(position: UnifiedPosition) {
     const pending = position.orders.filter((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED');
     if (pending.length === 0) {
@@ -276,6 +294,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
             const unrealized = position.status === 'OPEN' ? currentValue - Number(position.totalCostQuote) : 0;
             const realized = Number(position.realizedPnlQuote);
             const total = unrealized + realized;
+            const hasPendingOrder = position.orders.some((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED');
             return (
               <article id={`position-${position.id}`} key={`${position.source}-${position.id}`} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035]">
                 <div className="grid gap-4 p-5 xl:grid-cols-[1.2fr_0.9fr_0.9fr_0.9fr_auto] xl:items-center">
@@ -308,21 +327,23 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
 
                     <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
                       <h5 className="text-sm font-semibold">Manual controls</h5>
-                      <p className="mt-2 text-xs leading-5 text-slate-500">Pause and stop affect future bot actions only. Closing a position is a separate action.</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-500">Pause and stop affect future bot actions only. Closing a position is a separate confirmed action.</p>
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button disabled={busyId === position.id || position.strategyStatus === 'PAUSED'} onClick={() => void changeStatus(position, 'PAUSED')} className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-40">Pause bot</button>
                         <button disabled={busyId === position.id || position.strategyStatus === 'RUNNING'} onClick={() => void changeStatus(position, 'RUNNING')} className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-40">Resume bot</button>
                         <button disabled={busyId === position.id || position.strategyStatus === 'STOPPED'} onClick={() => void changeStatus(position, 'STOPPED')} className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-40">Stop bot</button>
                         {position.source === 'PAPER' && position.status === 'OPEN' && <button disabled={busyId === position.id} onClick={() => void closePaper(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Paper position</button>}
+                        {position.source === 'TESTNET' && position.status === 'OPEN' && <button disabled={busyId === position.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Testnet parent</button>}
                         {position.source === 'TESTNET' && <button disabled={busyId === position.id} onClick={() => void syncTestnet(position)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-200 disabled:opacity-40">Sync pending orders</button>}
                       </div>
-                      {position.source === 'TESTNET' && <p className="mt-3 text-xs text-amber-200">A protected Testnet market-close endpoint is not yet available, so this screen does not submit an unverified SELL. Use Pause/Stop and sync while that safety endpoint is added.</p>}
+                      {position.source === 'TESTNET' && position.strategyStatus !== 'PAUSED' && <p className="mt-3 text-xs text-amber-200">Pause the bot before submitting a manual Testnet close.</p>}
+                      {position.source === 'TESTNET' && hasPendingOrder && <p className="mt-3 text-xs text-amber-200">A Testnet order is pending or partially filled. Sync it before closing.</p>}
                     </div>
 
                     <div className="mt-5">
                       <h5 className="text-sm font-semibold">Independent sub-positions</h5>
                       {position.subPositions.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-500">No independent levels have been opened.</p> : (
-                        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td></tr>)}</tbody></table></div>
+                        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3">{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : '—'}</td></tr>)}</tbody></table></div>
                       )}
                     </div>
                   </div>
