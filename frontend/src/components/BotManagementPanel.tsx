@@ -23,8 +23,15 @@ type EditableStrategy = {
   maxDcaOrders: number;
   dcaStepPercent: number;
   dcaMultiplier: number;
+  dcaMultipliers: number[];
   takeProfitPercent: number;
+  subPositionTriggerPercent: number;
+  subPositionTakeProfitPercent: number;
   independentFromLevel: number;
+  basePositionPercent: number;
+  maxTotalRiskPercent: number;
+  maxOpenPairs: number;
+  cooldownMinutes: number;
   recoveryEnabled: boolean;
   recoveryMaxOrders: number;
   recoveryTakeProfitPercent: number;
@@ -37,8 +44,15 @@ const toEditable = (strategy: TradingStrategy): EditableStrategy => ({
   maxDcaOrders: strategy.maxDcaOrders,
   dcaStepPercent: Number(strategy.dcaStepPercent ?? 0),
   dcaMultiplier: Number(strategy.dcaMultiplier ?? 1),
+  dcaMultipliers: strategy.dcaMultipliers ?? [1, 1.5, 2, 3, 5],
   takeProfitPercent: Number(strategy.takeProfitPercent ?? 0),
+  subPositionTriggerPercent: Number(strategy.subPositionTriggerPercent ?? 2),
+  subPositionTakeProfitPercent: Number(strategy.subPositionTakeProfitPercent ?? 1.5),
   independentFromLevel: Number(strategy.independentFromLevel ?? 5),
+  basePositionPercent: Number(strategy.basePositionPercent ?? 1),
+  maxTotalRiskPercent: Number(strategy.maxTotalRiskPercent ?? 3),
+  maxOpenPairs: Number(strategy.maxOpenPairs ?? 5),
+  cooldownMinutes: Number(strategy.cooldownMinutes ?? 60),
   recoveryEnabled: strategy.recoveryEnabled ?? true,
   recoveryMaxOrders: Number(strategy.recoveryMaxOrders ?? 5),
   recoveryTakeProfitPercent: Number(strategy.recoveryTakeProfitPercent ?? 1.5),
@@ -241,10 +255,16 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                       <Field label="Bot name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
                       <NumberField label="Risk budget" value={draft.riskBudgetQuote} onChange={(value) => setDraft({ ...draft, riskBudgetQuote: value })} />
                       <NumberField label="Base order" value={draft.baseOrderQuote} onChange={(value) => setDraft({ ...draft, baseOrderQuote: value })} />
-                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={0} max={50} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
-                      <NumberField label="DCA step (%)" value={draft.dcaStepPercent} onChange={(value) => setDraft({ ...draft, dcaStepPercent: value })} />
-                      <NumberField label="DCA multiplier" value={draft.dcaMultiplier} onChange={(value) => setDraft({ ...draft, dcaMultiplier: value })} />
-                      <NumberField label="Take profit (%)" value={draft.takeProfitPercent} onChange={(value) => setDraft({ ...draft, takeProfitPercent: value })} />
+                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={3} max={10} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
+                      <NumberField label="DCA trigger (%)" value={draft.dcaStepPercent} min={3} max={15} onChange={(value) => setDraft({ ...draft, dcaStepPercent: value })} />
+                      <Field label="DCA multipliers" value={draft.dcaMultipliers.join(', ')} onChange={(value) => setDraft({ ...draft, dcaMultipliers: value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0) })} />
+                      <NumberField label="Global TP (%)" value={draft.takeProfitPercent} min={0.5} max={5} onChange={(value) => setDraft({ ...draft, takeProfitPercent: value })} />
+                      <NumberField label="Sub-position trigger (%)" value={draft.subPositionTriggerPercent} min={0.5} max={5} onChange={(value) => setDraft({ ...draft, subPositionTriggerPercent: value })} />
+                      <NumberField label="Sub-position TP (%)" value={draft.subPositionTakeProfitPercent} min={0.5} max={5} onChange={(value) => setDraft({ ...draft, subPositionTakeProfitPercent: value })} />
+                      <NumberField label="Base position (% capital)" value={draft.basePositionPercent} min={0.1} max={5} onChange={(value) => setDraft({ ...draft, basePositionPercent: value })} />
+                      <NumberField label="Max risk (% capital)" value={draft.maxTotalRiskPercent} min={1} max={10} onChange={(value) => setDraft({ ...draft, maxTotalRiskPercent: value })} />
+                      <NumberField label="Maximum open pairs" value={draft.maxOpenPairs} min={1} max={20} step={1} onChange={(value) => setDraft({ ...draft, maxOpenPairs: value })} />
+                      <NumberField label="Cooldown after TP (min)" value={draft.cooldownMinutes} min={0} max={1440} step={1} onChange={(value) => setDraft({ ...draft, cooldownMinutes: value })} />
                       <NumberField label="Independent from level" value={draft.independentFromLevel} min={2} max={draft.maxDcaOrders + 2} step={1} onChange={(value) => setDraft({ ...draft, independentFromLevel: value })} />
                       <NumberField label="Recovery max orders" value={draft.recoveryMaxOrders} max={5} onChange={(value) => setDraft({ ...draft, recoveryMaxOrders: value })} />
                       <NumberField label="Recovery global TP (%)" value={draft.recoveryTakeProfitPercent} onChange={(value) => setDraft({ ...draft, recoveryTakeProfitPercent: value })} />

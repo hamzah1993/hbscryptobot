@@ -56,7 +56,7 @@ export class RiskAwareTestnetStrategyExecutionService extends TestnetStrategyExe
       userId,
       strategy,
       openPosition,
-      input.actionType,
+      input.actionType ?? (input.side === 'BUY' && !openPosition ? 'INITIAL_ENTRY' : undefined),
       estimatedOrderQuote,
     );
 

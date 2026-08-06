@@ -10,6 +10,8 @@ export type BinanceTestnetMarketOrderInput = {
   clientOrderId?: string;
 };
 
+export type BinanceTestnetLimitOrderInput = BinanceTestnetMarketOrderInput & { price: number };
+
 type ResolvedQuantityFilter = {
   filter: BinanceSymbolFilter;
   filterType: 'MARKET_LOT_SIZE' | 'LOT_SIZE';
@@ -119,6 +121,27 @@ export class BinanceTestnetOrderService {
     );
   }
 
+  async placeLimitOrder(userId: string, input: BinanceTestnetLimitOrderInput) {
+    const symbol = input.symbol.trim().toUpperCase();
+    if (!symbol) throw new BadRequestException('Symbol is required');
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) throw new BadRequestException('Quantity must be a positive number');
+    if (!Number.isFinite(input.price) || input.price <= 0) throw new BadRequestException('Limit price must be a positive number');
+
+    const [credential, symbolInfo] = await Promise.all([
+      this.credentials.getBinance(userId, ExchangeEnvironment.TESTNET),
+      this.binance.getSymbolInfo(symbol, 'testnet'),
+    ]);
+    const resolvedFilter = this.resolveLimitQuantityFilter(symbolInfo.filters);
+    const normalizedQuantity = this.normalizeQuantity(input.quantity, resolvedFilter);
+    const normalizedPrice = this.normalizePrice(input.price, symbolInfo.filters);
+    this.assertMinimumNotional(normalizedQuantity, Number(normalizedPrice), symbolInfo.filters);
+
+    return this.binance.placeLimitOrder({
+      symbol, side: input.side, quantity: normalizedQuantity, price: normalizedPrice,
+      clientOrderId: this.normalizeClientOrderId(input.clientOrderId),
+    }, credential.apiKey, credential.apiSecret, 'testnet');
+  }
+
   async getOrder(userId: string, symbol: string, exchangeOrderId: string) {
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
@@ -202,6 +225,27 @@ export class BinanceTestnetOrderService {
     throw new BadRequestException(
       `Binance quantity filters are unusable for this symbol. ${marketDetails}; ${lotDetails}`,
     );
+  }
+
+  private resolveLimitQuantityFilter(filters: BinanceSymbolFilter[]): ResolvedQuantityFilter {
+    const lotSize = this.toResolvedFilter(filters.find((item) => item.filterType === 'LOT_SIZE'), 'LOT_SIZE');
+    if (lotSize) return lotSize;
+    return this.resolveQuantityFilter(filters);
+  }
+
+  private normalizePrice(price: number, filters: BinanceSymbolFilter[]) {
+    const priceFilter = filters.find((item) => item.filterType === 'PRICE_FILTER');
+    const tickSize = Number(priceFilter?.tickSize ?? 0);
+    if (!Number.isFinite(tickSize) || tickSize <= 0) return String(price);
+    const precision = this.decimalPlaces(priceFilter?.tickSize ?? String(tickSize));
+    const scale = 10 ** precision;
+    const tickUnits = Math.round(tickSize * scale);
+    const priceUnits = Math.floor(price * scale + Number.EPSILON);
+    if (!Number.isSafeInteger(tickUnits) || tickUnits <= 0) throw new BadRequestException(`Binance price tick size ${priceFilter?.tickSize} is unsupported`);
+    const normalizedUnits = Math.floor(priceUnits / tickUnits) * tickUnits;
+    const normalized = (normalizedUnits / scale).toFixed(precision);
+    if (Number(normalized) <= 0) throw new BadRequestException('Limit price is below the Binance price tick size');
+    return normalized;
   }
 
   private toResolvedFilter(

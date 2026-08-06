@@ -16,6 +16,7 @@ export type TradingOrder = {
   quoteAmount: string;
   feeQuote?: string | null;
   averageFillPrice: string | null;
+  executionLatencyMs?: number | null;
   createdAt: string;
 };
 
@@ -165,8 +166,15 @@ export type TradingStrategy = {
   maxDcaOrders: number;
   dcaStepPercent?: string;
   dcaMultiplier?: string;
+  dcaMultipliers?: number[];
   takeProfitPercent?: string;
+  subPositionTriggerPercent?: string;
+  subPositionTakeProfitPercent?: string;
   independentFromLevel?: number;
+  basePositionPercent?: string;
+  maxTotalRiskPercent?: string;
+  maxOpenPairs?: number;
+  cooldownMinutes?: number;
   recoveryEnabled?: boolean;
   recoveryMaxOrders?: number;
   recoveryStepPercents?: number[];
@@ -284,6 +292,7 @@ export type TestnetOrder = {
   quoteAmount: string;
   feeQuote: string | null;
   averageFillPrice: string | null;
+  executionLatencyMs: number | null;
   createdAt: string;
   updatedAt: string;
   position: {
@@ -449,8 +458,15 @@ export type CreateStrategyPayload = {
   maxDcaOrders: number;
   dcaStepPercent: number;
   dcaMultiplier: number;
+  dcaMultipliers: number[];
   takeProfitPercent: number;
+  subPositionTriggerPercent: number;
+  subPositionTakeProfitPercent: number;
   independentFromLevel: number;
+  basePositionPercent: number;
+  maxTotalRiskPercent: number;
+  maxOpenPairs: number;
+  cooldownMinutes: number;
   recoveryEnabled: boolean;
   recoveryMaxOrders: number;
   recoveryStepPercents: number[];
@@ -518,7 +534,7 @@ export const api = {
     request<TradingStrategy>(`/strategies/${strategyId}/status`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ status }) }),
   previewTestnetOrder: (token: string, payload: { symbol: string; quoteAmount: number }) =>
     request<TestnetOrderPreview>('/strategies/testnet-order-preview', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
-  executeTestnetOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number }) =>
+  executeTestnetOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number; type?: 'MARKET' | 'LIMIT'; price?: number }) =>
     request<unknown>(`/strategies/${strategyId}/testnet-order`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   closeTestnetPosition: (token: string, positionId: string, subPositionId?: string) =>
     request<unknown>(`/strategies/testnet-positions/${encodeURIComponent(positionId)}/close`, {

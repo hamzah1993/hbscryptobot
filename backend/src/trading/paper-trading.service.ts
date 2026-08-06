@@ -55,7 +55,7 @@ export class PaperTradingService {
     const base = plan[0];
     const quantity = base.quoteAmount / input.marketPrice;
     const nextDcaPrice = plan[1]
-      ? input.marketPrice * (1 - plan[1].triggerDropPercent / 100)
+      ? input.marketPrice * (1 - Number(plan[1].independent ? (strategy.subPositionTriggerPercent ?? strategy.dcaStepPercent) : strategy.dcaStepPercent) / 100)
       : null;
     const takeProfitPrice = input.marketPrice * (1 + Number(strategy.takeProfitPercent) / 100);
 
@@ -250,7 +250,10 @@ export class PaperTradingService {
     maxDcaOrders: number;
     dcaStepPercent: unknown;
     dcaMultiplier: unknown;
+    dcaMultipliers?: unknown;
     takeProfitPercent: unknown;
+    subPositionTriggerPercent?: unknown;
+    subPositionTakeProfitPercent?: unknown;
     independentFromLevel: number;
   }) {
     return this.riskBudget.buildPlan({
@@ -259,6 +262,7 @@ export class PaperTradingService {
       maxDcaOrders: strategy.maxDcaOrders,
       dcaStepPercent: Number(strategy.dcaStepPercent),
       dcaMultiplier: Number(strategy.dcaMultiplier),
+      dcaMultipliers: Array.isArray(strategy.dcaMultipliers) ? strategy.dcaMultipliers.map(Number) : undefined,
       takeProfitPercent: Number(strategy.takeProfitPercent),
       independentFromLevel: strategy.independentFromLevel,
     });
@@ -288,12 +292,12 @@ export class PaperTradingService {
     const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
     const following = plan.find((level) => level.level === nextLevel + 1);
     const nextDcaPrice = following
-      ? marketPrice * (1 - Number(position.strategy.dcaStepPercent) / 100)
+      ? marketPrice * (1 - Number(following.independent ? (position.strategy.subPositionTriggerPercent ?? position.strategy.dcaStepPercent) : position.strategy.dcaStepPercent) / 100)
       : null;
     const parentTakeProfitPrice =
       averageEntryPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
     const subPositionTakeProfitPrice =
-      marketPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
+      marketPrice * (1 + Number(position.strategy.subPositionTakeProfitPercent ?? position.strategy.takeProfitPercent) / 100);
 
     const result = await this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({

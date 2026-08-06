@@ -187,6 +187,7 @@ export function TestnetOrdersPanel({ token }: Props) {
                       <td className="px-4 py-4">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${order.side === 'BUY' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'}`}>{order.side}</span>
                         <p className="mt-2 text-xs text-slate-400">Level #{order.level}</p>
+                        <p className="mt-1 text-xs text-slate-500">{order.type}{order.executionLatencyMs !== null ? ` · ${order.executionLatencyMs} ms` : ''}</p>
                         {order.independent && <p className="mt-1 text-xs text-violet-300">Independent leg</p>}
                       </td>
                       <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(order.status)}`}>{order.status.replace('_', ' ')}</span></td>

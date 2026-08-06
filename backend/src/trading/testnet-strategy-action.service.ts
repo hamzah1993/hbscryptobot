@@ -123,6 +123,7 @@ export class TestnetStrategyActionService {
           actionKey: input.idempotencyKey,
           independent: input.type === 'INDEPENDENT_ENTRY' || input.type === 'INDEPENDENT_EXIT',
           attemptCount: 0,
+          maxAttempts: 4,
           retryable: false,
           failureCategory: null,
           lastAttemptedAt: null,

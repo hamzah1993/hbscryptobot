@@ -13,8 +13,10 @@ type Balance = { asset: string; free: number; locked: number };
 
 const initialForm: CreateStrategyPayload & { marketPrice: number; mode: BotMode } = {
   name: 'Testnet DCA Bot', symbol: '', environment: 'TESTNET', paperTrading: false,
-  riskBudgetQuote: 1000, baseOrderQuote: 100, maxDcaOrders: 5, dcaStepPercent: 2,
-  dcaMultiplier: 1.5, takeProfitPercent: 1.5, independentFromLevel: 5,
+  riskBudgetQuote: 1000, baseOrderQuote: 100, maxDcaOrders: 5, dcaStepPercent: 5,
+  dcaMultiplier: 1.5, dcaMultipliers: [1, 1.5, 2, 3, 5], takeProfitPercent: 1.5,
+  subPositionTriggerPercent: 2, subPositionTakeProfitPercent: 1.5, independentFromLevel: 5,
+  basePositionPercent: 1, maxTotalRiskPercent: 3, maxOpenPairs: 5, cooldownMinutes: 60,
   recoveryEnabled: true, recoveryMaxOrders: 5, recoveryStepPercents: [5, 8, 12, 18, 25],
   recoveryMultipliers: [1, 1.5, 2, 3, 5], recoveryTakeProfitPercent: 1.5,
   marketPrice: 0, mode: 'TESTNET',
@@ -51,11 +53,20 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   const quoteBalance = balanceMap.get(pair.quoteAsset)?.free ?? 0;
   const plannedDcaExposure = useMemo(() => {
     let total = form.baseOrderQuote;
-    for (let index = 1; index <= form.maxDcaOrders; index += 1) total += form.baseOrderQuote * Math.pow(form.dcaMultiplier, index);
+    for (let index = 0; index < form.maxDcaOrders; index += 1) total += form.baseOrderQuote * (form.dcaMultipliers[index] ?? Math.pow(form.dcaMultiplier, index + 1));
     return Math.min(total, form.riskBudgetQuote);
-  }, [form.baseOrderQuote, form.dcaMultiplier, form.maxDcaOrders, form.riskBudgetQuote]);
+  }, [form.baseOrderQuote, form.dcaMultiplier, form.dcaMultipliers, form.maxDcaOrders, form.riskBudgetQuote]);
   const remainingRiskBudget = Math.max(form.riskBudgetQuote - form.baseOrderQuote, 0);
   const recoveryReserve = Math.max(form.riskBudgetQuote - plannedDcaExposure, 0);
+
+  useEffect(() => {
+    if (form.mode !== 'TESTNET' || quoteBalance <= 0) return;
+    setForm((current) => ({
+      ...current,
+      baseOrderQuote: Number((quoteBalance * current.basePositionPercent / 100).toFixed(8)),
+      riskBudgetQuote: Number((quoteBalance * current.maxTotalRiskPercent / 100).toFixed(8)),
+    }));
+  }, [form.mode, form.basePositionPercent, form.maxTotalRiskPercent, quoteBalance]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,6 +142,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (!form.name.trim()) return setError('Bot name is required.');
     if (duplicateName) return setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
+    if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
     if (step === 2 && form.mode === 'TESTNET') {
       setPreviewing(true);
       try {
@@ -148,6 +160,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (duplicateName) return setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
     if (!form.symbol || !form.marketPrice) return setError('A symbol and current market price are required.');
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
+    if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
     if (form.mode === 'TESTNET' && !preview) return setError('Refresh and confirm the Binance Testnet order preview before creating the bot.');
     if (form.mode === 'TESTNET' && quoteBalance < Number(preview?.estimatedSpend ?? form.baseOrderQuote)) return setError(`Insufficient ${pair.quoteAsset} balance for the initial order.`);
 
@@ -164,7 +177,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
       else {
         await api.setStrategyStatus(token, strategy.id, 'PAUSED');
         const confirmed = await api.previewTestnetOrder(token, { symbol: form.symbol, quoteAmount: form.baseOrderQuote });
-        await api.executeTestnetOrder(token, strategy.id, { side: 'BUY', quantity: Number(confirmed.normalizedQuantity) });
+        await api.executeTestnetOrder(token, strategy.id, { side: 'BUY', quantity: Number(confirmed.normalizedQuantity), type: 'LIMIT', price: confirmed.marketPrice });
       }
       onCreated(strategy);
     } catch (reason) {
@@ -188,16 +201,24 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
         {form.mode === 'TESTNET' && <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}{metric(`Available ${pair.quoteAsset}`, quoteBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}<button type="button" onClick={() => void refreshBalances()} className="sm:col-span-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-200">Refresh balances</button></div>}
       </div>}
       {step === 2 && <div className="grid gap-4 sm:grid-cols-2">{[
-        ['riskBudgetQuote','Risk budget (USDT)'],['baseOrderQuote','Base order (USDT)'],['dcaStepPercent','DCA step (%)'],['dcaMultiplier','DCA multiplier'],['takeProfitPercent','Take profit (%)'],
-      ].map(([key,label]) => <label key={key} className="text-sm text-slate-300">{label}<input type="number" min="0" step="any" value={form[key as keyof typeof form] as number} onChange={(event) => update(key as keyof typeof form, Number(event.target.value) as never)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>)}
-        <label className="text-sm text-slate-300">Maximum DCA orders<input type="number" min="0" max="50" step="1" value={form.maxDcaOrders} onChange={(event) => update('maxDcaOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        ['riskBudgetQuote','Fixed risk budget (USDT)'],['baseOrderQuote','Base order (USDT)'],['dcaStepPercent','DCA trigger from last entry (%)'],['takeProfitPercent','Global TP after DCA (%)'],['subPositionTriggerPercent','Sub-position trigger (%)'],['subPositionTakeProfitPercent','Sub-position TP (%)'],
+      ].map(([key,label]) => {
+        const range = key === 'dcaStepPercent' ? { min: 3, max: 15 } : key === 'takeProfitPercent' || key === 'subPositionTriggerPercent' || key === 'subPositionTakeProfitPercent' ? { min: 0.5, max: 5 } : { min: 0, max: undefined };
+        return <label key={key} className="text-sm text-slate-300">{label}<input type="number" min={range.min} max={range.max} step="any" value={form[key as keyof typeof form] as number} onChange={(event) => update(key as keyof typeof form, Number(event.target.value) as never)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>;
+      })}
+        <label className="text-sm text-slate-300">Base position (% capital)<input type="number" min="0.1" max="5" step="0.1" value={form.basePositionPercent} onChange={(event) => update('basePositionPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300">Max total risk per pair (% capital)<input type="number" min="1" max="10" step="0.1" value={form.maxTotalRiskPercent} onChange={(event) => update('maxTotalRiskPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300">Maximum DCA orders<input type="number" min="3" max="10" step="1" value={form.maxDcaOrders} onChange={(event) => update('maxDcaOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300 sm:col-span-2">DCA size multipliers<input value={form.dcaMultipliers.join(', ')} onChange={(event) => update('dcaMultipliers', event.target.value.split(',').map((value) => Number(value.trim())).filter((value) => Number.isFinite(value)))} placeholder="1, 1.5, 2, 3, 5" className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">One multiplier per DCA level. Defaults: 1×, 1.5×, 2×, 3×, 5×.</span></label>
+        <label className="text-sm text-slate-300">Maximum open pairs<input type="number" min="1" max="20" step="1" value={form.maxOpenPairs} onChange={(event) => update('maxOpenPairs', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300">Cooldown after TP (minutes)<input type="number" min="0" max="1440" step="1" value={form.cooldownMinutes} onChange={(event) => update('cooldownMinutes', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300">Independent from level<input type="number" min="2" max={form.maxDcaOrders + 2} step="1" value={form.independentFromLevel} onChange={(event) => update('independentFromLevel', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">{form.independentFromLevel > form.maxDcaOrders + 1 ? 'No independent entries in the current ladder' : `Levels 1–${Math.max(form.independentFromLevel - 1, 1)} main · level ${form.independentFromLevel}+ independent`}</span></label>
         <div className="sm:col-span-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4"><label className="flex items-center gap-3 text-sm text-slate-200"><input type="checkbox" checked={form.recoveryEnabled} onChange={(event) => update('recoveryEnabled', event.target.checked)} className="h-4 w-4 accent-amber-400" />Enable Dynamic DCA Recovery</label><p className="mt-2 text-xs leading-5 text-slate-400">After the first independent level, Recovery can add deeper basket buys at {form.recoveryStepPercents.join('/')}% using {form.recoveryMultipliers.join('/')}× sizing, then close the basket at one weighted global TP.</p></div>
         {form.recoveryEnabled && <><label className="text-sm text-slate-300">Recovery max orders<input type="number" min="0" max="5" step="1" value={form.recoveryMaxOrders} onChange={(event) => update('recoveryMaxOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label><label className="text-sm text-slate-300">Recovery global TP (%)<input type="number" min="0.01" step="any" value={form.recoveryTakeProfitPercent} onChange={(event) => update('recoveryTakeProfitPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label></>}
         <div className="sm:col-span-2 grid gap-3 sm:grid-cols-4">{metric('Planned maximum exposure', `$${plannedDcaExposure.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Recovery reserve', `$${recoveryReserve.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Remaining risk after entry', `$${remainingRiskBudget.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Configured levels', String(estimatedLevels))}</div>
         {form.recoveryEnabled && recoveryReserve <= 0 && <p className="sm:col-span-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-200">Your normal DCA plan can consume the full risk budget. Recovery orders will still respect the hard cap, but they can only buy if earlier independent exposure has been closed or you increase the risk budget.</p>}
       </div>}
-      {step === 3 && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2">{metric('Mode', form.mode === 'PAPER' ? 'Paper' : 'Binance Testnet')}{metric('Strategy', form.name)}{metric('Symbol', form.symbol)}{metric('Market price', `$${(preview?.marketPrice ?? form.marketPrice).toLocaleString()}`)}{metric('Risk budget', `$${form.riskBudgetQuote}`)}{metric('Planned exposure', `$${plannedDcaExposure.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Independent from', `Level #${form.independentFromLevel}`)}{metric('Recovery', form.recoveryEnabled ? `${form.recoveryMaxOrders} orders · ${form.recoveryTakeProfitPercent}% global TP` : 'Disabled')}{metric('Initial quantity', form.mode === 'TESTNET' ? preview?.normalizedQuantity ?? 'Preview required' : estimatedInitialQuantity.toPrecision(8))}{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Available ${pair.quoteAsset}`, (preview?.availableQuote ?? quoteBalance).toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Remaining ${pair.quoteAsset}`, (preview?.remainingQuote ?? quoteBalance - form.baseOrderQuote).toLocaleString(undefined,{maximumFractionDigits:8}))}</div>
+      {step === 3 && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2">{metric('Mode', form.mode === 'PAPER' ? 'Paper' : 'Binance Testnet')}{metric('Strategy', form.name)}{metric('Symbol', form.symbol)}{metric('Market price', `$${(preview?.marketPrice ?? form.marketPrice).toLocaleString()}`)}{metric('Risk budget', `$${form.riskBudgetQuote} · ${form.maxTotalRiskPercent}% capital`)}{metric('Base position', `$${form.baseOrderQuote} · ${form.basePositionPercent}% capital`)}{metric('DCA multipliers', form.dcaMultipliers.slice(0, form.maxDcaOrders).map((value) => `${value}×`).join(' / '))}{metric('Order execution', 'Limit entries · Market exits')}{metric('Planned exposure', `$${plannedDcaExposure.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Independent from', `Level #${form.independentFromLevel}`)}{metric('Recovery', form.recoveryEnabled ? `${form.recoveryMaxOrders} orders · ${form.recoveryTakeProfitPercent}% global TP` : 'Disabled')}{metric('Initial quantity', form.mode === 'TESTNET' ? preview?.normalizedQuantity ?? 'Preview required' : estimatedInitialQuantity.toPrecision(8))}{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Available ${pair.quoteAsset}`, (preview?.availableQuote ?? quoteBalance).toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Remaining ${pair.quoteAsset}`, (preview?.remainingQuote ?? quoteBalance - form.baseOrderQuote).toLocaleString(undefined,{maximumFractionDigits:8}))}</div>
         {form.mode === 'TESTNET' && <button type="button" onClick={() => void loadPreview()} disabled={previewing} className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-200">{previewing ? 'Validating…' : 'Refresh balances and order preview'}</button>}
       </div>}
     </div>

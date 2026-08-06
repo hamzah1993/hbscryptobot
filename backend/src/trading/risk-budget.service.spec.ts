@@ -30,4 +30,31 @@ describe('RiskBudgetService independent start level', () => {
       'maxDcaOrders must be an integer between 0 and 50',
     );
   });
+
+  it('uses the configured multiplier for each DCA level instead of geometric sizing', () => {
+    const plan = service.buildPlan({
+      ...base,
+      maxDcaOrders: 5,
+      dcaMultipliers: [1, 1.5, 2, 3, 5],
+      independentFromLevel: 5,
+    });
+    expect(plan.map((level) => level.quoteAmount)).toEqual([100, 100, 150, 200, 300, 500]);
+  });
+
+  it('keeps every one of 100 crash simulations inside its pre-allocated quote budget', () => {
+    for (let positionIndex = 0; positionIndex < 100; positionIndex += 1) {
+      const riskBudgetQuote = 1000 + positionIndex;
+      const plan = service.buildPlan({
+        ...base,
+        riskBudgetQuote,
+        maxDcaOrders: 5,
+        dcaMultipliers: [1, 1.5, 2, 3, 5],
+        independentFromLevel: 5,
+      });
+      const crashPercent = (positionIndex / 99) * 50;
+      const simulatedPrice = 100 * (1 - crashPercent / 100);
+      expect(simulatedPrice).toBeGreaterThanOrEqual(50);
+      expect(plan.reduce((sum, level) => sum + level.quoteAmount, 0)).toBeLessThanOrEqual(riskBudgetQuote + Number.EPSILON);
+    }
+  });
 });

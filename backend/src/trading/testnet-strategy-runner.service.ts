@@ -174,6 +174,9 @@ export class TestnetStrategyRunnerService {
           level: 1,
           triggerPrice: quote.price,
           plannedQuoteAmount: quoteAmount,
+          orderType: 'LIMIT',
+          limitPrice: quote.price,
+          signalAtMs: Date.now(),
           allowRunningStrategy: true,
         });
 
@@ -265,6 +268,9 @@ export class TestnetStrategyRunnerService {
             level: Number(strategy.maxDcaOrders) + recoveryLeg.recoveryLevel + 1,
             triggerPrice: recoveryLeg.triggerPrice,
             plannedQuoteAmount: recoveryLeg.quoteAmount,
+            orderType: 'LIMIT',
+            limitPrice: quote.price,
+            signalAtMs: Date.now(),
             allowRunningStrategy: true,
           });
           return {
@@ -380,9 +386,12 @@ export class TestnetStrategyRunnerService {
             actionType: 'RECOVERY_DCA_ENTRY',
             actionKey,
             level: Number(strategy.maxDcaOrders) + recoveryLeg.recoveryLevel + 1,
-            triggerPrice: recoveryLeg.triggerPrice,
-            plannedQuoteAmount: recoveryLeg.quoteAmount,
-            allowRunningStrategy: true,
+          triggerPrice: recoveryLeg.triggerPrice,
+          plannedQuoteAmount: recoveryLeg.quoteAmount,
+          orderType: 'LIMIT',
+          limitPrice: quote.price,
+          signalAtMs: Date.now(),
+          allowRunningStrategy: true,
           });
           return {
             strategyId: strategy.id,
@@ -423,9 +432,14 @@ export class TestnetStrategyRunnerService {
         };
       }
 
-      const multiplier = Number(strategy.dcaMultiplier);
       const baseOrderQuote = Number(strategy.baseOrderQuote);
-      const requestedQuote = baseOrderQuote * Math.pow(multiplier, dcaCount + 1);
+      const multipliers = Array.isArray(strategy.dcaMultipliers) ? strategy.dcaMultipliers.map(Number) : [];
+      const configuredMultiplier = multipliers[dcaCount];
+      const requestedQuote = baseOrderQuote * (
+        Number.isFinite(configuredMultiplier) && configuredMultiplier > 0
+          ? configuredMultiplier
+          : Math.pow(Number(strategy.dcaMultiplier), dcaCount + 1)
+      );
       const totalExposure = this.recoveryStrategy.basketTotals(
         openPosition,
         openPosition.subPositions ?? [],
@@ -459,8 +473,11 @@ export class TestnetStrategyRunnerService {
         actionType,
         actionKey,
         level: nextLevel,
-        triggerPrice: nextDcaPrice,
+        triggerPrice: quote.price,
         plannedQuoteAmount: quoteAmount,
+        orderType: 'LIMIT',
+        limitPrice: quote.price,
+        signalAtMs: Date.now(),
         allowRunningStrategy: true,
       });
 

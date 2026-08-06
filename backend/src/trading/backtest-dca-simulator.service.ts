@@ -14,7 +14,10 @@ export type BacktestDcaSimulationInput = {
   maxEntries: number;
   priceDeviationPercent: Prisma.Decimal | string | number;
   volumeMultiplier?: Prisma.Decimal | string | number;
+  volumeMultipliers?: number[];
   takeProfitPercent?: Prisma.Decimal | string | number;
+  subPositionTriggerPercent?: Prisma.Decimal | string | number;
+  subPositionTakeProfitPercent?: Prisma.Decimal | string | number;
   independentFromLevel?: number;
   feePercent?: Prisma.Decimal | string | number;
   slippagePercent?: Prisma.Decimal | string | number;
@@ -60,10 +63,13 @@ export class BacktestDcaSimulatorService {
     const initialCapital = new Prisma.Decimal(input.initialCapital);
     const priceDeviationPercent = new Prisma.Decimal(input.priceDeviationPercent);
     const volumeMultiplier = new Prisma.Decimal(input.volumeMultiplier ?? 1);
+    const volumeMultipliers = (input.volumeMultipliers ?? []).map((value) => new Prisma.Decimal(value));
     const takeProfitPercent =
       input.takeProfitPercent === undefined
         ? null
         : new Prisma.Decimal(input.takeProfitPercent);
+    const subPositionTriggerPercent = new Prisma.Decimal(input.subPositionTriggerPercent ?? input.priceDeviationPercent);
+    const subPositionTakeProfitPercent = new Prisma.Decimal(input.subPositionTakeProfitPercent ?? input.takeProfitPercent ?? 1.5);
     const feePercent = new Prisma.Decimal(input.feePercent ?? 0);
     const slippagePercent = new Prisma.Decimal(input.slippagePercent ?? 0);
     const riskBudgetQuote = input.riskBudgetQuote === undefined
@@ -90,6 +96,7 @@ export class BacktestDcaSimulatorService {
     if (volumeMultiplier.lessThan(1)) {
       throw new BadRequestException('Volume multiplier must be at least 1');
     }
+    if (volumeMultipliers.some((value) => value.lessThanOrEqualTo(0))) throw new BadRequestException('DCA multipliers must be positive');
     if (
       takeProfitPercent !== null &&
       takeProfitPercent.lessThanOrEqualTo(0)
@@ -142,6 +149,7 @@ export class BacktestDcaSimulatorService {
     let peakEquity = initialCapital;
     let maxDrawdownPercent = new Prisma.Decimal(0);
     let cycleEntryPrice = prices[0];
+    let lastEntryPrice = cycleEntryPrice;
     let recoveryMode = false;
     let recoveryDcaCount = 0;
     let recoveryAnchorPrice: Prisma.Decimal | null = null;
@@ -163,20 +171,22 @@ export class BacktestDcaSimulatorService {
         recoveryDcaCount = 0;
         recoveryAnchorPrice = null;
         cycleEntryPrice = marketPrice;
+        lastEntryPrice = marketPrice;
         awaitingNewCycle = false;
       }
 
       while (!recoveryMode && entries < input.maxEntries) {
-        const triggerPrice = cycleEntryPrice.mul(
-          new Prisma.Decimal(1).sub(
-            priceDeviationPercent.mul(entries).div(100),
-          ),
-        );
+        const nextLevel = entries + 1;
+        const triggerPercent = nextLevel >= independentFromLevel ? subPositionTriggerPercent : priceDeviationPercent;
+        const triggerPrice = entries === 0
+          ? cycleEntryPrice
+          : lastEntryPrice.mul(new Prisma.Decimal(1).sub(triggerPercent.div(100)));
         if (marketPrice.greaterThan(triggerPrice)) break;
 
+        const configuredMultiplier = entries > 0 ? volumeMultipliers[entries - 1] : undefined;
         const allocation = baseOrderQuote === null
           ? initialCapital.mul(weights[entries]).div(totalWeight)
-          : baseOrderQuote.mul(volumeMultiplier.pow(entries));
+          : baseOrderQuote.mul(entries === 0 ? 1 : (configuredMultiplier ?? volumeMultiplier.pow(entries)));
         const riskRemaining = riskBudgetQuote === null
           ? quoteBalance
           : Prisma.Decimal.max(riskBudgetQuote.sub(currentExposure()), 0);
@@ -213,6 +223,7 @@ export class BacktestDcaSimulatorService {
           feeQuote: feeQuote.toFixed(8),
         });
         entries += 1;
+        lastEntryPrice = marketPrice;
         entryTrades += 1;
       }
 
@@ -357,7 +368,7 @@ export class BacktestDcaSimulatorService {
           const position = independentPositions[index];
           const takeProfitPrice = position.costQuote
             .div(position.quantity)
-            .mul(new Prisma.Decimal(1).add(takeProfitPercent.div(100)));
+            .mul(new Prisma.Decimal(1).add(subPositionTakeProfitPercent.div(100)));
           if (marketPrice.greaterThanOrEqualTo(takeProfitPrice)) {
             const executionPrice = marketPrice.mul(sellSlippageFactor);
             const grossProceeds = position.quantity.mul(executionPrice);

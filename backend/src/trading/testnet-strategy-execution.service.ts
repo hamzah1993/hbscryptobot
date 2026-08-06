@@ -17,6 +17,9 @@ export type ExecuteTestnetStrategyInput = {
   plannedQuoteAmount?: number | null;
   allowRunningStrategy?: boolean;
   retryActionId?: string;
+  orderType?: 'MARKET' | 'LIMIT';
+  limitPrice?: number | null;
+  signalAtMs?: number;
 };
 
 type TakeProfitUpdateInput = {
@@ -193,6 +196,10 @@ export class TestnetStrategyExecutionService {
     if (strategy.environment !== 'TESTNET') {
       throw new BadRequestException('Only Binance testnet strategy execution is allowed');
     }
+    const orderType = input.orderType ?? 'MARKET';
+    if (orderType === 'LIMIT' && (!Number.isFinite(Number(input.limitPrice)) || Number(input.limitPrice) <= 0)) {
+      throw new BadRequestException('A positive limit price is required for LIMIT orders');
+    }
 
     const isAutomaticRunningExecution = input.allowRunningStrategy === true && strategy.status === 'RUNNING';
     if (strategy.status !== 'PAUSED' && !isAutomaticRunningExecution) {
@@ -286,12 +293,14 @@ export class TestnetStrategyExecutionService {
         )) as BinanceOrderResponse | null;
       }
       if (!exchangeOrder) {
-        exchangeOrder = (await this.testnetOrders.placeMarketOrder(userId, {
-          symbol: strategy.symbol,
-          side: input.side,
-          quantity: input.quantity,
-          clientOrderId,
-        })) as BinanceOrderResponse;
+        exchangeOrder = orderType === 'LIMIT'
+          ? (await this.testnetOrders.placeLimitOrder(userId, {
+              symbol: strategy.symbol, side: input.side, quantity: input.quantity,
+              price: Number(input.limitPrice), clientOrderId,
+            })) as BinanceOrderResponse
+          : (await this.testnetOrders.placeMarketOrder(userId, {
+              symbol: strategy.symbol, side: input.side, quantity: input.quantity, clientOrderId,
+            })) as BinanceOrderResponse;
       }
 
       const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
@@ -299,6 +308,7 @@ export class TestnetStrategyExecutionService {
       const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
       const feeQuote = this.calculateQuoteFee(exchangeOrder, strategy.symbol);
       const status = this.mapOrderStatus(exchangeOrder.status);
+      const executionLatencyMs = input.signalAtMs ? Math.max(Date.now() - input.signalAtMs, 0) : null;
 
       const savedOrder = await this.prisma.$transaction(async (tx) => {
         let position = openPosition;
@@ -332,7 +342,7 @@ export class TestnetStrategyExecutionService {
           const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
           const dcaCount = recoveryEntry ? Number(position.dcaCount) : Number(position.dcaCount) + 1;
           const recoveryDcaCount = recoveryEntry ? Number(position.recoveryDcaCount) + 1 : Number(position.recoveryDcaCount);
-          const parentTriggers = this.calculateParentTriggers(strategy, totalQuantity, totalCostQuote, averageEntryPrice, dcaCount);
+          const parentTriggers = this.calculateParentTriggers(strategy, totalQuantity, totalCostQuote, averageEntryPrice, dcaCount, averageFillPrice);
 
           let recoveryData: Record<string, unknown> = {};
           if (recoveryEntry) {
@@ -396,7 +406,7 @@ export class TestnetStrategyExecutionService {
           const newQuantity = Number(existingSubPosition?.quantity ?? 0) + executedQuantity;
           const newCost = Number(existingSubPosition?.costQuote ?? 0) + quoteAmount;
           const newAverage = newQuantity > 0 ? newCost / newQuantity : 0;
-          const calculatedTakeProfitPrice = newAverage * (1 + Number(strategy.takeProfitPercent) / 100);
+          const calculatedTakeProfitPrice = newAverage * (1 + Number(strategy.subPositionTakeProfitPercent ?? strategy.takeProfitPercent) / 100);
           const takeProfitPrice = existingSubPosition?.takeProfitManual
             ? Number(existingSubPosition.takeProfitPrice)
             : calculatedTakeProfitPrice;
@@ -427,7 +437,7 @@ export class TestnetStrategyExecutionService {
           const expectedLevel = Number(position.dcaCount) + 2;
           if (!existingSubPosition && level === expectedLevel) {
             const dcaCount = Number(position.dcaCount) + 1;
-            const nextDcaPrice = averageFillPrice * (1 - Number(strategy.dcaStepPercent) / 100);
+            const nextDcaPrice = averageFillPrice * (1 - Number(strategy.subPositionTriggerPercent ?? strategy.dcaStepPercent) / 100);
             position = await tx.tradingPosition.update({
               where: { id: position.id },
               data: { dcaCount, nextDcaPrice },
@@ -453,18 +463,19 @@ export class TestnetStrategyExecutionService {
             exchangeOrderId: exchangeOrder.orderId ? String(exchangeOrder.orderId) : null,
             clientOrderId: exchangeOrder.clientOrderId ?? clientOrderId,
             side: input.side,
-            type: 'MARKET',
+            type: orderType,
             status,
             level: input.level ?? (position.dcaCount + 1),
             independent: Boolean(independentEntry || independentExit),
             quantity: input.quantity,
-            price: averageFillPrice || null,
+            price: averageFillPrice || (orderType === 'LIMIT' ? Number(input.limitPrice) : null),
             filledQuantity: executedQuantity,
             quoteAmount,
             feeQuote,
             averageFillPrice: averageFillPrice || null,
             accountedFilledQuantity: executedQuantity,
             accountedQuoteAmount: quoteAmount,
+            executionLatencyMs,
           },
           include: { position: true, subPosition: true },
         });
@@ -516,6 +527,7 @@ export class TestnetStrategyExecutionService {
           quoteAmount,
           feeQuote,
           averageFillPrice: averageFillPrice || null,
+          executionLatencyMs,
         },
       });
 
@@ -528,6 +540,7 @@ export class TestnetStrategyExecutionService {
         savedOrder,
         exchangeOrder,
         actionId: claimedActionId,
+        executionLatencyMs: executionLatencyMs ?? undefined,
       };
     } catch (error: unknown) {
       if (claimedActionId) {
@@ -612,8 +625,15 @@ export class TestnetStrategyExecutionService {
             maxDcaOrders: true,
             dcaStepPercent: true,
             dcaMultiplier: true,
+            dcaMultipliers: true,
             takeProfitPercent: true,
+            subPositionTriggerPercent: true,
+            subPositionTakeProfitPercent: true,
             independentFromLevel: true,
+            basePositionPercent: true,
+            maxTotalRiskPercent: true,
+            maxOpenPairs: true,
+            cooldownMinutes: true,
             recoveryEnabled: true,
             recoveryMaxOrders: true,
             recoveryStepPercents: true,
@@ -678,7 +698,7 @@ export class TestnetStrategyExecutionService {
           const newQuantity = Number(current?.quantity ?? 0) + deltaQuantity;
           const newCost = Number(current?.costQuote ?? 0) + deltaQuote;
           const newAverage = newQuantity > 0 ? newCost / newQuantity : 0;
-          const calculatedTakeProfitPrice = newAverage * (1 + Number(order.position.strategy.takeProfitPercent) / 100);
+          const calculatedTakeProfitPrice = newAverage * (1 + Number(order.position.strategy.subPositionTakeProfitPercent ?? order.position.strategy.takeProfitPercent) / 100);
           const takeProfitPrice = current?.takeProfitManual
             ? Number(current.takeProfitPrice)
             : calculatedTakeProfitPrice;
@@ -714,7 +734,7 @@ export class TestnetStrategyExecutionService {
                 where: { id: order.positionId },
                 data: {
                   dcaCount,
-                  nextDcaPrice: averageFillPrice * (1 - Number(order.position.strategy.dcaStepPercent) / 100),
+                  nextDcaPrice: averageFillPrice * (1 - Number(order.position.strategy.subPositionTriggerPercent ?? order.position.strategy.dcaStepPercent) / 100),
                 },
               })),
               strategy: order.position.strategy,
@@ -740,7 +760,10 @@ export class TestnetStrategyExecutionService {
           const totalCostQuote = previousCost + deltaQuote;
           const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
           const recoveryEntry = order.strategyAction?.type === 'RECOVERY_DCA_ENTRY';
-          const dcaCount = Number(updatedPosition.dcaCount) + (!recoveryEntry && accountedQuantity === 0 ? 1 : 0);
+          const initialEntry = order.strategyAction?.type === 'INITIAL_ENTRY' || (
+            accountedQuantity === 0 && Number(updatedPosition.totalQuantity) === 0 && Number(updatedPosition.totalCostQuote) === 0
+          );
+          const dcaCount = Number(updatedPosition.dcaCount) + (!recoveryEntry && !initialEntry && accountedQuantity === 0 ? 1 : 0);
           const recoveryDcaCount = Number(updatedPosition.recoveryDcaCount) + (recoveryEntry && accountedQuantity === 0 ? 1 : 0);
           const parentTriggers = this.calculateParentTriggers(
             order.position.strategy,
@@ -748,6 +771,7 @@ export class TestnetStrategyExecutionService {
             totalCostQuote,
             averageEntryPrice,
             dcaCount,
+            averageFillPrice,
           );
           let recoveryData: Record<string, unknown> = {};
           if (recoveryEntry) {
@@ -1071,23 +1095,30 @@ export class TestnetStrategyExecutionService {
       dcaStepPercent: unknown;
       dcaMultiplier: unknown;
       takeProfitPercent: unknown;
+      subPositionTriggerPercent?: unknown;
+      independentFromLevel?: unknown;
+      maxDcaOrders?: unknown;
     },
     totalQuantity: number,
     totalCostQuote: number,
     averageEntryPrice: number,
     dcaCount: number,
+    lastEntryPrice = averageEntryPrice,
   ) {
     if (totalQuantity <= 0 || totalCostQuote <= 0 || averageEntryPrice <= 0) {
       return { nextDcaPrice: null, takeProfitPrice: null };
     }
 
     const dcaStepPercent = Number(strategy.dcaStepPercent);
-    const dcaMultiplier = Number(strategy.dcaMultiplier);
     const takeProfitPercent = Number(strategy.takeProfitPercent);
-    const nextStepMultiplier = Math.pow(dcaMultiplier, dcaCount);
+    const nextLevel = dcaCount + 2;
+    const independentFromLevel = Number(strategy.independentFromLevel ?? Number.MAX_SAFE_INTEGER);
+    const triggerPercent = nextLevel >= independentFromLevel
+      ? Number(strategy.subPositionTriggerPercent ?? dcaStepPercent)
+      : dcaStepPercent;
+    const maxDcaOrders = Number(strategy.maxDcaOrders ?? Number.MAX_SAFE_INTEGER);
     return {
-      nextDcaPrice:
-        averageEntryPrice * (1 - (dcaStepPercent * nextStepMultiplier) / 100),
+      nextDcaPrice: dcaCount >= maxDcaOrders ? null : lastEntryPrice * (1 - triggerPercent / 100),
       takeProfitPrice:
         averageEntryPrice * (1 + takeProfitPercent / 100),
     };
