@@ -5,6 +5,7 @@ import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationChannelsService, type NotificationChannelSettingsInput } from '../notifications/notification-channels.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
+import { ProductionReadinessService } from './production-readiness.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
 import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
@@ -30,6 +31,7 @@ export class StrategyController {
     private readonly testnetHealth: TestnetRunnerHealthService,
     private readonly notifications: NotificationsService,
     private readonly notificationChannels: NotificationChannelsService,
+    private readonly productionReadiness: ProductionReadinessService,
   ) {}
 
   @Get()
@@ -69,6 +71,11 @@ export class StrategyController {
   @Get('testnet-runner-health')
   getTestnetRunnerHealth() {
     return this.testnetHealth.snapshot();
+  }
+
+  @Get('production-readiness')
+  getProductionReadiness(@Req() request: AuthenticatedRequest) {
+    return this.productionReadiness.snapshot(request.user.sub);
   }
 
   @Get('testnet-orders')

@@ -1,0 +1,4 @@
+ALTER TYPE "ExchangeName" ADD VALUE IF NOT EXISTS 'BYBIT';
+ALTER TYPE "ExchangeName" ADD VALUE IF NOT EXISTS 'OKX';
+
+ALTER TABLE "ExchangeCredential" ADD COLUMN "passphraseCipher" TEXT;

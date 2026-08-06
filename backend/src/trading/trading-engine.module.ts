@@ -16,6 +16,7 @@ import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { PaperStrategySchedulerService } from './paper-strategy-scheduler.service';
 import { PaperTradingController } from './paper-trading.controller';
 import { PaperTradingService } from './paper-trading.service';
+import { ProductionReadinessService } from './production-readiness.service';
 import { RiskAwareTestnetStrategyExecutionService } from './risk-aware-testnet-strategy-execution.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
@@ -49,6 +50,7 @@ import { TradingEngineService } from './trading-engine.service';
     RecoveryStrategyService,
     TradingEngineService,
     PaperTradingService,
+    ProductionReadinessService,
     StrategyService,
     HistoricalCandleIngestionService,
     HistoricalCandleQueryService,

@@ -9,6 +9,7 @@ import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { BinanceModule } from './exchange/binance/binance.module';
 import { ExchangeCredentialsModule } from './exchange/credentials/exchange-credentials.module';
+import { DemoExchangeModule } from './exchange/demo/demo-exchange.module';
 import { MarketDataModule } from './market/market-data.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -41,6 +42,7 @@ const globalRateLimit = getGlobalRateLimitConfiguration();
     AuthModule,
     UsersModule,
     ExchangeCredentialsModule,
+    DemoExchangeModule,
     BinanceModule,
     MarketDataModule,
     TradingEngineModule,

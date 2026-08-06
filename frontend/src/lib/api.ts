@@ -72,6 +72,27 @@ export type TestnetRunnerHealth = {
   lastError: string | null;
 };
 
+export type ProductionReadiness = {
+  executionEvidence: {
+    sampleCount: number; minimumSamples: number; targetMs: number; averageMs: number | null;
+    p95Ms: number | null; maxMs: number | null; withinTargetCount: number; overTargetCount: number;
+    meetsTarget: boolean;
+    retryPolicy: { initialAttempt: number; retries: number; totalAttempts: number; backoff: string };
+  };
+  runner: TestnetRunnerHealth;
+  unresolvedActions: number;
+  permanentFailures: number;
+  notificationReadiness: {
+    email: { enabled: boolean; providerConfigured: boolean };
+    telegram: { enabled: boolean; providerConfigured: boolean };
+    atLeastOneProviderConfigured: boolean;
+  };
+  hardeningChecks: Record<string, boolean>;
+  productionHardeningReady: boolean;
+  liveChecks: Record<string, boolean>;
+  liveMoneyReady: boolean;
+};
+
 export type OperationalNotification = {
   id: string;
   event: string;
@@ -102,10 +123,36 @@ export type NotificationChannelSettings = {
 
 export type ExchangeCredentialSummary = {
   id: string;
-  exchange: 'BINANCE';
+  exchange: 'BINANCE' | 'BYBIT' | 'OKX';
   environment: ExchangeEnvironment;
   createdAt: string;
   updatedAt: string;
+};
+
+export type DemoExchange = 'BYBIT' | 'OKX';
+
+export type DemoExchangeConnectionResponse = {
+  connected: boolean;
+  exchange: DemoExchange;
+  environment: 'TESTNET' | 'DEMO';
+  account: unknown;
+};
+
+export type DemoExchangeOrder = {
+  exchange: DemoExchange;
+  exchangeOrderId: string;
+  clientOrderId: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT';
+  status: 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'CANCELLED' | 'REJECTED';
+  quantity: string;
+  filledQuantity: string;
+  quoteAmount: string;
+  averageFillPrice: string | null;
+  price: string | null;
+  duplicateRecovered?: boolean;
+  attemptCount?: number;
 };
 
 export type BinanceAccountTestResponse = {
@@ -556,6 +603,8 @@ export const api = {
     }),
   getTestnetRunnerHealth: (token: string) =>
     request<TestnetRunnerHealth>('/strategies/testnet-runner-health', { headers: authHeaders(token) }),
+  getProductionReadiness: (token: string) =>
+    request<ProductionReadiness>('/strategies/production-readiness', { headers: authHeaders(token) }),
   listBacktests: (token: string, limit = 100) =>
     request<BacktestRun[]>(`/backtests?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   createBacktest: (token: string, payload: CreateBacktestPayload) =>
@@ -598,6 +647,20 @@ export const api = {
     request<ExchangeCredentialSummary>('/exchange/credentials/binance', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   saveBinanceTestnetCredentials: (token: string, payload: { apiKey: string; apiSecret: string }) =>
     request<ExchangeCredentialSummary>('/exchange/credentials/binance', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ ...payload, environment: 'TESTNET' }) }),
+  saveBybitTestnetCredentials: (token: string, payload: { apiKey: string; apiSecret: string }) =>
+    request<ExchangeCredentialSummary>('/exchange/credentials/bybit', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  saveOkxDemoCredentials: (token: string, payload: { apiKey: string; apiSecret: string; passphrase: string }) =>
+    request<ExchangeCredentialSummary>('/exchange/credentials/okx', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  testDemoExchangeConnection: (token: string, exchange: DemoExchange) =>
+    request<DemoExchangeConnectionResponse>(`/exchange/demo/${exchange.toLowerCase()}/test-connection`, { method: 'POST', headers: authHeaders(token) }),
+  deleteDemoExchangeCredentials: (token: string, exchange: DemoExchange) =>
+    request<{ deleted: boolean }>(`/exchange/credentials/${exchange.toLowerCase()}/demo`, { method: 'DELETE', headers: authHeaders(token) }),
+  placeDemoExchangeOrder: (token: string, exchange: DemoExchange, payload: { symbol: string; side: 'BUY' | 'SELL'; type: 'MARKET' | 'LIMIT'; quantity: number; price?: number; clientOrderId: string }) =>
+    request<DemoExchangeOrder>(`/exchange/demo/${exchange.toLowerCase()}/orders`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  getDemoExchangeOrder: (token: string, exchange: DemoExchange, symbol: string, orderId: string) =>
+    request<DemoExchangeOrder>(`/exchange/demo/${exchange.toLowerCase()}/orders/${encodeURIComponent(orderId)}?symbol=${encodeURIComponent(symbol)}`, { headers: authHeaders(token) }),
+  cancelDemoExchangeOrder: (token: string, exchange: DemoExchange, symbol: string, orderId: string) =>
+    request<DemoExchangeOrder>(`/exchange/demo/${exchange.toLowerCase()}/orders/${encodeURIComponent(orderId)}/cancel`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ symbol }) }),
   deleteBinanceCredentials: (token: string, environment: ExchangeEnvironment) =>
     request<{ deleted: boolean }>(`/exchange/credentials/binance/${environment}`, { method: 'DELETE', headers: authHeaders(token) }),
   testBinanceConnection: (token: string, environment: ExchangeEnvironment) =>
