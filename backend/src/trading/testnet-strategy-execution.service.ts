@@ -50,6 +50,66 @@ export class TestnetStrategyExecutionService {
     private readonly notifications: NotificationsService,
   ) {}
 
+  async closePosition(userId: string, positionId: string, subPositionId?: string) {
+    const position = await this.prisma.tradingPosition.findFirst({
+      where: { id: positionId, userId },
+      include: {
+        strategy: true,
+        subPositions: true,
+        orders: {
+          where: { status: { in: ['PENDING', 'PARTIALLY_FILLED'] } },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!position) throw new NotFoundException('Testnet position not found');
+    if (position.strategy.paperTrading || position.strategy.environment !== 'TESTNET') {
+      throw new BadRequestException('Only Binance Testnet positions can be closed here');
+    }
+    if (position.status !== 'OPEN') {
+      throw new BadRequestException('Only open Testnet positions can be closed');
+    }
+    if (position.strategy.status !== 'PAUSED') {
+      throw new BadRequestException('Pause the bot before closing a Testnet position');
+    }
+    if (position.orders.length > 0) {
+      throw new BadRequestException('Sync or finish pending Testnet orders before closing this position');
+    }
+
+    if (subPositionId) {
+      const subPosition = position.subPositions.find((item) => item.id === subPositionId);
+      if (!subPosition || subPosition.status !== 'OPEN') {
+        throw new BadRequestException('Open independent sub-position was not found');
+      }
+      const quantity = Number(subPosition.quantity);
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new BadRequestException('Independent sub-position quantity is invalid');
+      }
+      return this.executeMarketOrder(userId, {
+        strategyId: position.strategyId,
+        side: 'SELL',
+        quantity,
+        actionType: 'INDEPENDENT_EXIT',
+        actionKey: `manual-independent-close:${subPosition.id}:${subPosition.openedAt.toISOString()}`,
+        level: subPosition.level,
+      });
+    }
+
+    const quantity = Number(position.totalQuantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new BadRequestException('Parent position quantity is invalid');
+    }
+
+    return this.executeMarketOrder(userId, {
+      strategyId: position.strategyId,
+      side: 'SELL',
+      quantity,
+      actionType: 'PARENT_EXIT',
+      actionKey: `manual-parent-close:${position.id}:${position.updatedAt.toISOString()}`,
+    });
+  }
+
   async executeMarketOrder(userId: string, input: ExecuteTestnetStrategyInput) {
     if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
       throw new BadRequestException('Quantity must be a positive number');
