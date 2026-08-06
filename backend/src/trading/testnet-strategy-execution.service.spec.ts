@@ -15,7 +15,11 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     takeProfitPercent: 10,
   };
 
-  function createService(orderOverrides: Record<string, unknown> = {}, exchangeOrder: Record<string, unknown> = {}) {
+  function createService(
+    orderOverrides: Record<string, unknown> = {},
+    exchangeOrder: Record<string, unknown> = {},
+    positionOverrides: Record<string, unknown> = {},
+  ) {
     const position = {
       id: 'position-1',
       strategyId: strategy.id,
@@ -29,6 +33,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       nextDcaPrice: 95,
       takeProfitPrice: 110,
       strategy,
+      ...positionOverrides,
     };
     const order = {
       id: 'order-1',
@@ -67,6 +72,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     };
     const tradingOrder = {
       findFirst: jest.fn().mockResolvedValue(order),
+      create: jest.fn(async ({ data }) => ({ id: 'order-new', ...data })),
       update: jest.fn(async ({ data }) => ({ ...order, ...data })),
     };
     const strategyAction = {
@@ -74,19 +80,27 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     };
     const tx = { tradingPosition, tradingSubPosition, tradingOrder, strategyAction };
     const prisma = {
+      tradingStrategy: { findFirst: jest.fn().mockResolvedValue(strategy) },
+      tradingPosition: { findFirst: jest.fn().mockResolvedValue(position) },
+      tradingSubPosition,
       tradingOrder,
       $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
     } as any;
+    const resolvedExchangeOrder = {
+      orderId: '123',
+      status: 'FILLED',
+      executedQty: '2',
+      cummulativeQuoteQty: '210',
+      ...exchangeOrder,
+    };
     const testnetOrders = {
-      getOrder: jest.fn().mockResolvedValue({
-        orderId: '123',
-        status: 'FILLED',
-        executedQty: '2',
-        cummulativeQuoteQty: '210',
-        ...exchangeOrder,
-      }),
+      getOrder: jest.fn().mockResolvedValue(resolvedExchangeOrder),
+      placeMarketOrder: jest.fn().mockResolvedValue(resolvedExchangeOrder),
     } as any;
-    const actions = { claim: jest.fn(), markFailed: jest.fn() } as any;
+    const actions = {
+      claim: jest.fn().mockResolvedValue({ claimed: true, action: { id: 'action-new' } }),
+      markFailed: jest.fn(),
+    } as any;
     const notifications = { publish: jest.fn() } as any;
 
     return {
@@ -99,6 +113,58 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       notifications,
     };
   }
+
+  it('advances the campaign once when an independent entry fills immediately', async () => {
+    const { service, tradingPosition } = createService(
+      {},
+      { status: 'FILLED', executedQty: '1', cummulativeQuoteQty: '90' },
+      { dcaCount: 3 },
+    );
+
+    await service.executeMarketOrder(userId, {
+      strategyId: strategy.id,
+      side: 'BUY',
+      quantity: 1,
+      actionType: 'INDEPENDENT_ENTRY',
+      actionKey: 'strategy:strategy-1:position:position-1:independent-entry:5',
+      level: 5,
+    });
+
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: expect.objectContaining({
+        dcaCount: 4,
+      }),
+    });
+  });
+
+  it('advances the campaign on the first reconciled independent fill only', async () => {
+    const { service, tradingPosition } = createService(
+      {
+        independent: true,
+        level: 5,
+        filledQuantity: 0,
+        quoteAmount: 0,
+        accountedFilledQuantity: 0,
+        accountedQuoteAmount: 0,
+      },
+      {
+        status: 'PARTIALLY_FILLED',
+        executedQty: '0.5',
+        cummulativeQuoteQty: '50',
+      },
+      { dcaCount: 3 },
+    );
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: expect.objectContaining({
+        dcaCount: 4,
+      }),
+    });
+  });
 
   it('accounts only newly confirmed parent BUY fill deltas', async () => {
     const { service, tradingPosition, tradingOrder, strategyAction } = createService();
