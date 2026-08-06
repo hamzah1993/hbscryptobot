@@ -90,7 +90,21 @@ export type ProductionReadiness = {
   hardeningChecks: Record<string, boolean>;
   productionHardeningReady: boolean;
   liveChecks: Record<string, boolean>;
+  liveSafetyProfile: {
+    capitalCeilingQuote: number | null;
+    confirmedAt: string | null;
+    confirmationVersion: string | null;
+  };
+  liveConfirmationAvailable: boolean;
   liveMoneyReady: boolean;
+};
+
+export type LiveTradingSafetyProfile = {
+  capitalCeilingQuote: number | null;
+  confirmationVersion: string | null;
+  confirmedAt: string | null;
+  confirmationPhrase: string;
+  activationEnabled: false;
 };
 
 export type OperationalNotification = {
@@ -625,6 +639,12 @@ export const api = {
     request<TestnetRunnerHealth>('/strategies/testnet-runner-health', { headers: authHeaders(token) }),
   getProductionReadiness: (token: string) =>
     request<ProductionReadiness>('/strategies/production-readiness', { headers: authHeaders(token) }),
+  getLiveTradingSafety: (token: string) =>
+    request<LiveTradingSafetyProfile>('/strategies/live-safety', { headers: authHeaders(token) }),
+  setLiveTradingCapitalCeiling: (token: string, capitalCeilingQuote: number) =>
+    request<LiveTradingSafetyProfile>('/strategies/live-safety', { method: 'PATCH', headers: authHeaders(token), body: JSON.stringify({ capitalCeilingQuote }) }),
+  confirmLiveTrading: (token: string, confirmation: string) =>
+    request<LiveTradingSafetyProfile>('/strategies/live-safety/confirm', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ confirmation }) }),
   listBacktests: (token: string, limit = 100) =>
     request<BacktestRun[]>(`/backtests?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   createBacktest: (token: string, payload: CreateBacktestPayload) =>

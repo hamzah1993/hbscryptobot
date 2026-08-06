@@ -12,6 +12,7 @@ import { BinanceHistoricalCandleImporterService } from './binance-historical-can
 import { HistoricalCandleController } from './historical-candle.controller';
 import { HistoricalCandleIngestionService } from './historical-candle-ingestion.service';
 import { HistoricalCandleQueryService } from './historical-candle-query.service';
+import { LiveTradingSafetyService } from './live-trading-safety.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { PaperStrategySchedulerService } from './paper-strategy-scheduler.service';
 import { PaperTradingController } from './paper-trading.controller';
@@ -52,6 +53,7 @@ import { TradingEngineService } from './trading-engine.service';
     TradingEngineService,
     PaperTradingService,
     ProductionReadinessService,
+    LiveTradingSafetyService,
     StrategyService,
     HistoricalCandleIngestionService,
     HistoricalCandleQueryService,
@@ -105,6 +107,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetStrategyRunnerService,
     TestnetStrategyExecutionRouterService,
     TestnetRunnerHealthService,
+    LiveTradingSafetyService,
   ],
 })
 export class TradingEngineModule {}

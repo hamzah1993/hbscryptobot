@@ -17,7 +17,7 @@ export class ProductionReadinessService {
   ) {}
 
   async snapshot(userId: string) {
-    const [orders, unresolvedActions, permanentFailures, credentialGroups, notifications] = await Promise.all([
+    const [orders, unresolvedActions, permanentFailures, credentialGroups, notifications, liveSafetyProfile] = await Promise.all([
       this.prisma.tradingOrder.findMany({
         where: { userId, executionLatencyMs: { not: null } },
         select: { executionLatencyMs: true, createdAt: true },
@@ -36,6 +36,7 @@ export class ProductionReadinessService {
         _count: { _all: true },
       }),
       this.notificationChannels.getSettings(userId),
+      this.prisma.liveTradingSafetyProfile.findUnique({ where: { userId } }),
     ]);
 
     const latencies = orders.map((order) => Number(order.executionLatencyMs)).filter(Number.isFinite).sort((a, b) => a - b);
@@ -76,6 +77,10 @@ export class ProductionReadinessService {
 
     const liveFeatureFlag = this.config.get<string>('ENABLE_LIVE_TRADING') === 'true';
     const liveRoutingImplemented = false;
+    const liveCapitalCeilingConfigured = liveSafetyProfile?.capitalCeilingQuote != null
+      && Number(liveSafetyProfile.capitalCeilingQuote) > 0;
+    const explicitLiveConfirmationRecorded = liveSafetyProfile?.confirmationVersion === '2026-08-v1'
+      && liveSafetyProfile.confirmedAt !== null;
     const liveChecks = {
       productionHardeningReady,
       operationalNotificationProvider: hardeningChecks.operationalNotificationProvider,
@@ -90,9 +95,26 @@ export class ProductionReadinessService {
       liveFeatureFlag,
       liveRoutingImplemented,
       liveCredentialsConfigured: credentialGroups.some((group) => group.environment === 'LIVE' && group._count._all > 0),
-      explicitLiveConfirmationImplemented: false,
+      liveCapitalCeilingConfigured,
+      explicitLiveConfirmationImplemented: true,
+      explicitLiveConfirmationRecorded,
       liveEmergencyExitAdapterVerified: false,
     };
+    const liveConfirmationAvailable = liveChecks.productionHardeningReady
+      && liveChecks.operationalNotificationProvider
+      && liveChecks.fixedRiskBudgetEnforced
+      && liveChecks.perBotRiskCeilingsImplemented
+      && liveChecks.dailyLossGateImplemented
+      && liveChecks.emergencyExitWorkflowImplemented
+      && liveChecks.emergencyReentryBlockImplemented
+      && liveChecks.binanceStrategyRoutingVerified
+      && liveChecks.bybitStrategyRoutingVerified
+      && liveChecks.okxStrategyRoutingVerified
+      && liveChecks.liveFeatureFlag
+      && liveChecks.liveRoutingImplemented
+      && liveChecks.liveCredentialsConfigured
+      && liveChecks.liveCapitalCeilingConfigured
+      && liveChecks.liveEmergencyExitAdapterVerified;
 
     return {
       executionEvidence,
@@ -107,6 +129,12 @@ export class ProductionReadinessService {
       hardeningChecks,
       productionHardeningReady,
       liveChecks,
+      liveSafetyProfile: {
+        capitalCeilingQuote: liveSafetyProfile?.capitalCeilingQuote == null ? null : Number(liveSafetyProfile.capitalCeilingQuote),
+        confirmedAt: liveSafetyProfile?.confirmedAt?.toISOString() ?? null,
+        confirmationVersion: liveSafetyProfile?.confirmationVersion ?? null,
+      },
+      liveConfirmationAvailable,
       // LIVE order routing is intentionally not implemented yet; this gate must stay closed.
       liveMoneyReady: false,
     };

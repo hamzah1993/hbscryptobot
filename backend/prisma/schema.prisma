@@ -139,9 +139,23 @@ model User {
   strategyActions     StrategyAction[]
   notifications       OperationalNotification[]
   notificationPreference NotificationPreference?
+  liveSafetyProfile   LiveTradingSafetyProfile?
   backtestRuns        BacktestRun[]
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
+}
+
+model LiveTradingSafetyProfile {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  capitalCeilingQuote   Decimal? @db.Decimal(28, 8)
+  confirmationVersion   String?
+  confirmedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model NotificationPreference {
