@@ -466,6 +466,12 @@ export const api = {
     request<TestnetOrderPreview>('/strategies/testnet-order-preview', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   executeTestnetOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number }) =>
     request<unknown>(`/strategies/${strategyId}/testnet-order`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  closeTestnetPosition: (token: string, positionId: string, subPositionId?: string) =>
+    request<unknown>(`/strategies/testnet-positions/${encodeURIComponent(positionId)}/close`, {
+      method: 'POST',
+      headers: authHeaders(token),
+      body: JSON.stringify(subPositionId ? { subPositionId } : {}),
+    }),
   listBacktests: (token: string, limit = 100) =>
     request<BacktestRun[]>(`/backtests?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   createBacktest: (token: string, payload: CreateBacktestPayload) =>
