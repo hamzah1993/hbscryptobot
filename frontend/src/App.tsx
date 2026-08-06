@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
+import { TradingEnvironmentProvider } from './trading/TradingEnvironmentContext';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ExchangeAccountsPage } from './pages/ExchangeAccountsPage';
@@ -12,11 +13,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/auth" element={<AuthPage />} />
-      <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-      <Route path="/exchange-accounts" element={<ProtectedRoute><ExchangeAccountsPage /></ProtectedRoute>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <TradingEnvironmentProvider>
+      <Routes>
+        <Route path="/auth" element={<AuthPage />} />
+        <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+        <Route path="/exchange-accounts" element={<ProtectedRoute><ExchangeAccountsPage /></ProtectedRoute>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </TradingEnvironmentProvider>
   );
 }
