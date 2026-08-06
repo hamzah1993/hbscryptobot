@@ -91,7 +91,7 @@ export class TestnetStrategyExecutionService {
         side: 'SELL',
         quantity,
         actionType: 'INDEPENDENT_EXIT',
-        actionKey: `manual-independent-close:${subPosition.id}:${subPosition.updatedAt.toISOString()}`,
+        actionKey: `manual-independent-close:${subPosition.id}:${subPosition.openedAt.toISOString()}`,
         level: subPosition.level,
       });
     }
