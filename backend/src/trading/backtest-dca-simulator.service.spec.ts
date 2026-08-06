@@ -1,9 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
+import { RecoveryStrategyService } from './recovery-strategy.service';
 
 describe('BacktestDcaSimulatorService', () => {
-  const service = new BacktestDcaSimulatorService();
+  const service = new BacktestDcaSimulatorService(new RecoveryStrategyService());
 
   it('allocates capital across triggered DCA entries', () => {
     const result = service.simulate({
@@ -113,6 +114,31 @@ describe('BacktestDcaSimulatorService', () => {
     expect(result.equityPoints).toHaveLength(4);
   });
 
+  it.each([3, 5])(
+    'switches backtest entries to independent exactly at configured level #%s',
+    (independentFromLevel) => {
+      const result = service.simulate({
+        initialCapital: 5000,
+        riskBudgetQuote: 5000,
+        baseOrderQuote: 100,
+        candles: [{ close: 100 }, { close: 98 }, { close: 96 }, { close: 94 }, { close: 92 }],
+        maxEntries: 5,
+        priceDeviationPercent: 2,
+        volumeMultiplier: 1,
+        takeProfitPercent: 50,
+        independentFromLevel,
+        recoveryEnabled: false,
+      });
+
+      expect(result.trades!.map((trade) => [trade.level, trade.type])).toEqual(
+        [1, 2, 3, 4, 5].map((level) => [
+          level,
+          level >= independentFromLevel ? 'INDEPENDENT_ENTRY' : 'PARENT_ENTRY',
+        ]),
+      );
+    },
+  );
+
   it('keeps parent and independent positions open when their take-profit levels are not reached', () => {
     const result = service.simulate({
       initialCapital: 1000,
@@ -126,6 +152,125 @@ describe('BacktestDcaSimulatorService', () => {
     expect(result.tradeCount).toBe(3);
     expect(result.endingCapital).toBe('970.21442495');
     expect(result.realizedPnlQuote).toBe('-29.78557505');
+  });
+
+  it('simulates recovery DCA and exits the weighted basket at the global TP', () => {
+    const result = service.simulate({
+      initialCapital: 1000,
+      riskBudgetQuote: 500,
+      baseOrderQuote: 100,
+      candles: [{ close: 100 }, { close: 95 }, { close: 90 }, { close: 85 }, { close: 94 }],
+      maxEntries: 3,
+      priceDeviationPercent: 5,
+      volumeMultiplier: 1,
+      takeProfitPercent: 1.5,
+      independentFromLevel: 3,
+      recoveryEnabled: true,
+      recoveryMaxOrders: 5,
+      recoveryStepPercents: [5, 8, 12, 18, 25],
+      recoveryMultipliers: [1, 1.5, 2, 3, 5],
+      recoveryTakeProfitPercent: 1.5,
+    });
+
+    expect(result.tradeCount).toBe(6);
+    expect(result.trades!.map((trade) => trade.type)).toEqual([
+      'PARENT_ENTRY',
+      'PARENT_ENTRY',
+      'INDEPENDENT_ENTRY',
+      'RECOVERY_ENTRY',
+      'INDEPENDENT_EXIT',
+      'PARENT_EXIT',
+    ]);
+    expect(Number(result.endingCapital)).toBeGreaterThan(1000);
+  });
+
+  it('can restart completed campaigns for continuous 24/7 backtests', () => {
+    const result = service.simulate({
+      initialCapital: 1000,
+      riskBudgetQuote: 100,
+      baseOrderQuote: 100,
+      candles: [{ close: 100 }, { close: 110 }, { close: 100 }],
+      maxEntries: 1,
+      priceDeviationPercent: 5,
+      takeProfitPercent: 5,
+      continuousCycles: true,
+    });
+
+    expect(result.trades!.map((trade) => trade.type)).toEqual([
+      'PARENT_ENTRY',
+      'PARENT_EXIT',
+      'PARENT_ENTRY',
+    ]);
+    expect(result.tradeCount).toBe(3);
+  });
+
+  it('runs a full main-to-independent-to-recovery lifecycle, closes the basket, and resets', () => {
+    const riskBudgetQuote = 5000;
+    const result = service.simulate({
+      initialCapital: 5000,
+      riskBudgetQuote,
+      baseOrderQuote: 100,
+      candles: [
+        { close: 100 }, // #1 main
+        { close: 98 },  // #2 main
+        { close: 96 },  // #3 main
+        { close: 94 },  // #4 main
+        { close: 92 },  // #5 independent
+        { close: 90 },  // #6 independent
+        { close: 87 },  // Recovery R1
+        { close: 84 },  // Recovery R2
+        { close: 100 }, // Global TP: independent legs (reverse order), then parent
+        { close: 101 }, // Completed campaign resets and opens the next #1
+      ],
+      maxEntries: 6,
+      priceDeviationPercent: 2,
+      volumeMultiplier: 1.5,
+      takeProfitPercent: 1.5,
+      independentFromLevel: 5,
+      recoveryEnabled: true,
+      recoveryMaxOrders: 5,
+      recoveryStepPercents: [5, 8, 12, 18, 25],
+      recoveryMultipliers: [1, 1.5, 2, 3, 5],
+      recoveryTakeProfitPercent: 1.5,
+      continuousCycles: true,
+    });
+
+    const trades = result.trades!;
+    const firstExitIndex = trades.findIndex((trade) =>
+      trade.type === 'INDEPENDENT_EXIT' || trade.type === 'PARENT_EXIT',
+    );
+    const firstCampaign = trades.slice(0, firstExitIndex);
+    const firstCampaignEntryExposure = firstCampaign.reduce(
+      (sum, trade) => sum + Number(trade.quoteAmount),
+      0,
+    );
+
+    expect(firstCampaign.map((trade) => [trade.type, trade.level])).toEqual([
+      ['PARENT_ENTRY', 1],
+      ['PARENT_ENTRY', 2],
+      ['PARENT_ENTRY', 3],
+      ['PARENT_ENTRY', 4],
+      ['INDEPENDENT_ENTRY', 5],
+      ['INDEPENDENT_ENTRY', 6],
+      ['RECOVERY_ENTRY', 7],
+      ['RECOVERY_ENTRY', 8],
+    ]);
+    expect(firstCampaignEntryExposure).toBeLessThanOrEqual(riskBudgetQuote);
+
+    expect(trades.slice(firstExitIndex, firstExitIndex + 3).map((trade) => [
+      trade.type,
+      trade.level,
+    ])).toEqual([
+      ['INDEPENDENT_EXIT', 6],
+      ['INDEPENDENT_EXIT', 5],
+      ['PARENT_EXIT', 8],
+    ]);
+
+    expect(trades[firstExitIndex + 3]).toMatchObject({
+      type: 'PARENT_ENTRY',
+      level: 1,
+    });
+    expect(Number(result.endingCapital)).toBeGreaterThan(5000);
   });
 
   it('rejects an empty candle collection', () => {

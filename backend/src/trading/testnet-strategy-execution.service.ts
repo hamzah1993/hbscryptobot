@@ -4,16 +4,24 @@ import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
+import { RecoveryStrategyService } from './recovery-strategy.service';
 
 export type ExecuteTestnetStrategyInput = {
   strategyId: string;
   side: 'BUY' | 'SELL';
   quantity: number;
-  actionType?: 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
+  actionType?: 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'RECOVERY_DCA_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
   actionKey?: string;
   level?: number | null;
   triggerPrice?: number | null;
+  plannedQuoteAmount?: number | null;
   allowRunningStrategy?: boolean;
+};
+
+type TakeProfitUpdateInput = {
+  target: 'PARENT' | 'RECOVERY' | 'INDEPENDENT';
+  takeProfitPrice: number;
+  subPositionId?: string;
 };
 
 type BinanceOrderFill = {
@@ -48,7 +56,64 @@ export class TestnetStrategyExecutionService {
     private readonly testnetOrders: BinanceTestnetOrderService,
     private readonly strategyActions: TestnetStrategyActionService,
     private readonly notifications: NotificationsService,
+    private readonly recoveryStrategy: RecoveryStrategyService,
   ) {}
+
+  async updateTakeProfit(userId: string, positionId: string, input: TakeProfitUpdateInput) {
+    if (!['PARENT', 'RECOVERY', 'INDEPENDENT'].includes(input.target)) {
+      throw new BadRequestException('Take-profit target is invalid');
+    }
+    if (!Number.isFinite(Number(input.takeProfitPrice)) || Number(input.takeProfitPrice) <= 0) {
+      throw new BadRequestException('Take-profit price must be greater than zero');
+    }
+    const position = await this.prisma.tradingPosition.findFirst({
+      where: { id: positionId, userId },
+      include: {
+        strategy: true,
+        subPositions: true,
+        orders: { where: { status: { in: ['PENDING', 'PARTIALLY_FILLED'] } } },
+      },
+    });
+    if (!position) throw new NotFoundException('Testnet position not found');
+    if (position.strategy.paperTrading || position.strategy.environment !== 'TESTNET') {
+      throw new BadRequestException('Only Binance Testnet positions can be edited here');
+    }
+    if (position.status !== 'OPEN') throw new BadRequestException('Only open Testnet positions can be edited');
+    if (position.strategy.status !== 'PAUSED') throw new BadRequestException('Pause the bot before editing Testnet take profit');
+    if (position.orders.length > 0) {
+      throw new BadRequestException('Sync or finish pending Testnet orders before editing take profit');
+    }
+
+    const takeProfitPrice = Number(input.takeProfitPrice);
+    if (input.target === 'INDEPENDENT') {
+      if (position.recoveryMode) throw new BadRequestException('Recovery mode uses the global take-profit price');
+      const subPosition = position.subPositions.find((item) => item.id === input.subPositionId);
+      if (!subPosition || subPosition.status !== 'OPEN') {
+        throw new BadRequestException('Open independent sub-position was not found');
+      }
+      await this.prisma.tradingSubPosition.update({
+        where: { id: subPosition.id },
+        data: { takeProfitPrice, takeProfitManual: true },
+      });
+    } else if (input.target === 'RECOVERY') {
+      if (!position.recoveryMode) throw new BadRequestException('Position is not in recovery mode');
+      await this.prisma.tradingPosition.update({
+        where: { id: position.id },
+        data: { recoveryTakeProfitPrice: takeProfitPrice, recoveryTakeProfitManual: true },
+      });
+    } else {
+      if (position.recoveryMode) throw new BadRequestException('Recovery mode uses the global take-profit price');
+      await this.prisma.tradingPosition.update({
+        where: { id: position.id },
+        data: { takeProfitPrice, takeProfitManual: true },
+      });
+    }
+
+    return this.prisma.tradingPosition.findUnique({
+      where: { id: position.id },
+      include: { strategy: true, subPositions: { orderBy: { level: 'asc' } }, orders: { orderBy: { createdAt: 'desc' } } },
+    });
+  }
 
   async closePosition(userId: string, positionId: string, subPositionId?: string) {
     const position = await this.prisma.tradingPosition.findFirst({
@@ -213,6 +278,7 @@ export class TestnetStrategyExecutionService {
         let position = openPosition;
         let subPositionId: string | null = independentSubPosition?.id ?? null;
         const independentEntry = actionType === 'INDEPENDENT_ENTRY' && input.side === 'BUY';
+        const recoveryEntry = actionType === 'RECOVERY_DCA_ENTRY' && input.side === 'BUY';
         const independentExit = actionType === 'INDEPENDENT_EXIT' && input.side === 'SELL';
 
         if (!position && input.side === 'BUY') {
@@ -238,8 +304,37 @@ export class TestnetStrategyExecutionService {
           const totalQuantity = previousQuantity + executedQuantity;
           const totalCostQuote = previousCost + quoteAmount;
           const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
-          const dcaCount = position.dcaCount + 1;
+          const dcaCount = recoveryEntry ? Number(position.dcaCount) : Number(position.dcaCount) + 1;
+          const recoveryDcaCount = recoveryEntry ? Number(position.recoveryDcaCount) + 1 : Number(position.recoveryDcaCount);
           const parentTriggers = this.calculateParentTriggers(strategy, totalQuantity, totalCostQuote, averageEntryPrice, dcaCount);
+
+          let recoveryData: Record<string, unknown> = {};
+          if (recoveryEntry) {
+            const subPositions = await tx.tradingSubPosition.findMany({
+              where: { positionId: position.id, status: 'OPEN' },
+              orderBy: { level: 'asc' },
+            });
+            const anchor = subPositions.find((item: any) => Number(item.level) === Number(strategy.independentFromLevel));
+            const anchorPrice = Number(position.recoveryAnchorPrice ?? anchor?.entryPrice ?? 0);
+            const basket = this.recoveryStrategy.basketTotals({ totalQuantity, totalCostQuote }, subPositions);
+            const recoveryTakeProfitPrice = position.recoveryTakeProfitManual
+              ? Number(position.recoveryTakeProfitPrice)
+              : this.recoveryStrategy.globalTakeProfit(strategy, basket);
+            const nextLeg = this.recoveryStrategy.nextLeg(strategy, {
+              recoveryDcaCount,
+              anchorPrice,
+              baseOrderQuote: Number(strategy.baseOrderQuote),
+              remainingRiskBudget: Math.max(Number(strategy.riskBudgetQuote) - basket.costQuote, 0),
+            });
+            recoveryData = {
+              recoveryMode: true,
+              recoveryDcaCount,
+              recoveryAnchorPrice: anchorPrice,
+              recoveryTakeProfitPrice,
+              nextDcaPrice: nextLeg?.triggerPrice ?? null,
+              takeProfitPrice: null,
+            };
+          }
 
           position = await tx.tradingPosition.update({
             where: { id: position.id },
@@ -248,8 +343,9 @@ export class TestnetStrategyExecutionService {
               totalCostQuote,
               averageEntryPrice,
               dcaCount,
-              nextDcaPrice: parentTriggers.nextDcaPrice,
-              takeProfitPrice: parentTriggers.takeProfitPrice,
+              nextDcaPrice: recoveryEntry ? undefined : parentTriggers.nextDcaPrice,
+              takeProfitPrice: recoveryEntry || position.takeProfitManual ? undefined : parentTriggers.takeProfitPrice,
+              ...recoveryData,
             },
           });
         } else if (position && input.side === 'SELL' && !independentExit && executedQuantity > 0) {
@@ -274,7 +370,10 @@ export class TestnetStrategyExecutionService {
           const newQuantity = Number(existingSubPosition?.quantity ?? 0) + executedQuantity;
           const newCost = Number(existingSubPosition?.costQuote ?? 0) + quoteAmount;
           const newAverage = newQuantity > 0 ? newCost / newQuantity : 0;
-          const takeProfitPrice = newAverage * (1 + Number(strategy.takeProfitPercent) / 100);
+          const calculatedTakeProfitPrice = newAverage * (1 + Number(strategy.takeProfitPercent) / 100);
+          const takeProfitPrice = existingSubPosition?.takeProfitManual
+            ? Number(existingSubPosition.takeProfitPrice)
+            : calculatedTakeProfitPrice;
           const subPosition = existingSubPosition
             ? await tx.tradingSubPosition.update({
                 where: { id: existingSubPosition.id },
@@ -299,23 +398,13 @@ export class TestnetStrategyExecutionService {
                 },
               });
           subPositionId = subPosition.id;
-
           const expectedLevel = Number(position.dcaCount) + 2;
-          if (level === expectedLevel) {
+          if (!existingSubPosition && level === expectedLevel) {
             const dcaCount = Number(position.dcaCount) + 1;
-            const parentTriggers = this.calculateParentTriggers(
-              strategy,
-              Number(position.totalQuantity),
-              Number(position.totalCostQuote),
-              Number(position.averageEntryPrice),
-              dcaCount,
-            );
+            const nextDcaPrice = averageFillPrice * (1 - Number(strategy.dcaStepPercent) / 100);
             position = await tx.tradingPosition.update({
               where: { id: position.id },
-              data: {
-                dcaCount,
-                nextDcaPrice: parentTriggers.nextDcaPrice,
-              },
+              data: { dcaCount, nextDcaPrice },
             });
           }
         } else if (independentExit && independentSubPosition && executedQuantity > 0) {
@@ -491,6 +580,11 @@ export class TestnetStrategyExecutionService {
             dcaMultiplier: true,
             takeProfitPercent: true,
             independentFromLevel: true,
+            recoveryEnabled: true,
+            recoveryMaxOrders: true,
+            recoveryStepPercents: true,
+            recoveryMultipliers: true,
+            recoveryTakeProfitPercent: true,
           },
         },
         subPositions: {
@@ -549,7 +643,10 @@ export class TestnetStrategyExecutionService {
           const newQuantity = Number(current?.quantity ?? 0) + deltaQuantity;
           const newCost = Number(current?.costQuote ?? 0) + deltaQuote;
           const newAverage = newQuantity > 0 ? newCost / newQuantity : 0;
-          const takeProfitPrice = newAverage * (1 + Number(order.position.strategy.takeProfitPercent) / 100);
+          const calculatedTakeProfitPrice = newAverage * (1 + Number(order.position.strategy.takeProfitPercent) / 100);
+          const takeProfitPrice = current?.takeProfitManual
+            ? Number(current.takeProfitPrice)
+            : calculatedTakeProfitPrice;
           updatedSubPosition = current
             ? await tx.tradingSubPosition.update({
                 where: { id: current.id },
@@ -573,24 +670,16 @@ export class TestnetStrategyExecutionService {
                   takeProfitPrice,
                 },
               });
-
           const expectedLevel = Number(updatedPosition.dcaCount) + 2;
           if (accountedQuantity === 0 && level === expectedLevel) {
             const dcaCount = Number(updatedPosition.dcaCount) + 1;
-            const parentTriggers = this.calculateParentTriggers(
-              order.position.strategy,
-              Number(updatedPosition.totalQuantity),
-              Number(updatedPosition.totalCostQuote),
-              Number(updatedPosition.averageEntryPrice),
-              dcaCount,
-            );
             updatedPosition = {
               ...updatedPosition,
               ...(await tx.tradingPosition.update({
                 where: { id: order.positionId },
                 data: {
                   dcaCount,
-                  nextDcaPrice: parentTriggers.nextDcaPrice,
+                  nextDcaPrice: averageFillPrice * (1 - Number(order.position.strategy.dcaStepPercent) / 100),
                 },
               })),
               strategy: order.position.strategy,
@@ -615,7 +704,9 @@ export class TestnetStrategyExecutionService {
           const totalQuantity = previousQuantity + deltaQuantity;
           const totalCostQuote = previousCost + deltaQuote;
           const averageEntryPrice = totalQuantity > 0 ? totalCostQuote / totalQuantity : 0;
-          const dcaCount = Number(updatedPosition.dcaCount) + (accountedQuantity === 0 ? 1 : 0);
+          const recoveryEntry = order.strategyAction?.type === 'RECOVERY_DCA_ENTRY';
+          const dcaCount = Number(updatedPosition.dcaCount) + (!recoveryEntry && accountedQuantity === 0 ? 1 : 0);
+          const recoveryDcaCount = Number(updatedPosition.recoveryDcaCount) + (recoveryEntry && accountedQuantity === 0 ? 1 : 0);
           const parentTriggers = this.calculateParentTriggers(
             order.position.strategy,
             totalQuantity,
@@ -623,6 +714,32 @@ export class TestnetStrategyExecutionService {
             averageEntryPrice,
             dcaCount,
           );
+          let recoveryData: Record<string, unknown> = {};
+          if (recoveryEntry) {
+            const subPositions = await tx.tradingSubPosition.findMany({
+              where: { positionId: order.positionId, status: 'OPEN' },
+              orderBy: { level: 'asc' },
+            });
+            const anchor = subPositions.find((item: any) => Number(item.level) === Number(order.position.strategy.independentFromLevel));
+            const anchorPrice = Number(updatedPosition.recoveryAnchorPrice ?? anchor?.entryPrice ?? 0);
+            const basket = this.recoveryStrategy.basketTotals({ totalQuantity, totalCostQuote }, subPositions);
+            const nextLeg = this.recoveryStrategy.nextLeg(order.position.strategy, {
+              recoveryDcaCount,
+              anchorPrice,
+              baseOrderQuote: Number(order.position.strategy.baseOrderQuote),
+              remainingRiskBudget: Math.max(Number(order.position.strategy.riskBudgetQuote) - basket.costQuote, 0),
+            });
+            recoveryData = {
+              recoveryMode: true,
+              recoveryDcaCount,
+              recoveryAnchorPrice: anchorPrice,
+              recoveryTakeProfitPrice: updatedPosition.recoveryTakeProfitManual
+                ? Number(updatedPosition.recoveryTakeProfitPrice)
+                : this.recoveryStrategy.globalTakeProfit(order.position.strategy, basket),
+              nextDcaPrice: nextLeg?.triggerPrice ?? null,
+              takeProfitPrice: null,
+            };
+          }
           updatedPosition = {
             ...updatedPosition,
             ...(await tx.tradingPosition.update({
@@ -632,8 +749,9 @@ export class TestnetStrategyExecutionService {
                 totalCostQuote,
                 averageEntryPrice,
                 dcaCount,
-                nextDcaPrice: parentTriggers.nextDcaPrice,
-                takeProfitPrice: parentTriggers.takeProfitPrice,
+                nextDcaPrice: recoveryEntry ? undefined : parentTriggers.nextDcaPrice,
+                takeProfitPrice: recoveryEntry || updatedPosition.takeProfitManual ? undefined : parentTriggers.takeProfitPrice,
+                ...recoveryData,
               },
             })),
             strategy: order.position.strategy,
@@ -753,7 +871,11 @@ export class TestnetStrategyExecutionService {
         realizedPnlQuote: Number(position.realizedPnlQuote) + proceeds - allocatedCost,
         closedAt: closed ? new Date() : null,
         nextDcaPrice: parentTriggers.nextDcaPrice,
-        takeProfitPrice: parentTriggers.takeProfitPrice,
+        takeProfitPrice: closed
+          ? null
+          : position.takeProfitManual
+            ? position.takeProfitPrice
+            : parentTriggers.takeProfitPrice,
       },
     });
   }

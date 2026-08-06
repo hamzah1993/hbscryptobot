@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type StrategyStatus, type TestnetPosition, type TradingPosition } from '../lib/api';
+import { api, type StrategyStatus, type TakeProfitTarget, type TestnetPosition, type TradingPosition } from '../lib/api';
 
 type Props = {
   token: string;
@@ -22,7 +22,13 @@ type UnifiedPosition = {
   averageEntryPrice: string;
   realizedPnlQuote: string;
   dcaCount: number;
+  recoveryMode: boolean;
+  recoveryDcaCount: number;
+  recoveryAnchorPrice: string | null;
+  recoveryTakeProfitPrice: string | null;
   maxDcaOrders: number;
+  independentFromLevel: number;
+  recoveryMaxOrders: number;
   nextDcaPrice: string | null;
   takeProfitPrice: string | null;
   openedAt: string;
@@ -52,6 +58,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
   const [expandedId, setExpandedId] = useState<string | null>(initialPositionId);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editingTp, setEditingTp] = useState<{ positionId: string; target: TakeProfitTarget; subPositionId?: string; label: string; value: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
@@ -101,7 +108,13 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
       averageEntryPrice: position.averageEntryPrice,
       realizedPnlQuote: position.realizedPnlQuote,
       dcaCount: position.dcaCount,
+      recoveryMode: position.recoveryMode,
+      recoveryDcaCount: position.recoveryDcaCount,
+      recoveryAnchorPrice: position.recoveryAnchorPrice,
+      recoveryTakeProfitPrice: position.recoveryTakeProfitPrice,
       maxDcaOrders: position.strategy.maxDcaOrders,
+      independentFromLevel: position.strategy.independentFromLevel ?? 5,
+      recoveryMaxOrders: position.strategy.recoveryMaxOrders ?? 5,
       nextDcaPrice: position.nextDcaPrice,
       takeProfitPrice: position.takeProfitPrice,
       openedAt: position.openedAt,
@@ -121,7 +134,13 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
       averageEntryPrice: position.averageEntryPrice,
       realizedPnlQuote: position.realizedPnlQuote,
       dcaCount: position.dcaCount,
+      recoveryMode: position.recoveryMode,
+      recoveryDcaCount: position.recoveryDcaCount,
+      recoveryAnchorPrice: position.recoveryAnchorPrice,
+      recoveryTakeProfitPrice: position.recoveryTakeProfitPrice,
       maxDcaOrders: position.strategy.maxDcaOrders,
+      independentFromLevel: position.strategy.independentFromLevel ?? 5,
+      recoveryMaxOrders: position.strategy.recoveryMaxOrders ?? 5,
       nextDcaPrice: position.nextDcaPrice,
       takeProfitPrice: position.takeProfitPrice,
       openedAt: position.openedAt,
@@ -232,11 +251,62 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     }
   }
 
+  function beginTakeProfitEdit(
+    position: UnifiedPosition,
+    target: TakeProfitTarget,
+    currentValue: string | null,
+    subPositionId?: string,
+  ) {
+    const label = target === 'PARENT'
+      ? 'Parent take profit'
+      : target === 'RECOVERY'
+        ? 'Recovery global take profit'
+        : `Independent take profit`;
+    setEditingTp({ positionId: position.id, target, subPositionId, label, value: currentValue ?? '' });
+    setError(null);
+  }
+
+  async function saveTakeProfit(position: UnifiedPosition) {
+    if (!editingTp || editingTp.positionId !== position.id) return;
+    const takeProfitPrice = Number(editingTp.value);
+    if (!Number.isFinite(takeProfitPrice) || takeProfitPrice <= 0) {
+      setError('Take-profit price must be greater than zero.');
+      return;
+    }
+
+    const payload = {
+      target: editingTp.target,
+      takeProfitPrice,
+      ...(editingTp.subPositionId ? { subPositionId: editingTp.subPositionId } : {}),
+    };
+    const operationId = editingTp.subPositionId ?? position.id;
+    setBusyId(operationId);
+    try {
+      if (position.source === 'PAPER') {
+        await api.updatePaperPositionTakeProfit(token, position.id, payload);
+      } else {
+        await api.updateTestnetPositionTakeProfit(token, position.id, payload);
+      }
+      setEditingTp(null);
+      await load(true);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Unable to update take profit');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const totals = useMemo(() => {
     const open = allPositions.filter((position) => position.status === 'OPEN');
     const unrealized = open.reduce((sum, position) => {
       const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
-      return sum + currentPrice * Number(position.totalQuantity) - Number(position.totalCostQuote);
+      const independentQuantity = position.subPositions
+        .filter((subPosition) => subPosition.status === 'OPEN')
+        .reduce((quantity, subPosition) => quantity + Number(subPosition.quantity), 0);
+      const independentCost = position.subPositions
+        .filter((subPosition) => subPosition.status === 'OPEN')
+        .reduce((cost, subPosition) => cost + Number(subPosition.costQuote), 0);
+      return sum + currentPrice * (Number(position.totalQuantity) + independentQuantity) - (Number(position.totalCostQuote) + independentCost);
     }, 0);
     const realized = allPositions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
     return {
@@ -290,8 +360,13 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
           {filtered.map((position) => {
             const expanded = expandedId === position.id;
             const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
-            const currentValue = currentPrice * Number(position.totalQuantity);
-            const unrealized = position.status === 'OPEN' ? currentValue - Number(position.totalCostQuote) : 0;
+            const openIndependent = position.subPositions.filter((subPosition) => subPosition.status === 'OPEN');
+            const independentQuantity = openIndependent.reduce((sum, subPosition) => sum + Number(subPosition.quantity), 0);
+            const independentCost = openIndependent.reduce((sum, subPosition) => sum + Number(subPosition.costQuote), 0);
+            const basketQuantity = Number(position.totalQuantity) + independentQuantity;
+            const basketCost = Number(position.totalCostQuote) + independentCost;
+            const currentValue = currentPrice * basketQuantity;
+            const unrealized = position.status === 'OPEN' ? currentValue - basketCost : 0;
             const realized = Number(position.realizedPnlQuote);
             const total = unrealized + realized;
             const hasPendingOrder = position.orders.some((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED');
@@ -303,6 +378,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                       <h4 className="text-lg font-semibold">{position.symbol}</h4>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${position.source === 'PAPER' ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{position.source === 'PAPER' ? 'Paper' : 'Binance Testnet'}</span>
                       <span className="rounded-full bg-emerald-400/15 px-2.5 py-1 text-xs text-emerald-300">{position.status}</span>
+                      {position.recoveryMode && <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs font-semibold text-amber-300">RECOVERY</span>}
                     </div>
                     <p className="mt-2 text-sm text-slate-400">{position.strategyName}</p>
                     <p className="mt-1 text-xs text-slate-600">Opened {new Date(position.openedAt).toLocaleString()}</p>
@@ -316,14 +392,19 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                   <div className="border-t border-white/10 p-5">
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                       <Metric label="Average entry" value={number(position.averageEntryPrice)} />
-                      <Metric label="Open quantity" value={number(position.totalQuantity)} />
+                      <Metric label="Basket quantity" value={number(basketQuantity)} />
                       <Metric label="Current value" value={money(currentValue)} />
-                      <Metric label="Allocated cost" value={money(position.totalCostQuote)} />
+                      <Metric label="Basket cost" value={money(basketCost)} />
                       <Metric label="Next DCA" value={position.nextDcaPrice ? number(position.nextDcaPrice) : '—'} />
                       <Metric label="Take profit" value={position.takeProfitPrice ? number(position.takeProfitPrice) : '—'} />
+                      <Metric label="Recovery orders" value={position.recoveryMode ? String(position.recoveryDcaCount) : '—'} />
+                      <Metric label="Recovery global TP" value={position.recoveryTakeProfitPrice ? number(position.recoveryTakeProfitPrice) : '—'} />
+                      <Metric label="Recovery anchor" value={position.recoveryAnchorPrice ? number(position.recoveryAnchorPrice) : '—'} />
                       <Metric label="Realized P&L" value={money(realized)} />
                       <Metric label="Strategy state" value={position.strategyStatus ?? 'STOPPED'} />
                     </div>
+
+                    <PositionFlow position={position} />
 
                     <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
                       <h5 className="text-sm font-semibold">Manual controls</h5>
@@ -335,15 +416,29 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                         {position.source === 'PAPER' && position.status === 'OPEN' && <button disabled={busyId === position.id} onClick={() => void closePaper(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Paper position</button>}
                         {position.source === 'TESTNET' && position.status === 'OPEN' && <button disabled={busyId === position.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Testnet parent</button>}
                         {position.source === 'TESTNET' && <button disabled={busyId === position.id} onClick={() => void syncTestnet(position)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-200 disabled:opacity-40">Sync pending orders</button>}
+                        {position.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === position.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'PARENT', position.takeProfitPrice)} className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-2 text-sm font-semibold text-violet-200 disabled:opacity-40">Edit parent TP</button>}
+                        {position.status === 'OPEN' && position.recoveryMode && <button disabled={busyId === position.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'RECOVERY', position.recoveryTakeProfitPrice)} className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-2 text-sm font-semibold text-violet-200 disabled:opacity-40">Edit global TP</button>}
                       </div>
                       {position.source === 'TESTNET' && position.strategyStatus !== 'PAUSED' && <p className="mt-3 text-xs text-amber-200">Pause the bot before submitting a manual Testnet close.</p>}
                       {position.source === 'TESTNET' && hasPendingOrder && <p className="mt-3 text-xs text-amber-200">A Testnet order is pending or partially filled. Sync it before closing.</p>}
+                      {editingTp?.positionId === position.id && !editingTp.subPositionId && (
+                        <div className="mt-4 rounded-xl border border-violet-400/20 bg-violet-400/[0.06] p-4">
+                          <label className="text-sm font-medium text-slate-200">{editingTp.label} price
+                            <input autoFocus type="number" min="0.00000001" step="any" value={editingTp.value} onChange={(event) => setEditingTp({ ...editingTp, value: event.target.value })} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 outline-none ring-violet-400/40 focus:ring" />
+                          </label>
+                          <div className="mt-3 flex gap-2">
+                            <button disabled={busyId === position.id} onClick={() => void saveTakeProfit(position)} className="rounded-lg bg-violet-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Save TP</button>
+                            <button disabled={busyId === position.id} onClick={() => setEditingTp(null)} className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-300 disabled:opacity-40">Cancel</button>
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500">This overrides the TP for this open position only. Bot defaults for future positions are unchanged.</p>
+                        </div>
+                      )}
                     </div>
 
                     <div className="mt-5">
                       <h5 className="text-sm font-semibold">Independent sub-positions</h5>
                       {position.subPositions.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-500">No independent levels have been opened.</p> : (
-                        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3">{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : '—'}</td></tr>)}</tbody></table></div>
+                        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[920px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{editingTp?.subPositionId === sub.id ? <div className="flex min-w-[240px] gap-2"><input autoFocus type="number" min="0.00000001" step="any" value={editingTp.value} onChange={(event) => setEditingTp({ ...editingTp, value: event.target.value })} className="w-32 rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 outline-none ring-violet-400/40 focus:ring" /><button disabled={busyId === sub.id} onClick={() => void saveTakeProfit(position)} className="rounded-lg bg-violet-400 px-2.5 py-1.5 text-xs font-semibold text-slate-950">Save</button><button onClick={() => setEditingTp(null)} className="rounded-lg border border-white/10 px-2 py-1.5 text-xs">Cancel</button></div> : number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3"><div className="flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : null}</div></td></tr>)}</tbody></table></div>
                       )}
                     </div>
                   </div>
@@ -359,4 +454,59 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">{label}</p><p className="mt-2 font-semibold">{value}</p></div>;
+}
+
+function PositionFlow({ position }: { position: UnifiedPosition }) {
+  const maxLevel = position.maxDcaOrders + 1;
+  const completedThrough = position.dcaCount + 1;
+  const openByLevel = new Map(position.subPositions.map((subPosition) => [subPosition.level, subPosition]));
+  const normalLevels = Array.from({ length: maxLevel }, (_, index) => index + 1);
+
+  return (
+    <div className="mt-5 rounded-2xl border border-white/10 bg-slate-950/30 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h5 className="text-sm font-semibold">Position flow</h5>
+          <p className="mt-1 text-xs text-slate-500">Main basket → independent levels → Recovery basket</p>
+        </div>
+        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${position.recoveryMode ? 'bg-amber-400/15 text-amber-300' : 'bg-cyan-400/10 text-cyan-300'}`}>
+          {position.recoveryMode ? 'RECOVERY ACTIVE' : `NEXT LEVEL #${Math.min(completedThrough + 1, maxLevel)}`}
+        </span>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {normalLevels.map((level) => {
+          const independent = level >= position.independentFromLevel;
+          const subPosition = openByLevel.get(level);
+          const completed = level <= completedThrough;
+          const state = independent
+            ? subPosition?.status === 'OPEN' ? 'Open' : subPosition?.status === 'CLOSED' ? 'Exited' : completed ? 'Filled' : 'Waiting'
+            : completed ? 'Filled' : 'Waiting';
+          const active = !position.recoveryMode && !completed && level === completedThrough + 1;
+          return (
+            <div key={level} className={`rounded-xl border px-3 py-2 text-xs ${active ? 'border-cyan-400/50 bg-cyan-400/10 text-cyan-200' : completed ? 'border-emerald-400/25 bg-emerald-400/[0.08] text-emerald-200' : 'border-white/10 bg-white/[0.025] text-slate-500'}`}>
+              <span className="font-semibold">#{level} {independent ? 'Independent' : 'Main'}</span>
+              <span className="ml-2 opacity-75">{state}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
+        <span className="mr-1 text-xs font-semibold text-amber-300">Recovery</span>
+        {Array.from({ length: position.recoveryMaxOrders }, (_, index) => index + 1).map((level) => {
+          const filled = level <= position.recoveryDcaCount;
+          const active = position.recoveryMode && level === position.recoveryDcaCount + 1;
+          return (
+            <span key={level} className={`rounded-lg border px-2.5 py-1.5 text-xs ${filled ? 'border-amber-400/30 bg-amber-400/10 text-amber-200' : active ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200' : 'border-white/10 text-slate-600'}`}>
+              R{level} {filled ? 'Filled' : active ? 'Waiting' : 'Queued'}
+            </span>
+          );
+        })}
+        <span className={`rounded-lg border px-2.5 py-1.5 text-xs ${position.recoveryMode ? 'border-violet-400/30 bg-violet-400/10 text-violet-200' : 'border-white/10 text-slate-600'}`}>
+          Global TP {position.recoveryTakeProfitPrice ? number(position.recoveryTakeProfitPrice) : '—'}
+        </span>
+      </div>
+    </div>
+  );
 }

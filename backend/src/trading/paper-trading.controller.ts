@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaperTradingService } from './paper-trading.service';
@@ -41,6 +41,15 @@ export class PaperTradingController {
     @Body() body: { marketPrice: number },
   ) {
     return this.paper.closePosition(request.user.sub, positionId, body.marketPrice);
+  }
+
+  @Patch('positions/:positionId/take-profit')
+  updateTakeProfit(
+    @Req() request: AuthenticatedRequest,
+    @Param('positionId') positionId: string,
+    @Body() body: { target: 'PARENT' | 'RECOVERY' | 'INDEPENDENT'; takeProfitPrice: number; subPositionId?: string },
+  ) {
+    return this.paper.updateTakeProfit(request.user.sub, positionId, body);
   }
 
   @Post('positions/:positionId/tick')

@@ -59,14 +59,20 @@ export class RiskBudgetService {
   private validate(input: DcaPlanInput) {
     if (input.riskBudgetQuote <= 0) throw new BadRequestException('Risk budget must be positive');
     if (input.baseOrderQuote <= 0) throw new BadRequestException('Base order must be positive');
-    if (input.maxDcaOrders < 0 || input.maxDcaOrders > 50) {
-      throw new BadRequestException('maxDcaOrders must be between 0 and 50');
+    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 0 || input.maxDcaOrders > 50) {
+      throw new BadRequestException('maxDcaOrders must be an integer between 0 and 50');
     }
     if (input.dcaStepPercent <= 0) throw new BadRequestException('DCA step must be positive');
     if (input.dcaMultiplier < 1) throw new BadRequestException('DCA multiplier cannot be below 1');
     if (input.takeProfitPercent <= 0) throw new BadRequestException('Take-profit must be positive');
-    if (input.independentFromLevel < 1) {
-      throw new BadRequestException('Independent level must be at least 1');
+    if (
+      !Number.isInteger(input.independentFromLevel) ||
+      input.independentFromLevel < 2 ||
+      input.independentFromLevel > input.maxDcaOrders + 2
+    ) {
+      throw new BadRequestException(
+        'Independent level must be an integer between 2 and maxDcaOrders + 2',
+      );
     }
   }
 

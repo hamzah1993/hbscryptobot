@@ -31,6 +31,7 @@ export type TradingSubPosition = {
 };
 
 export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
+export type TakeProfitTarget = 'PARENT' | 'RECOVERY' | 'INDEPENDENT';
 export type BinanceStreamEnvironment = 'testnet' | 'live';
 export type ExchangeEnvironment = 'TESTNET' | 'LIVE';
 export type BinanceKlineInterval =
@@ -50,11 +51,11 @@ export type BinanceKlineInterval =
   | '1w'
   | '1M';
 export type TestnetOrderStatus = 'PENDING' | 'PARTIALLY_FILLED' | 'FILLED' | 'REJECTED' | 'CANCELLED';
-export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
+export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENTRY' | 'RECOVERY_DCA_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 export type TestnetActionStatus = 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-export type BacktestTradeType = 'PARENT_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
+export type BacktestTradeType = 'PARENT_ENTRY' | 'INDEPENDENT_ENTRY' | 'RECOVERY_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 
 export type TestnetRunnerHealth = {
   scheduler: 'HEALTHY' | 'DELAYED' | 'ERROR' | 'IDLE';
@@ -149,6 +150,11 @@ export type TradingStrategy = {
   dcaMultiplier?: string;
   takeProfitPercent?: string;
   independentFromLevel?: number;
+  recoveryEnabled?: boolean;
+  recoveryMaxOrders?: number;
+  recoveryStepPercents?: number[];
+  recoveryMultipliers?: number[];
+  recoveryTakeProfitPercent?: string;
 };
 
 export type TradingPosition = {
@@ -160,6 +166,10 @@ export type TradingPosition = {
   averageEntryPrice: string;
   realizedPnlQuote: string;
   dcaCount: number;
+  recoveryMode: boolean;
+  recoveryDcaCount: number;
+  recoveryAnchorPrice: string | null;
+  recoveryTakeProfitPrice: string | null;
   nextDcaPrice: string | null;
   takeProfitPrice: string | null;
   openedAt: string;
@@ -294,6 +304,10 @@ export type TestnetPosition = {
   averageEntryPrice: string;
   realizedPnlQuote: string;
   dcaCount: number;
+  recoveryMode: boolean;
+  recoveryDcaCount: number;
+  recoveryAnchorPrice: string | null;
+  recoveryTakeProfitPrice: string | null;
   nextDcaPrice: string | null;
   takeProfitPrice: string | null;
   openedAt: string;
@@ -413,6 +427,11 @@ export type CreateStrategyPayload = {
   dcaMultiplier: number;
   takeProfitPercent: number;
   independentFromLevel: number;
+  recoveryEnabled: boolean;
+  recoveryMaxOrders: number;
+  recoveryStepPercents: number[];
+  recoveryMultipliers: number[];
+  recoveryTakeProfitPercent: number;
 };
 
 export type CreateBacktestPayload = {
@@ -483,6 +502,10 @@ export const api = {
       headers: authHeaders(token),
       body: JSON.stringify(subPositionId ? { subPositionId } : {}),
     }),
+  updateTestnetPositionTakeProfit: (token: string, positionId: string, payload: { target: TakeProfitTarget; takeProfitPrice: number; subPositionId?: string }) =>
+    request<TestnetPosition>(`/strategies/testnet-positions/${encodeURIComponent(positionId)}/take-profit`, {
+      method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
+    }),
   getTestnetRunnerHealth: (token: string) =>
     request<TestnetRunnerHealth>('/strategies/testnet-runner-health', { headers: authHeaders(token) }),
   listBacktests: (token: string, limit = 100) =>
@@ -542,4 +565,8 @@ export const api = {
     request<{ action: 'DCA' | 'TAKE_PROFIT' | 'HOLD'; position: TradingPosition }>(`/paper-trading/positions/${positionId}/tick`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ marketPrice }) }),
   closePaperPosition: (token: string, positionId: string, marketPrice: number) =>
     request<TradingPosition>(`/paper-trading/positions/${positionId}/close`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ marketPrice }) }),
+  updatePaperPositionTakeProfit: (token: string, positionId: string, payload: { target: TakeProfitTarget; takeProfitPrice: number; subPositionId?: string }) =>
+    request<TradingPosition>(`/paper-trading/positions/${encodeURIComponent(positionId)}/take-profit`, {
+      method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
+    }),
 };

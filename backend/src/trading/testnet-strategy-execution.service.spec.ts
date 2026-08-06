@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+import { RecoveryStrategyService } from './recovery-strategy.service';
 
 describe('TestnetStrategyExecutionService incremental fill accounting', () => {
   const userId = 'user-1';
@@ -13,6 +14,14 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     dcaStepPercent: 5,
     dcaMultiplier: 1,
     takeProfitPercent: 10,
+    riskBudgetQuote: 1000,
+    baseOrderQuote: 100,
+    independentFromLevel: 5,
+    recoveryEnabled: true,
+    recoveryMaxOrders: 5,
+    recoveryStepPercents: [5, 8, 12, 18, 25],
+    recoveryMultipliers: [1, 1.5, 2, 3, 5],
+    recoveryTakeProfitPercent: 1.5,
   };
 
   function createService(
@@ -30,8 +39,13 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       averageEntryPrice: 100,
       realizedPnlQuote: 0,
       dcaCount: 0,
+      recoveryMode: false,
+      recoveryDcaCount: 0,
+      recoveryAnchorPrice: 80,
+      recoveryTakeProfitManual: false,
       nextDcaPrice: 95,
       takeProfitPrice: 110,
+      takeProfitManual: false,
       strategy,
       ...positionOverrides,
     };
@@ -63,10 +77,13 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     };
 
     const tradingPosition = {
+      findFirst: jest.fn().mockResolvedValue({ ...position, subPositions: [], orders: [] }),
+      findUnique: jest.fn().mockResolvedValue({ ...position, subPositions: [], orders: [] }),
       update: jest.fn(async ({ data }) => ({ ...position, ...data })),
     };
     const tradingSubPosition = {
       findUnique: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(async ({ data }) => ({ id: 'sub-1', realizedPnlQuote: 0, ...data })),
       update: jest.fn(async ({ data }) => ({ id: 'sub-1', ...data })),
     };
@@ -81,7 +98,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     const tx = { tradingPosition, tradingSubPosition, tradingOrder, strategyAction };
     const prisma = {
       tradingStrategy: { findFirst: jest.fn().mockResolvedValue(strategy) },
-      tradingPosition: { findFirst: jest.fn().mockResolvedValue(position) },
+      tradingPosition,
       tradingSubPosition,
       tradingOrder,
       $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
@@ -104,7 +121,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     const notifications = { publish: jest.fn() } as any;
 
     return {
-      service: new TestnetStrategyExecutionService(prisma, testnetOrders, actions, notifications),
+      service: new TestnetStrategyExecutionService(prisma, testnetOrders, actions, notifications, new RecoveryStrategyService()),
       order,
       tradingOrder,
       tradingPosition,
@@ -267,11 +284,16 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       status: 'PARTIALLY_FILLED',
       executedQty: '0.5',
       cummulativeQuoteQty: '50',
+    }, {
+      dcaCount: 3,
     });
 
     await service.syncOrder(userId, 'order-1');
 
-    expect(tradingPosition.update).not.toHaveBeenCalled();
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: { dcaCount: 4, nextDcaPrice: 95 },
+    });
     expect(tradingSubPosition.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         positionId: 'position-1',
@@ -331,6 +353,88 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         costQuote: 180,
         entryPrice: 90,
         takeProfitPrice: 99.00000000000001,
+      }),
+    });
+  });
+
+  it('preserves a manually overridden independent TP across later partial fills', async () => {
+    const existingSubPosition = {
+      id: 'sub-1',
+      positionId: 'position-1',
+      level: 5,
+      status: 'OPEN',
+      quantity: 1,
+      costQuote: 100,
+      entryPrice: 100,
+      takeProfitPrice: 115,
+      takeProfitManual: true,
+      realizedPnlQuote: 0,
+    };
+    const { service, tradingSubPosition } = createService({
+      independent: true,
+      level: 5,
+      subPositionId: 'sub-1',
+      subPosition: existingSubPosition,
+      filledQuantity: 1,
+      quoteAmount: 100,
+      accountedFilledQuantity: 1,
+      accountedQuoteAmount: 100,
+    }, {
+      status: 'FILLED',
+      executedQty: '2',
+      cummulativeQuoteQty: '180',
+    });
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingSubPosition.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: expect.objectContaining({ takeProfitPrice: 115 }),
+    });
+  });
+
+  it('updates Testnet TP only while the strategy is paused and has no pending order', async () => {
+    const { service, tradingPosition } = createService();
+
+    await service.updateTakeProfit(userId, 'position-1', {
+      target: 'PARENT',
+      takeProfitPrice: 120,
+    });
+
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: { takeProfitPrice: 120, takeProfitManual: true },
+    });
+  });
+
+  it('reconciles recovery BUY fills without advancing the normal campaign level', async () => {
+    const { service, tradingPosition } = createService({
+      level: 7,
+      filledQuantity: 0,
+      quoteAmount: 0,
+      accountedFilledQuantity: 0,
+      accountedQuoteAmount: 0,
+      strategyAction: { id: 'action-1', subPositionId: null, type: 'RECOVERY_DCA_ENTRY' },
+    }, {
+      status: 'FILLED',
+      executedQty: '1',
+      cummulativeQuoteQty: '70',
+    });
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: expect.objectContaining({
+        totalQuantity: 3,
+        totalCostQuote: 270,
+        dcaCount: 0,
+        recoveryMode: true,
+        recoveryDcaCount: 1,
+        recoveryAnchorPrice: 80,
+        recoveryTakeProfitPrice: 91.35,
+        nextDcaPrice: 73.60000000000001,
+        takeProfitPrice: null,
       }),
     });
   });
