@@ -35,6 +35,7 @@ export class StrategyService {
           name: normalized.name,
           symbol: normalized.symbol,
           environment: normalized.environment,
+          mode: normalized.mode,
           paperTrading: normalized.paperTrading,
           riskBudgetQuote: normalized.riskBudgetQuote,
           baseOrderQuote: normalized.baseOrderQuote,
@@ -122,11 +123,20 @@ export class StrategyService {
     if (!name) throw new BadRequestException('Strategy name is required');
     if (!symbol) throw new BadRequestException('Trading symbol is required');
 
+    const environment = input.environment ?? 'TESTNET';
+    const paperTrading = input.paperTrading ?? true;
+    const mode = paperTrading
+      ? 'PAPER'
+      : environment === 'TESTNET'
+        ? 'BINANCE_TESTNET'
+        : 'BINANCE_LIVE';
+
     return {
       name,
       symbol,
-      environment: input.environment ?? 'TESTNET',
-      paperTrading: input.paperTrading ?? true,
+      environment,
+      mode,
+      paperTrading,
       riskBudgetQuote: Number(input.riskBudgetQuote),
       baseOrderQuote: Number(input.baseOrderQuote),
       maxDcaOrders: Number(input.maxDcaOrders),
