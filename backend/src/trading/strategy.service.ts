@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RiskBudgetService } from './risk-budget.service';
 
@@ -27,22 +28,26 @@ export class StrategyService {
     const normalized = this.normalize(input);
     this.riskBudget.buildPlan(normalized);
 
-    return this.prisma.tradingStrategy.create({
-      data: {
-        userId,
-        name: normalized.name,
-        symbol: normalized.symbol,
-        environment: normalized.environment,
-        paperTrading: normalized.paperTrading,
-        riskBudgetQuote: normalized.riskBudgetQuote,
-        baseOrderQuote: normalized.baseOrderQuote,
-        maxDcaOrders: normalized.maxDcaOrders,
-        dcaStepPercent: normalized.dcaStepPercent,
-        dcaMultiplier: normalized.dcaMultiplier,
-        takeProfitPercent: normalized.takeProfitPercent,
-        independentFromLevel: normalized.independentFromLevel,
-      },
-    });
+    try {
+      return await this.prisma.tradingStrategy.create({
+        data: {
+          userId,
+          name: normalized.name,
+          symbol: normalized.symbol,
+          environment: normalized.environment,
+          paperTrading: normalized.paperTrading,
+          riskBudgetQuote: normalized.riskBudgetQuote,
+          baseOrderQuote: normalized.baseOrderQuote,
+          maxDcaOrders: normalized.maxDcaOrders,
+          dcaStepPercent: normalized.dcaStepPercent,
+          dcaMultiplier: normalized.dcaMultiplier,
+          takeProfitPercent: normalized.takeProfitPercent,
+          independentFromLevel: normalized.independentFromLevel,
+        },
+      });
+    } catch (error) {
+      this.rethrowFriendlyPrismaError(error);
+    }
   }
 
   list(userId: string) {
@@ -78,10 +83,14 @@ export class StrategyService {
     });
     this.riskBudget.buildPlan(merged);
 
-    return this.prisma.tradingStrategy.update({
-      where: { id: strategyId },
-      data: merged,
-    });
+    try {
+      return await this.prisma.tradingStrategy.update({
+        where: { id: strategyId },
+        data: merged,
+      });
+    } catch (error) {
+      this.rethrowFriendlyPrismaError(error);
+    }
   }
 
   async setStatus(userId: string, strategyId: string, status: 'RUNNING' | 'PAUSED' | 'STOPPED') {
@@ -98,6 +107,13 @@ export class StrategyService {
     if (!existing) throw new NotFoundException('Strategy not found');
     if (existing.positions.length) throw new BadRequestException('Close open positions before deleting the strategy');
     return this.prisma.tradingStrategy.delete({ where: { id: strategyId } });
+  }
+
+  private rethrowFriendlyPrismaError(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ConflictException('A bot with this name already exists. Choose another name or edit the existing bot.');
+    }
+    throw error;
   }
 
   private normalize(input: StrategyInput) {
