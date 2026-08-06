@@ -61,7 +61,9 @@ export function DashboardPage() {
   const [activeNav, setActiveNav] = useState('Overview');
   const [paperPositions, setPaperPositions] = useState<TradingPosition[]>([]);
   const [testnetPositions, setTestnetPositions] = useState<TestnetPosition[]>([]);
+  const [prices, setPrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreateBot, setShowCreateBot] = useState(false);
   const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
@@ -88,29 +90,70 @@ export function DashboardPage() {
   );
   const initializedNotificationPolling = useRef(false);
 
-  function loadPositions() {
+  async function loadPositions(silent = false) {
     if (!token) {
       setLoading(false);
       return;
     }
-    setLoading(true);
-    setError(null);
-    Promise.all([api.listPaperPositions(token), api.listTestnetPositions(token, 250)])
-      .then(([paper, testnet]) => {
-        setPaperPositions(paper);
-        setTestnetPositions(testnet);
-      })
-      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load positions'))
-      .finally(() => setLoading(false));
+    if (!silent) setLoading(true);
+    try {
+      const [paper, testnet] = await Promise.all([
+        api.listPaperPositions(token),
+        api.listTestnetPositions(token, 250),
+      ]);
+      setPaperPositions(paper);
+      setTestnetPositions(testnet);
+      setLastUpdatedAt(new Date());
+      setError(null);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load positions');
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }
 
   useEffect(() => {
-    loadPositions();
+    void loadPositions();
+    if (!token) return;
+    const timer = window.setInterval(() => void loadPositions(true), 5000);
+    return () => window.clearInterval(timer);
   }, [token]);
 
   useEffect(() => {
     window.localStorage.setItem(dashboardModeStorageKey, dashboardMode);
   }, [dashboardMode]);
+
+  useEffect(() => {
+    if (!token) return;
+    const active = (dashboardMode === 'PAPER' ? paperPositions : testnetPositions)
+      .filter((position) => position.status === 'OPEN');
+    const symbols = [...new Set(active.map((position) => position.symbol))];
+    if (symbols.length === 0) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const results = await Promise.allSettled(symbols.map(async (symbol) => {
+        const streamed = await api.getStreamedMarketPrice(token, symbol, 'testnet');
+        if (streamed?.price && Number.isFinite(streamed.price)) return [symbol, streamed.price] as const;
+        const candles = await api.getMarketCandles(token, symbol, '1m', 1, 'testnet');
+        const latest = candles.candles[candles.candles.length - 1];
+        return [symbol, latest?.close ?? 0] as const;
+      }));
+      if (cancelled) return;
+      setPrices((current) => {
+        const next = { ...current };
+        for (const result of results) {
+          if (result.status === 'fulfilled' && result.value[1] > 0) next[result.value[0]] = result.value[1];
+        }
+        return next;
+      });
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [token, dashboardMode, paperPositions, testnetPositions]);
 
   useEffect(() => {
     if (!token) {
@@ -248,17 +291,20 @@ export function DashboardPage() {
   const dashboardPositions = dashboardMode === 'PAPER' ? paperPositions : testnetPositions;
   const openPositions = dashboardPositions.filter((position) => position.status === 'OPEN');
   const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
+  const unrealizedPnl = openPositions.reduce((sum, position) => {
+    const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
+    return sum + (currentPrice * Number(position.totalQuantity) - Number(position.totalCostQuote));
+  }, 0);
   const realizedPnl = dashboardPositions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
+  const totalPnl = unrealizedPnl + realizedPnl;
   const runningBots = new Set(openPositions.filter((position) => position.strategy.status === 'RUNNING').map((position) => position.strategy.id)).size;
-  const independentPositions = dashboardPositions.flatMap((position) => position.subPositions ?? []);
-  const openIndependentPositions = independentPositions.filter((subPosition) => subPosition.status === 'OPEN');
   const initials = useMemo(() => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB', [user?.fullName]);
 
   const stats = [
     { label: 'Allocated capital', value: money(invested), change: `${openPositions.length} open ${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} position${openPositions.length === 1 ? '' : 's'}` },
-    { label: 'Realized P&L', value: money(realizedPnl), change: realizedPnl >= 0 ? `${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} gains` : `${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} loss` },
-    { label: 'Running bots', value: String(runningBots), change: `${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} strategies actively processed` },
-    { label: 'Independent legs', value: String(openIndependentPositions.length), change: `${independentPositions.length} total sub-position${independentPositions.length === 1 ? '' : 's'}` },
+    { label: 'Unrealized P&L', value: money(unrealizedPnl), change: 'Updates from current Testnet market prices' },
+    { label: 'Realized P&L', value: money(realizedPnl), change: 'Closed positions refresh automatically' },
+    { label: 'Total P&L', value: money(totalPnl), change: `${runningBots} running bot${runningBots === 1 ? '' : 's'}` },
   ];
 
   const secondaryPage = ['Backtests', 'Bots', 'Exchange accounts', 'Trade history', 'Positions', 'Strategies', 'Notifications'].includes(activeNav);
@@ -267,7 +313,7 @@ export function DashboardPage() {
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
       <NotificationToastStack notifications={toastNotifications} onDismiss={(id) => setToastNotifications((current) => current.filter((notification) => notification.id !== id))} />
-      {showCreateBot && token && <CreateBotWizard token={token} defaultMode={dashboardMode} onClose={() => setShowCreateBot(false)} onCreated={() => { setShowCreateBot(false); loadPositions(); setActiveNav('Bots'); }} />}
+      {showCreateBot && token && <CreateBotWizard token={token} defaultMode={dashboardMode} onClose={() => setShowCreateBot(false)} onCreated={() => { setShowCreateBot(false); void loadPositions(); setActiveNav('Bots'); }} />}
       {showEmergencyStopConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <section className="w-full max-w-lg rounded-2xl border border-rose-400/30 bg-[#0a1728] p-6 shadow-2xl shadow-rose-950/40">
@@ -299,7 +345,7 @@ export function DashboardPage() {
             </div>
           </header>
           {emergencyStopResult && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">Emergency stop completed at {new Date(emergencyStopResult.stoppedAt).toLocaleString()}. Stopped {emergencyStopResult.stoppedStrategies} strateg{emergencyStopResult.stoppedStrategies === 1 ? 'y' : 'ies'} and cancelled {emergencyStopResult.cancelledPendingActions} pending action{emergencyStopResult.cancelledPendingActions === 1 ? '' : 's'}.</div>}
-          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? <BotManagementPanel token={token} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} /> : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? <TestnetOrdersPanel token={token} /> : activeNav === 'Positions' && token ? <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={dashboardMode} /> : activeNav === 'Strategies' && token ? <TestnetActionTimelinePanel token={token} /> : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} defaultEnvironment="testnet" />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {dashboardMode === 'PAPER' ? 'Paper' : 'Binance Testnet'} operations. Live-money order execution remains disabled.</p></section></>}
+          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? <BotManagementPanel token={token} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} /> : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? <TestnetOrdersPanel token={token} /> : activeNav === 'Positions' && token ? <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={dashboardMode} /> : activeNav === 'Strategies' && token ? <TestnetActionTimelinePanel token={token} /> : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><p className="mt-3 text-xs text-slate-500">Dashboard last updated: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</p><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} defaultEnvironment="testnet" />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {dashboardMode === 'PAPER' ? 'Paper' : 'Binance Testnet'} operations. Live-money order execution remains disabled.</p></section></>}
         </section>
       </div>
     </main>
