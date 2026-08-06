@@ -32,4 +32,19 @@ describe('TestnetStrategyRiskService fixed budget', () => {
       'user-1', strategy, position, 'RECOVERY_DCA_ENTRY', 100,
     )).resolves.toBeUndefined();
   });
+
+  it('allows an order exactly at the fixed-budget boundary and rejects any amount above it', async () => {
+    const prisma = {
+      tradingSubPosition: { findMany: jest.fn().mockResolvedValue([{ costQuote: 200 }]) },
+    } as any;
+    const service = new TestnetStrategyRiskService(prisma);
+    const position = { id: 'position-1', totalCostQuote: 700 };
+
+    await expect(service.assertCanExecute(
+      'user-1', strategy, position, 'DCA_ENTRY', 100,
+    )).resolves.toBeUndefined();
+    await expect(service.assertCanExecute(
+      'user-1', strategy, position, 'DCA_ENTRY', 100.01,
+    )).rejects.toThrow('Order would exceed the configured fixed risk budget');
+  });
 });

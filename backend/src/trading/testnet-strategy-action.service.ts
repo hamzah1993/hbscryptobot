@@ -293,17 +293,16 @@ export class TestnetStrategyActionService {
       throw new BadRequestException('The linked Testnet order is still unresolved');
     }
 
+    const retryAt = new Date();
     const updated = await this.prisma.strategyAction.update({
       where: { id: action.id },
       data: {
-        status: 'PENDING',
-        retryable: false,
+        status: 'FAILED',
+        retryable: true,
         failureCategory: null,
         errorMessage: null,
-        nextRetryAt: null,
+        nextRetryAt: retryAt,
         completedAt: null,
-        lastAttemptedAt: new Date(),
-        attemptCount: { increment: 1 },
       },
     });
 
@@ -390,6 +389,21 @@ export class TestnetStrategyActionService {
     });
 
     return result.count === 1;
+  }
+
+  async getClaimedRetry(userId: string, actionId: string, strategyId: string, actionKey: string) {
+    const action = await this.prisma.strategyAction.findFirst({
+      where: {
+        id: actionId,
+        userId,
+        strategyId,
+        actionKey,
+        status: 'PENDING',
+        strategy: { environment: 'TESTNET', paperTrading: false },
+      },
+    });
+    if (!action) throw new BadRequestException('Claimed Testnet retry action was not found');
+    return action;
   }
 
   private calculateNextRetryAt(attemptCount: number) {

@@ -182,7 +182,7 @@ describe('BinanceHistoricalCandleImporterService', () => {
     expect(ingestion.upsertMany).not.toHaveBeenCalled();
   });
 
-  it.each([0, -1, 101, 1.5])('rejects an invalid maxPages value: %s', async (maxPages) => {
+  it.each([0, -1, 1001, 1.5])('rejects an invalid maxPages value: %s', async (maxPages) => {
     const { service, binance, ingestion } = createService();
 
     await expect(
@@ -190,5 +190,14 @@ describe('BinanceHistoricalCandleImporterService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(binance.getKlines).not.toHaveBeenCalled();
     expect(ingestion.upsertMany).not.toHaveBeenCalled();
+  });
+
+  it('allows enough pages to import at least six months of one-minute candles', async () => {
+    const { service, binance } = createService();
+    binance.getKlines.mockResolvedValue([]);
+
+    await expect(
+      service.import({ symbol: 'BTCUSDT', interval: '1m', maxPages: 260 }),
+    ).resolves.toEqual(expect.objectContaining({ pages: 0 }));
   });
 });

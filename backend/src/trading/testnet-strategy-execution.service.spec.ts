@@ -112,10 +112,12 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     };
     const testnetOrders = {
       getOrder: jest.fn().mockResolvedValue(resolvedExchangeOrder),
+      findOrderByClientOrderId: jest.fn().mockResolvedValue(null),
       placeMarketOrder: jest.fn().mockResolvedValue(resolvedExchangeOrder),
     } as any;
     const actions = {
       claim: jest.fn().mockResolvedValue({ claimed: true, action: { id: 'action-new' } }),
+      getClaimedRetry: jest.fn().mockResolvedValue({ id: 'action-1' }),
       markFailed: jest.fn(),
     } as any;
     const notifications = { publish: jest.fn() } as any;
@@ -127,9 +129,50 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       tradingPosition,
       tradingSubPosition,
       strategyAction,
+      testnetOrders,
+      actions,
       notifications,
     };
   }
+
+  it('recovers an exchange-accepted retry by stable client id without submitting a second order', async () => {
+    const { service, testnetOrders, actions } = createService(
+      {},
+      { status: 'FILLED', executedQty: '1', cummulativeQuoteQty: '100' },
+    );
+    testnetOrders.findOrderByClientOrderId.mockResolvedValue({
+      orderId: 'accepted-order',
+      clientOrderId: 'accepted-client-id',
+      status: 'FILLED',
+      executedQty: '1',
+      cummulativeQuoteQty: '100',
+    });
+
+    await service.executeMarketOrder(userId, {
+      strategyId: strategy.id,
+      side: 'BUY',
+      quantity: 1,
+      actionType: 'DCA_ENTRY',
+      actionKey: 'strategy:strategy-1:position:position-1:dca:2',
+      level: 2,
+      allowRunningStrategy: true,
+      retryActionId: 'action-1',
+    });
+
+    expect(actions.claim).not.toHaveBeenCalled();
+    expect(actions.getClaimedRetry).toHaveBeenCalledWith(
+      userId,
+      'action-1',
+      strategy.id,
+      'strategy:strategy-1:position:position-1:dca:2',
+    );
+    expect(testnetOrders.findOrderByClientOrderId).toHaveBeenCalledWith(
+      userId,
+      strategy.symbol,
+      expect.stringMatching(/^hbs-[a-f0-9]{32}$/),
+    );
+    expect(testnetOrders.placeMarketOrder).not.toHaveBeenCalled();
+  });
 
   it('advances the campaign once when an independent entry fills immediately', async () => {
     const { service, tradingPosition, tradingOrder, notifications } = createService(

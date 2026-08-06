@@ -138,6 +138,31 @@ export class BinanceTestnetOrderService {
     );
   }
 
+  async findOrderByClientOrderId(userId: string, symbol: string, clientOrderId: string) {
+    const normalized = symbol.trim().toUpperCase();
+    if (!normalized) throw new BadRequestException('Symbol is required');
+    if (!clientOrderId.trim()) throw new BadRequestException('Client order ID is required');
+
+    const credential = await this.credentials.getBinance(
+      userId,
+      ExchangeEnvironment.TESTNET,
+    );
+
+    try {
+      return await this.binance.getOrderByClientOrderId(
+        normalized,
+        clientOrderId.trim(),
+        credential.apiKey,
+        credential.apiSecret,
+        'testnet',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/order does not exist/i.test(message)) return null;
+      throw error;
+    }
+  }
+
   async cancelOrder(userId: string, symbol: string, exchangeOrderId: string) {
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');

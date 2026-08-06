@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationChannelsService, type NotificationChannelSettingsInput } from '../notifications/notification-channels.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
@@ -28,6 +29,7 @@ export class StrategyController {
     private readonly testnetEmergencyStop: TestnetEmergencyStopService,
     private readonly testnetHealth: TestnetRunnerHealthService,
     private readonly notifications: NotificationsService,
+    private readonly notificationChannels: NotificationChannelsService,
   ) {}
 
   @Get()
@@ -43,6 +45,25 @@ export class StrategyController {
   @Get('notifications/webhook-metrics')
   getNotificationWebhookMetrics() {
     return this.notifications.getWebhookMetrics();
+  }
+
+  @Get('notifications/channels')
+  getNotificationChannels(@Req() request: AuthenticatedRequest) {
+    return this.notificationChannels.getSettings(request.user.sub);
+  }
+
+  @Patch('notifications/channels')
+  updateNotificationChannels(@Req() request: AuthenticatedRequest, @Body() body: NotificationChannelSettingsInput) {
+    return this.notificationChannels.updateSettings(request.user.sub, body);
+  }
+
+  @Post('notifications/channels/:channel/test')
+  testNotificationChannel(@Req() request: AuthenticatedRequest, @Param('channel') channel: string) {
+    const normalized = channel.trim().toUpperCase();
+    if (normalized !== 'EMAIL' && normalized !== 'TELEGRAM') {
+      throw new BadRequestException('Unsupported notification channel');
+    }
+    return this.notificationChannels.sendTest(request.user.sub, normalized);
   }
 
   @Get('testnet-runner-health')

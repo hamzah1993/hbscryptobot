@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +16,7 @@ export type ExecuteTestnetStrategyInput = {
   triggerPrice?: number | null;
   plannedQuoteAmount?: number | null;
   allowRunningStrategy?: boolean;
+  retryActionId?: string;
 };
 
 type TakeProfitUpdateInput = {
@@ -236,40 +237,62 @@ export class TestnetStrategyExecutionService {
         throw new BadRequestException('Both actionKey and actionType are required for idempotent execution');
       }
 
-      const claim = await this.strategyActions.claim(userId, {
-        strategyId: strategy.id,
-        positionId: openPosition?.id ?? null,
-        type: actionType,
-        side: input.side,
-        quantity: input.quantity,
-        level: input.level ?? null,
-        triggerPrice: input.triggerPrice ?? null,
-        idempotencyKey: actionKey,
-      });
-
-      if (!claim.claimed) {
-        return {
+      if (input.retryActionId) {
+        const retryAction = await this.strategyActions.getClaimedRetry(
+          userId,
+          input.retryActionId,
+          strategy.id,
+          actionKey,
+        );
+        claimedActionId = retryAction.id;
+      } else {
+        const claim = await this.strategyActions.claim(userId, {
           strategyId: strategy.id,
-          symbol: strategy.symbol,
-          environment: strategy.environment,
-          paperTrading: strategy.paperTrading,
-          duplicate: true,
-          action: claim.action,
-        };
-      }
+          positionId: openPosition?.id ?? null,
+          type: actionType,
+          side: input.side,
+          quantity: input.quantity,
+          level: input.level ?? null,
+          triggerPrice: input.triggerPrice ?? null,
+          idempotencyKey: actionKey,
+        });
 
-      claimedActionId = claim.action.id;
+        if (!claim.claimed) {
+          return {
+            strategyId: strategy.id,
+            symbol: strategy.symbol,
+            environment: strategy.environment,
+            paperTrading: strategy.paperTrading,
+            duplicate: true,
+            action: claim.action,
+          };
+        }
+
+        claimedActionId = claim.action.id;
+      }
     }
 
-    const clientOrderId = `hbs-testnet-${randomUUID()}`;
+    const clientOrderId = actionKey
+      ? `hbs-${createHash('sha256').update(actionKey).digest('hex').slice(0, 32)}`
+      : `hbs-testnet-${randomUUID()}`;
 
     try {
-      const exchangeOrder = (await this.testnetOrders.placeMarketOrder(userId, {
-        symbol: strategy.symbol,
-        side: input.side,
-        quantity: input.quantity,
-        clientOrderId,
-      })) as BinanceOrderResponse;
+      let exchangeOrder: BinanceOrderResponse | null = null;
+      if (input.retryActionId) {
+        exchangeOrder = (await this.testnetOrders.findOrderByClientOrderId(
+          userId,
+          strategy.symbol,
+          clientOrderId,
+        )) as BinanceOrderResponse | null;
+      }
+      if (!exchangeOrder) {
+        exchangeOrder = (await this.testnetOrders.placeMarketOrder(userId, {
+          symbol: strategy.symbol,
+          side: input.side,
+          quantity: input.quantity,
+          clientOrderId,
+        })) as BinanceOrderResponse;
+      }
 
       const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
       const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);

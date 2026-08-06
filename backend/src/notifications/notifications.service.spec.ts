@@ -17,6 +17,8 @@ type PrismaMock = {
   };
 };
 
+const channels = { deliver: jest.fn().mockResolvedValue(undefined) };
+
 describe('NotificationsService webhook delivery', () => {
   const originalEnvironment = { ...process.env };
   const originalFetch = global.fetch;
@@ -32,6 +34,7 @@ describe('NotificationsService webhook delivery', () => {
     delete process.env.NOTIFICATION_RETENTION_DAYS;
     delete process.env.NOTIFICATION_WEBHOOK_METRICS_RETENTION_DAYS;
     global.fetch = jest.fn();
+    channels.deliver.mockClear();
     prisma = {
       operationalNotification: {
         create: jest.fn().mockResolvedValue({}),
@@ -53,7 +56,19 @@ describe('NotificationsService webhook delivery', () => {
     jest.restoreAllMocks();
   });
 
-  const createService = () => new NotificationsService(prisma as unknown as PrismaService);
+  const createService = () => new NotificationsService(prisma as unknown as PrismaService, channels as any);
+
+  it('dispatches user-scoped notifications to external channels without awaiting delivery', async () => {
+    const service = createService();
+    service.publish({ event: 'ENTRY_FILLED', message: 'Entry filled', severity: 'INFO', userId: 'user-1' });
+    await Promise.resolve();
+
+    expect(channels.deliver).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'ENTRY_FILLED',
+      severity: 'INFO',
+      userId: 'user-1',
+    }));
+  });
 
   it('does not call a webhook when no URL is configured', async () => {
     const service = createService();

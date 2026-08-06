@@ -1,10 +1,15 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { ExchangeName } from '@prisma/client';
+import type { BinanceKlineInterval } from '../exchange/binance/binance.service';
 import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
 import { BacktestExecutionService } from './backtest-execution.service';
 import { BacktestRunService } from './backtest-run.service';
+import { BinanceHistoricalCandleImporterService } from './binance-historical-candle-importer.service';
 import { HistoricalCandleQueryService } from './historical-candle-query.service';
 
 const BACKTEST_CANDLE_PAGE_SIZE = 5000;
+const BINANCE_IMPORT_PAGE_SIZE = 1000;
+const BINANCE_IMPORT_MAX_PAGES = 1000;
 
 @Injectable()
 export class BacktestCandleRunnerService {
@@ -13,6 +18,7 @@ export class BacktestCandleRunnerService {
     private readonly execution: BacktestExecutionService,
     private readonly candles: HistoricalCandleQueryService,
     private readonly simulator: BacktestDcaSimulatorService,
+    private readonly binanceImporter: BinanceHistoricalCandleImporterService,
   ) {}
 
   async run(userId: string, runId: string) {
@@ -20,26 +26,18 @@ export class BacktestCandleRunnerService {
     await this.execution.start(userId, run.id);
 
     try {
-      const candles = [];
-      let startTime = run.startTime;
+      let candles = await this.loadCandles(run);
 
-      while (startTime <= run.endTime) {
-        const page = await this.candles.list({
-          exchange: run.exchange,
+      if (candles.length === 0 && run.exchange === ExchangeName.BINANCE) {
+        await this.binanceImporter.import({
           symbol: run.symbol,
-          interval: run.interval,
-          startTime,
-          endTime: run.endTime,
-          limit: BACKTEST_CANDLE_PAGE_SIZE,
+          interval: run.interval as BinanceKlineInterval,
+          limit: BINANCE_IMPORT_PAGE_SIZE,
+          startTime: run.startTime.getTime(),
+          endTime: run.endTime.getTime(),
+          maxPages: BINANCE_IMPORT_MAX_PAGES,
         });
-
-        if (page.length === 0) break;
-        candles.push(...page);
-
-        if (page.length < BACKTEST_CANDLE_PAGE_SIZE) break;
-
-        const lastOpenTime = page[page.length - 1].openTime;
-        startTime = new Date(lastOpenTime.getTime() + 1);
+        candles = await this.loadCandles(run);
       }
 
       if (candles.length === 0) {
@@ -71,5 +69,37 @@ export class BacktestCandleRunnerService {
       await this.execution.fail(run.id, error);
       throw error;
     }
+  }
+
+  private async loadCandles(run: {
+    exchange: ExchangeName;
+    symbol: string;
+    interval: string;
+    startTime: Date;
+    endTime: Date;
+  }) {
+    const candles = [];
+    let startTime = run.startTime;
+
+    while (startTime <= run.endTime) {
+      const page = await this.candles.list({
+        exchange: run.exchange,
+        symbol: run.symbol,
+        interval: run.interval,
+        startTime,
+        endTime: run.endTime,
+        limit: BACKTEST_CANDLE_PAGE_SIZE,
+      });
+
+      if (page.length === 0) break;
+      candles.push(...page);
+
+      if (page.length < BACKTEST_CANDLE_PAGE_SIZE) break;
+
+      const lastOpenTime = page[page.length - 1].openTime;
+      startTime = new Date(lastOpenTime.getTime() + 1);
+    }
+
+    return candles;
   }
 }

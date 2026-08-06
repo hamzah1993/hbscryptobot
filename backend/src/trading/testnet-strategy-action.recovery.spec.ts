@@ -36,7 +36,7 @@ describe('TestnetStrategyActionService manual recovery', () => {
     );
   });
 
-  it('manually retries a failed action and clears failure metadata', async () => {
+  it('queues a manual retry for immediate scheduler processing', async () => {
     const { service, prisma, notifications } = createService();
     prisma.strategyAction.findFirst.mockResolvedValue({
       id: 'action-1',
@@ -55,20 +55,18 @@ describe('TestnetStrategyActionService manual recovery', () => {
     expect(prisma.strategyAction.update).toHaveBeenCalledWith({
       where: { id: 'action-1' },
       data: expect.objectContaining({
-        status: 'PENDING',
-        retryable: false,
+        status: 'FAILED',
+        retryable: true,
         failureCategory: null,
         errorMessage: null,
-        nextRetryAt: null,
+        nextRetryAt: expect.any(Date),
         completedAt: null,
-        lastAttemptedAt: expect.any(Date),
-        attemptCount: { increment: 1 },
       }),
     });
     expect(notifications.publish).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'TESTNET_STRATEGY_ACTION_MANUAL_RETRY', userId: 'user-1' }),
     );
-    expect(result).toMatchObject({ id: 'action-1', status: 'PENDING' });
+    expect(result).toMatchObject({ id: 'action-1' });
   });
 
   it('blocks manual retry while the linked order is unresolved', async () => {
