@@ -4,6 +4,7 @@ import {
   type CreateStrategyPayload,
   type StrategyStatus,
   type TestnetPosition,
+  type TestnetRunnerHealth,
   type TradingPosition,
   type TradingStrategy,
 } from '../lib/api';
@@ -40,6 +41,7 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
   const [strategies, setStrategies] = useState<TradingStrategy[]>([]);
   const [paperPositions, setPaperPositions] = useState<TradingPosition[]>([]);
   const [testnetPositions, setTestnetPositions] = useState<TestnetPosition[]>([]);
+  const [runnerHealth, setRunnerHealth] = useState<TestnetRunnerHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -50,14 +52,16 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
     setLoading(true);
     setError(null);
     try {
-      const [strategyResult, paperResult, testnetResult] = await Promise.all([
+      const [strategyResult, paperResult, testnetResult, healthResult] = await Promise.all([
         api.listStrategies(token),
         api.listPaperPositions(token),
         api.listTestnetPositions(token, 250),
+        api.getTestnetRunnerHealth(token),
       ]);
       setStrategies(strategyResult);
       setPaperPositions(paperResult);
       setTestnetPositions(testnetResult);
+      setRunnerHealth(healthResult);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Unable to load bots');
     } finally {
@@ -67,6 +71,10 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
 
   useEffect(() => {
     void load();
+    const timer = window.setInterval(() => {
+      void api.getTestnetRunnerHealth(token).then(setRunnerHealth).catch(() => undefined);
+    }, 10_000);
+    return () => window.clearInterval(timer);
   }, [token]);
 
   const positionsByStrategy = useMemo(() => {
@@ -151,6 +159,15 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
           </div>
           <button onClick={() => void load()} disabled={loading} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh bots'}</button>
         </div>
+        {runnerHealth && (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <HealthMetric label="Strategy runner" value={runnerHealth.scheduler} />
+            <HealthMetric label="Order sync" value={runnerHealth.orderSync} />
+            <HealthMetric label="Retry scheduler" value={runnerHealth.retryScheduler} />
+            <HealthMetric label="Redis lock" value={runnerHealth.redis} />
+          </div>
+        )}
+        {runnerHealth?.lastError && <p className="mt-3 text-xs text-amber-200">Last runner error: {runnerHealth.lastError}</p>}
       </div>
 
       {error && <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
@@ -165,6 +182,7 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
             const paper = positionsByStrategy.paper.get(strategy.id) ?? [];
             const testnet = positionsByStrategy.testnet.get(strategy.id) ?? [];
             const linkedPositionCount = paper.length + testnet.length;
+            const pendingOrders = testnet.flatMap((position) => position.orders).filter((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED').length;
             const status = strategy.status ?? 'STOPPED';
             const isEditing = editingId === strategy.id && draft;
             const disabled = busyId === strategy.id;
@@ -177,6 +195,7 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
                       <h4 className="text-lg font-semibold">{strategy.name}</h4>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status === 'RUNNING' ? 'bg-emerald-400/15 text-emerald-300' : status === 'PAUSED' ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-300'}`}>{status}</span>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${strategy.paperTrading ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{strategy.paperTrading ? 'Paper' : 'Binance Testnet'}</span>
+                      {pendingOrders > 0 && <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-300">{pendingOrders} pending order{pendingOrders === 1 ? '' : 's'}</span>}
                     </div>
                     <p className="mt-2 text-sm text-slate-400">{strategy.symbol}</p>
                     <p className="mt-1 text-xs text-slate-600">{linkedPositionCount > 0 ? `${linkedPositionCount} linked position${linkedPositionCount === 1 ? '' : 's'}` : 'No position opened yet'}</p>
@@ -228,6 +247,12 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
       )}
     </section>
   );
+}
+
+function HealthMetric({ label, value }: { label: string; value: string }) {
+  const healthy = value === 'HEALTHY' || value === 'AVAILABLE';
+  const warning = value === 'DELAYED' || value === 'IDLE' || value === 'UNKNOWN';
+  return <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">{label}</p><p className={`mt-2 font-semibold ${healthy ? 'text-emerald-300' : warning ? 'text-amber-300' : 'text-rose-300'}`}>{value}</p></div>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
