@@ -141,6 +141,38 @@ export class NotificationChannelsService {
     return { delivered: true, channel };
   }
 
+  async sendSecurityEmail(address: string, subject: string, message: string): Promise<boolean> {
+    if (!this.emailProviderConfigured()) {
+      this.logger.warn('Security email skipped: email provider is not configured');
+      return false;
+    }
+
+    try {
+      const port = this.smtpPort();
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST!.trim(),
+        port,
+        secure: this.smtpSecure(port),
+        auth: process.env.SMTP_USER?.trim()
+          ? { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASSWORD ?? '' }
+          : undefined,
+        connectionTimeout: 5_000,
+        greetingTimeout: 5_000,
+        socketTimeout: 8_000,
+      });
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM!.trim(),
+        to: address,
+        subject,
+        text: message,
+      });
+      return true;
+    } catch (error: unknown) {
+      this.logDeliveryFailure('Security email', 'security-email', error);
+      return false;
+    }
+  }
+
   private async sendTelegram(chatId: string, notification: StoredOperationalNotification, propagate = false): Promise<void> {
     const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
     if (!token) {

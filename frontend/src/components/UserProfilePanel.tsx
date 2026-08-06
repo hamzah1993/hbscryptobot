@@ -1,4 +1,6 @@
-import type { AuthUser } from '../lib/api';
+import { FormEvent, useState } from 'react';
+import { api, type AuthUser } from '../lib/api';
+import { useAuth } from '../auth/AuthContext';
 
 type Props = {
   user: AuthUser;
@@ -16,9 +18,35 @@ function initials(fullName: string) {
 }
 
 export function UserProfilePanel({ user, onLogout }: Props) {
+  const { token } = useAuth();
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
   const memberSince = user.createdAt
     ? new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(new Date(user.createdAt))
     : null;
+
+  async function changePassword(event: FormEvent) {
+    event.preventDefault();
+    setPasswordError('');
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New passwords do not match.');
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+      await api.changePassword(token, currentPassword, newPassword);
+      onLogout();
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : 'Could not change password');
+    } finally {
+      setChangingPassword(false);
+    }
+  }
 
   return (
     <section className="mx-auto mt-6 max-w-3xl">
@@ -41,6 +69,30 @@ export function UserProfilePanel({ user, onLogout }: Props) {
           <ProfileField label="Email address" value={user.email} />
           <ProfileField label="Account role" value={user.role} />
           <ProfileField label="Member since" value={memberSince ?? 'Account active'} />
+        </div>
+
+        <div className="border-t border-white/10 p-5 sm:p-7">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-200">Password &amp; security</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Changing your password signs out all existing sessions.</p>
+            </div>
+            <button type="button" onClick={() => setShowPasswordForm((value) => !value)} className="rounded-xl border border-cyan-400/25 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200">
+              {showPasswordForm ? 'Cancel' : 'Change password'}
+            </button>
+          </div>
+          {showPasswordForm && (
+            <form onSubmit={changePassword} className="mt-5 grid gap-3 sm:grid-cols-2">
+              <input type="password" minLength={8} required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Current password" className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm outline-none focus:border-cyan-400/50" />
+              <div />
+              <input type="password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="New password" className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm outline-none focus:border-cyan-400/50" />
+              <input type="password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Confirm new password" className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm outline-none focus:border-cyan-400/50" />
+              {passwordError && <p className="rounded-xl border border-rose-400/25 bg-rose-400/10 px-4 py-3 text-sm text-rose-200 sm:col-span-2">{passwordError}</p>}
+              <button disabled={changingPassword} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-60">
+                {changingPassword ? 'Changing…' : 'Update password'}
+              </button>
+            </form>
+          )}
         </div>
 
         <div className="flex flex-col gap-3 border-t border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
