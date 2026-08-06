@@ -38,7 +38,13 @@ describe('PaperTradingService recovery mode', () => {
       },
     };
     const prisma = {
-      tradingPosition: { findFirst: jest.fn().mockResolvedValue(position) },
+      tradingPosition: {
+        findFirst: jest.fn().mockResolvedValue(position),
+        update: jest.fn(async ({ data }: any) => ({ ...position, ...data })),
+      },
+      tradingSubPosition: {
+        update: jest.fn(async ({ data }: any) => data),
+      },
       $transaction: jest.fn(async (callback: any) => callback(tx)),
     } as any;
     const service = new PaperTradingService(
@@ -132,5 +138,29 @@ describe('PaperTradingService recovery mode', () => {
         realizedPnlQuote: 10,
       }),
     }));
+  });
+
+  it('updates only the selected open paper position take profit', async () => {
+    const position = {
+      id: 'position-1',
+      userId: 'user-1',
+      status: 'OPEN',
+      recoveryMode: false,
+      takeProfitPrice: 101.5,
+      strategy,
+      orders: [],
+      subPositions: [],
+    };
+    const { service, prisma } = createHarness(position);
+
+    await service.updateTakeProfit('user-1', position.id, {
+      target: 'PARENT',
+      takeProfitPrice: 105,
+    });
+
+    expect(prisma.tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: position.id },
+      data: { takeProfitPrice: 105, takeProfitManual: true },
+    });
   });
 });

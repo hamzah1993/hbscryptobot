@@ -203,8 +203,10 @@ model TradingPosition {
   recoveryDcaCount  Int                  @default(0)
   recoveryAnchorPrice Decimal?            @db.Decimal(28, 12)
   recoveryTakeProfitPrice Decimal?        @db.Decimal(28, 12)
+  recoveryTakeProfitManual Boolean        @default(false)
   nextDcaPrice      Decimal?             @db.Decimal(28, 12)
   takeProfitPrice   Decimal?             @db.Decimal(28, 12)
+  takeProfitManual  Boolean              @default(false)
   orders            TradingOrder[]
   subPositions      TradingSubPosition[]
   actions           StrategyAction[]
@@ -227,6 +229,7 @@ model TradingSubPosition {
   costQuote        Decimal           @db.Decimal(28, 8)
   entryPrice       Decimal           @db.Decimal(28, 12)
   takeProfitPrice  Decimal           @db.Decimal(28, 12)
+  takeProfitManual Boolean           @default(false)
   realizedPnlQuote Decimal           @default(0) @db.Decimal(28, 8)
   openedAt         DateTime          @default(now())
   closedAt         DateTime?

@@ -84,6 +84,15 @@ export class StrategyController {
     return this.testnetExecution.closePosition(request.user.sub, positionId, body.subPositionId);
   }
 
+  @Patch('testnet-positions/:positionId/take-profit')
+  updateTestnetTakeProfit(
+    @Req() request: AuthenticatedRequest,
+    @Param('positionId') positionId: string,
+    @Body() body: { target: 'PARENT' | 'RECOVERY' | 'INDEPENDENT'; takeProfitPrice: number; subPositionId?: string },
+  ) {
+    return this.testnetExecution.updateTakeProfit(request.user.sub, positionId, body);
+  }
+
   @Post('testnet-actions/:actionId/retry')
   retryTestnetAction(@Req() request: AuthenticatedRequest, @Param('actionId') actionId: string) {
     return this.testnetActions.manualRetry(request.user.sub, actionId);

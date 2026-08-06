@@ -42,8 +42,10 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       recoveryMode: false,
       recoveryDcaCount: 0,
       recoveryAnchorPrice: 80,
+      recoveryTakeProfitManual: false,
       nextDcaPrice: 95,
       takeProfitPrice: 110,
+      takeProfitManual: false,
       strategy,
       ...positionOverrides,
     };
@@ -75,6 +77,8 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     };
 
     const tradingPosition = {
+      findFirst: jest.fn().mockResolvedValue({ ...position, subPositions: [], orders: [] }),
+      findUnique: jest.fn().mockResolvedValue({ ...position, subPositions: [], orders: [] }),
       update: jest.fn(async ({ data }) => ({ ...position, ...data })),
     };
     const tradingSubPosition = {
@@ -94,7 +98,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     const tx = { tradingPosition, tradingSubPosition, tradingOrder, strategyAction };
     const prisma = {
       tradingStrategy: { findFirst: jest.fn().mockResolvedValue(strategy) },
-      tradingPosition: { findFirst: jest.fn().mockResolvedValue(position) },
+      tradingPosition,
       tradingSubPosition,
       tradingOrder,
       $transaction: jest.fn(async (callback: (value: typeof tx) => unknown) => callback(tx)),
@@ -280,13 +284,15 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       status: 'PARTIALLY_FILLED',
       executedQty: '0.5',
       cummulativeQuoteQty: '50',
+    }, {
+      dcaCount: 3,
     });
 
     await service.syncOrder(userId, 'order-1');
 
     expect(tradingPosition.update).toHaveBeenCalledWith({
       where: { id: 'position-1' },
-      data: { dcaCount: 1, nextDcaPrice: 95 },
+      data: { dcaCount: 4, nextDcaPrice: 95 },
     });
     expect(tradingSubPosition.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -348,6 +354,56 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         entryPrice: 90,
         takeProfitPrice: 99.00000000000001,
       }),
+    });
+  });
+
+  it('preserves a manually overridden independent TP across later partial fills', async () => {
+    const existingSubPosition = {
+      id: 'sub-1',
+      positionId: 'position-1',
+      level: 5,
+      status: 'OPEN',
+      quantity: 1,
+      costQuote: 100,
+      entryPrice: 100,
+      takeProfitPrice: 115,
+      takeProfitManual: true,
+      realizedPnlQuote: 0,
+    };
+    const { service, tradingSubPosition } = createService({
+      independent: true,
+      level: 5,
+      subPositionId: 'sub-1',
+      subPosition: existingSubPosition,
+      filledQuantity: 1,
+      quoteAmount: 100,
+      accountedFilledQuantity: 1,
+      accountedQuoteAmount: 100,
+    }, {
+      status: 'FILLED',
+      executedQty: '2',
+      cummulativeQuoteQty: '180',
+    });
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingSubPosition.update).toHaveBeenCalledWith({
+      where: { id: 'sub-1' },
+      data: expect.objectContaining({ takeProfitPrice: 115 }),
+    });
+  });
+
+  it('updates Testnet TP only while the strategy is paused and has no pending order', async () => {
+    const { service, tradingPosition } = createService();
+
+    await service.updateTakeProfit(userId, 'position-1', {
+      target: 'PARENT',
+      takeProfitPrice: 120,
+    });
+
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: { takeProfitPrice: 120, takeProfitManual: true },
     });
   });
 

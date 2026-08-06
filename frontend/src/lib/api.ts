@@ -31,6 +31,7 @@ export type TradingSubPosition = {
 };
 
 export type StrategyStatus = 'STOPPED' | 'RUNNING' | 'PAUSED';
+export type TakeProfitTarget = 'PARENT' | 'RECOVERY' | 'INDEPENDENT';
 export type BinanceStreamEnvironment = 'testnet' | 'live';
 export type ExchangeEnvironment = 'TESTNET' | 'LIVE';
 export type BinanceKlineInterval =
@@ -501,6 +502,10 @@ export const api = {
       headers: authHeaders(token),
       body: JSON.stringify(subPositionId ? { subPositionId } : {}),
     }),
+  updateTestnetPositionTakeProfit: (token: string, positionId: string, payload: { target: TakeProfitTarget; takeProfitPrice: number; subPositionId?: string }) =>
+    request<TestnetPosition>(`/strategies/testnet-positions/${encodeURIComponent(positionId)}/take-profit`, {
+      method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
+    }),
   getTestnetRunnerHealth: (token: string) =>
     request<TestnetRunnerHealth>('/strategies/testnet-runner-health', { headers: authHeaders(token) }),
   listBacktests: (token: string, limit = 100) =>
@@ -560,4 +565,8 @@ export const api = {
     request<{ action: 'DCA' | 'TAKE_PROFIT' | 'HOLD'; position: TradingPosition }>(`/paper-trading/positions/${positionId}/tick`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ marketPrice }) }),
   closePaperPosition: (token: string, positionId: string, marketPrice: number) =>
     request<TradingPosition>(`/paper-trading/positions/${positionId}/close`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ marketPrice }) }),
+  updatePaperPositionTakeProfit: (token: string, positionId: string, payload: { target: TakeProfitTarget; takeProfitPrice: number; subPositionId?: string }) =>
+    request<TradingPosition>(`/paper-trading/positions/${encodeURIComponent(positionId)}/take-profit`, {
+      method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
+    }),
 };

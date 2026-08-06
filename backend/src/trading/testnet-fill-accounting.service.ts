@@ -84,7 +84,9 @@ export class TestnetFillAccountingService {
       const quantity = previousQuantity + deltaQuantity;
       const costQuote = previousCost + deltaQuote;
       const entryPrice = quantity > 0 ? costQuote / quantity : averageFillPrice;
-      const takeProfitPrice = this.calculateIndependentTakeProfit(strategy, entryPrice);
+      const takeProfitPrice = existing?.takeProfitManual
+        ? Number(existing.takeProfitPrice)
+        : this.calculateIndependentTakeProfit(strategy, entryPrice);
       const saved = existing
         ? await tx.tradingSubPosition.update({
             where: { id: existing.id },
@@ -124,7 +126,9 @@ export class TestnetFillAccountingService {
           entryPrice: remainingAverage,
           takeProfitPrice: closed
             ? null
-            : this.calculateIndependentTakeProfit(strategy, remainingAverage),
+            : subPosition.takeProfitManual
+              ? Number(subPosition.takeProfitPrice)
+              : this.calculateIndependentTakeProfit(strategy, remainingAverage),
           realizedPnlQuote: Number(subPosition.realizedPnlQuote) + proceeds - allocatedCost,
           closedAt: closed ? new Date() : null,
         },
@@ -148,7 +152,7 @@ export class TestnetFillAccountingService {
           averageEntryPrice,
           dcaCount,
           nextDcaPrice: triggers.nextDcaPrice,
-          takeProfitPrice: triggers.takeProfitPrice,
+          takeProfitPrice: position.takeProfitManual ? position.takeProfitPrice : triggers.takeProfitPrice,
         },
       });
       return { position: saved, subPosition };
@@ -176,7 +180,11 @@ export class TestnetFillAccountingService {
         realizedPnlQuote: Number(position.realizedPnlQuote) + proceeds - allocatedCost,
         closedAt: closed ? new Date() : null,
         nextDcaPrice: triggers.nextDcaPrice,
-        takeProfitPrice: triggers.takeProfitPrice,
+        takeProfitPrice: closed
+          ? null
+          : position.takeProfitManual
+            ? position.takeProfitPrice
+            : triggers.takeProfitPrice,
       },
     });
     return { position: saved, subPosition };

@@ -14,6 +14,12 @@ interface AddPaperDcaInput {
   marketPrice: number;
 }
 
+type TakeProfitUpdateInput = {
+  target: 'PARENT' | 'RECOVERY' | 'INDEPENDENT';
+  takeProfitPrice: number;
+  subPositionId?: string;
+};
+
 type PaperTickAction = 'DCA' | 'RECOVERY_DCA' | 'TAKE_PROFIT' | 'RECOVERY_TAKE_PROFIT' | 'HOLD';
 
 type PaperTickResult = {
@@ -111,6 +117,48 @@ export class PaperTradingService {
 
     const position = await this.getOpenPosition(userId, positionId);
     return this.executeClose(position, marketPrice);
+  }
+
+  async updateTakeProfit(userId: string, positionId: string, input: TakeProfitUpdateInput) {
+    if (!['PARENT', 'RECOVERY', 'INDEPENDENT'].includes(input.target)) {
+      throw new BadRequestException('Take-profit target is invalid');
+    }
+    if (!Number.isFinite(Number(input.takeProfitPrice)) || Number(input.takeProfitPrice) <= 0) {
+      throw new BadRequestException('Take-profit price must be greater than zero');
+    }
+
+    const position = await this.getOpenPosition(userId, positionId);
+    const takeProfitPrice = Number(input.takeProfitPrice);
+
+    if (input.target === 'INDEPENDENT') {
+      if (position.recoveryMode) {
+        throw new BadRequestException('Recovery mode uses the global take-profit price');
+      }
+      const subPosition = position.subPositions.find((item) => item.id === input.subPositionId);
+      if (!subPosition || subPosition.status !== 'OPEN') {
+        throw new BadRequestException('Open independent sub-position was not found');
+      }
+      await this.prisma.tradingSubPosition.update({
+        where: { id: subPosition.id },
+        data: { takeProfitPrice, takeProfitManual: true },
+      });
+    } else if (input.target === 'RECOVERY') {
+      if (!position.recoveryMode) throw new BadRequestException('Position is not in recovery mode');
+      await this.prisma.tradingPosition.update({
+        where: { id: position.id },
+        data: { recoveryTakeProfitPrice: takeProfitPrice, recoveryTakeProfitManual: true },
+      });
+    } else {
+      if (position.recoveryMode) {
+        throw new BadRequestException('Recovery mode uses the global take-profit price');
+      }
+      await this.prisma.tradingPosition.update({
+        where: { id: position.id },
+        data: { takeProfitPrice, takeProfitManual: true },
+      });
+    }
+
+    return this.getOpenPosition(userId, positionId);
   }
 
   async processPrice(
@@ -281,7 +329,7 @@ export class PaperTradingService {
           averageEntryPrice,
           dcaCount: position.dcaCount + 1,
           nextDcaPrice,
-          takeProfitPrice: allocation.independent
+          takeProfitPrice: allocation.independent || position.takeProfitManual
             ? Number(position.takeProfitPrice ?? parentTakeProfitPrice)
             : parentTakeProfitPrice,
         },
@@ -375,7 +423,9 @@ export class PaperTradingService {
       { totalQuantity, totalCostQuote },
       position.subPositions,
     );
-    const recoveryTakeProfitPrice = this.recoveryStrategy.globalTakeProfit(position.strategy, basketAfter);
+    const recoveryTakeProfitPrice = position.recoveryTakeProfitManual
+      ? Number(position.recoveryTakeProfitPrice)
+      : this.recoveryStrategy.globalTakeProfit(position.strategy, basketAfter);
     const nextLeg = this.recoveryStrategy.nextLeg(position.strategy, {
       recoveryDcaCount: Number(position.recoveryDcaCount) + 1,
       anchorPrice,
