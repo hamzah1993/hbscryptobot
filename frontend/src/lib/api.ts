@@ -438,6 +438,10 @@ export const api = {
   listStrategies: (token: string) => request<TradingStrategy[]>('/strategies', { headers: authHeaders(token) }),
   createStrategy: (token: string, payload: CreateStrategyPayload) =>
     request<TradingStrategy>('/strategies', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  updateStrategy: (token: string, strategyId: string, payload: Partial<CreateStrategyPayload>) =>
+    request<TradingStrategy>(`/strategies/${strategyId}`, { method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  deleteStrategy: (token: string, strategyId: string) =>
+    request<{ deleted: boolean }>(`/strategies/${strategyId}`, { method: 'DELETE', headers: authHeaders(token) }),
   setStrategyStatus: (token: string, strategyId: string, status: StrategyStatus) =>
     request<TradingStrategy>(`/strategies/${strategyId}/status`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ status }) }),
   listBacktests: (token: string, limit = 100) =>
