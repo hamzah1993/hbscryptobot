@@ -325,8 +325,10 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
                     <PreviewMetric label="Estimated spend" value={preview.estimatedSpend} />
                     <PreviewMetric label={`Remaining ${preview.quoteAsset}`} value={preview.remainingQuote} />
                     <PreviewMetric label="Minimum notional" value={preview.minNotional} />
+                    <PreviewMetric label="Quantity filter" value={preview.quantityFilterType} raw />
                     <PreviewMetric label="Step size" value={preview.stepSize} raw />
                     <PreviewMetric label="Minimum quantity" value={preview.minQuantity} />
+                    <PreviewMetric label="Maximum quantity" value={preview.maxQuantity > 0 ? preview.maxQuantity : 'No separate maximum'} raw />
                   </div>
                 )}
 
