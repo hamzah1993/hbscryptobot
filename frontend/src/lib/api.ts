@@ -414,6 +414,11 @@ export type MarketStreamStatus = {
   latestPrice: StreamedMarketPrice | null;
 };
 
+export type StreamedMarketPricesResponse = {
+  environment: BinanceStreamEnvironment;
+  prices: Array<{ symbol: string; price: StreamedMarketPrice | null }>;
+};
+
 type AuthResponse = {
   user: AuthUser;
   accessToken: string;
@@ -562,6 +567,8 @@ export const api = {
     request<MarketStreamStatus>(`/market-data/stream/status?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, { headers: authHeaders(token) }),
   getStreamedMarketPrice: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>
     request<StreamedMarketPrice | null>(`/market-data/stream/price?symbol=${encodeURIComponent(symbol)}&environment=${environment}`, { headers: authHeaders(token) }),
+  getStreamedMarketPrices: (token: string, symbols: string[], environment: BinanceStreamEnvironment) =>
+    request<StreamedMarketPricesResponse>(`/market-data/stream/prices?symbols=${encodeURIComponent(symbols.join(','))}&environment=${environment}`, { headers: authHeaders(token) }),
   openPaperPosition: (token: string, strategyId: string, marketPrice: number) =>
     request<TradingPosition>('/paper-trading/positions/open', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ strategyId, marketPrice }) }),
   listPaperPositions: (token: string) => request<TradingPosition[]>('/paper-trading/positions', { headers: authHeaders(token) }),

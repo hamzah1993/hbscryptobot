@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type StrategyStatus, type TakeProfitTarget, type TestnetPosition, type TradingPosition } from '../lib/api';
+import { subscribeSharedMarketPrice } from '../lib/sharedMarketPriceFeed';
 
 type Props = {
   token: string;
@@ -153,28 +154,18 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     const symbols = [...new Set(allPositions.filter((position) => position.status === 'OPEN').map((position) => position.symbol))];
     if (symbols.length === 0) return;
     let cancelled = false;
-    const refresh = async () => {
-      const results = await Promise.allSettled(symbols.map(async (currentSymbol) => {
-        const streamed = await api.getStreamedMarketPrice(token, currentSymbol, 'testnet');
-        if (streamed?.price && Number.isFinite(streamed.price)) return [currentSymbol, streamed.price] as const;
-        const candles = await api.getMarketCandles(token, currentSymbol, '1m', 1, 'testnet');
-        const latestCandle = candles.candles[candles.candles.length - 1];
-        return [currentSymbol, latestCandle?.close ?? 0] as const;
-      }));
-      if (cancelled) return;
-      setPrices((current) => {
-        const next = { ...current };
-        for (const result of results) {
-          if (result.status === 'fulfilled' && result.value[1] > 0) next[result.value[0]] = result.value[1];
-        }
-        return next;
-      });
-    };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
+    const unsubscribes = symbols.map((currentSymbol) => subscribeSharedMarketPrice(
+      token,
+      currentSymbol,
+      'testnet',
+      (streamed) => {
+        if (cancelled || !streamed?.price || !Number.isFinite(streamed.price)) return;
+        setPrices((current) => ({ ...current, [currentSymbol]: streamed.price }));
+      },
+    ));
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
   }, [token, allPositions]);
 

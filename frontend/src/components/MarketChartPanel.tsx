@@ -13,6 +13,7 @@ import {
   type TradingViewOrderMarker,
   type TradingViewPriceLevel,
 } from './TradingViewChart';
+import { subscribeSharedMarketPrice } from '../lib/sharedMarketPriceFeed';
 
 type Props = {
   token: string;
@@ -122,68 +123,49 @@ export function MarketChartPanel({ token, environment, showTestnetOverlays = fal
     const bucketSize = intervalSeconds[interval];
     if (!symbol || bucketSize === null) return;
     let cancelled = false;
-    let pollTimer: number | undefined;
     let lastSuccessfulPoll = 0;
-
-    const start = async () => {
-      try {
-        await api.subscribeMarketStream(token, symbol, environment);
-        if (!cancelled) { setStreaming(true); setStreamStale(false); }
-      } catch {
-        if (!cancelled) { setStreaming(false); setStreamStale(true); }
+    const unsubscribe = subscribeSharedMarketPrice(token, symbol, environment, (streamed) => {
+      if (cancelled) return;
+      if (!streamed || !Number.isFinite(streamed.price)) {
+        if (lastSuccessfulPoll > 0 && Date.now() - lastSuccessfulPoll > 10_000) setStreamStale(true);
+        return;
       }
 
-      const poll = async () => {
-        try {
-          const streamed = await api.getStreamedMarketPrice(token, symbol, environment);
-          if (!cancelled && streamed && Number.isFinite(streamed.price)) {
-            lastSuccessfulPoll = Date.now();
-            setStreaming(true);
-            setStreamStale(false);
-            setLastUpdatedAt(new Date());
-            const candleTime = Math.floor(streamed.eventTime / 1000 / bucketSize) * bucketSize;
-            setCandles((current) => {
-              if (current.length === 0) return current;
-              const last = current[current.length - 1];
-              if (candleTime < last.time) return current;
-              if (candleTime === last.time) {
-                return [...current.slice(0, -1), {
-                  ...last,
-                  high: Math.max(last.high, streamed.price),
-                  low: Math.min(last.low, streamed.price),
-                  close: streamed.price,
-                  closeTime: (candleTime + bucketSize) * 1000 - 1,
-                }];
-              }
-              return [...current.slice(-299), {
-                time: candleTime,
-                open: last.close,
-                high: streamed.price,
-                low: streamed.price,
-                close: streamed.price,
-                volume: 0,
-                closeTime: (candleTime + bucketSize) * 1000 - 1,
-              }];
-            });
-          } else if (!cancelled && lastSuccessfulPoll > 0 && Date.now() - lastSuccessfulPoll > 10_000) {
-            setStreamStale(true);
-          }
-        } catch {
-          if (!cancelled) { setStreaming(false); setStreamStale(true); }
-        } finally {
-          if (!cancelled) pollTimer = window.setTimeout(poll, 1000);
+      lastSuccessfulPoll = Date.now();
+      setStreaming(true);
+      setStreamStale(false);
+      setLastUpdatedAt(new Date());
+      const candleTime = Math.floor(streamed.eventTime / 1000 / bucketSize) * bucketSize;
+      setCandles((current) => {
+        if (current.length === 0) return current;
+        const last = current[current.length - 1];
+        if (candleTime < last.time) return current;
+        if (candleTime === last.time) {
+          return [...current.slice(0, -1), {
+            ...last,
+            high: Math.max(last.high, streamed.price),
+            low: Math.min(last.low, streamed.price),
+            close: streamed.price,
+            closeTime: (candleTime + bucketSize) * 1000 - 1,
+          }];
         }
-      };
-      void poll();
-    };
+        return [...current.slice(-299), {
+          time: candleTime,
+          open: last.close,
+          high: streamed.price,
+          low: streamed.price,
+          close: streamed.price,
+          volume: 0,
+          closeTime: (candleTime + bucketSize) * 1000 - 1,
+        }];
+      });
+    });
 
-    void start();
     return () => {
       cancelled = true;
       setStreaming(false);
       setStreamStale(false);
-      if (pollTimer) window.clearTimeout(pollTimer);
-      void api.unsubscribeMarketStream(token, symbol, environment).catch(() => undefined);
+      unsubscribe();
     };
   }, [token, symbol, interval, environment]);
 
