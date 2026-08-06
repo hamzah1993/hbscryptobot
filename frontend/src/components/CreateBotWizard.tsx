@@ -3,6 +3,7 @@ import { api, type CreateStrategyPayload, type TestnetOrderPreview, type Trading
 
 type Props = {
   token: string;
+  defaultMode?: BotMode;
   onClose: () => void;
   onCreated: (strategy: TradingStrategy) => void;
 };
@@ -27,8 +28,13 @@ const initialForm: CreateStrategyPayload & { marketPrice: number; mode: BotMode 
 
 const quoteAssets = new Set(['USDT', 'USDC', 'BUSD', 'FDUSD']);
 
-export function CreateBotWizard({ token, onClose, onCreated }: Props) {
-  const [form, setForm] = useState(initialForm);
+export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCreated }: Props) {
+  const [form, setForm] = useState(() => ({
+    ...initialForm,
+    mode: defaultMode,
+    paperTrading: defaultMode === 'PAPER',
+    name: defaultMode === 'PAPER' ? 'Paper DCA Bot' : 'Testnet DCA Bot',
+  }));
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +43,27 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
   const [loadingPrice, setLoadingPrice] = useState(false);
   const [preview, setPreview] = useState<TestnetOrderPreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [existingNames, setExistingNames] = useState<string[]>([]);
 
   const estimatedLevels = useMemo(() => form.maxDcaOrders + 1, [form.maxDcaOrders]);
   const estimatedInitialQuantity = useMemo(
     () => form.marketPrice > 0 ? form.baseOrderQuote / form.marketPrice : 0,
     [form.baseOrderQuote, form.marketPrice],
   );
+  const duplicateName = useMemo(() => {
+    const normalized = form.name.trim().toLowerCase();
+    return normalized.length > 0 && existingNames.some((name) => name.trim().toLowerCase() === normalized);
+  }, [existingNames, form.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listStrategies(token)
+      .then((strategies) => {
+        if (!cancelled) setExistingNames(strategies.map((strategy) => strategy.name));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [token]);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,9 +85,7 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
       .finally(() => {
         if (!cancelled) setLoadingBalances(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [token]);
 
   useEffect(() => {
@@ -89,9 +108,7 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
       .finally(() => {
         if (!cancelled) setLoadingPrice(false);
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [token, form.symbol]);
 
   useEffect(() => {
@@ -135,27 +152,44 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
   }
 
   async function goNext() {
+    if (!form.name.trim()) {
+      setError('Bot name is required.');
+      return;
+    }
+    if (duplicateName) {
+      setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
+      return;
+    }
     if (step === 2 && form.mode === 'TESTNET') {
-      await loadPreview();
-      if (!preview && !previewing) {
-        try {
-          const result = await api.previewTestnetOrder(token, {
-            symbol: form.symbol,
-            quoteAmount: form.baseOrderQuote,
-          });
-          setPreview(result);
-          setForm((current) => ({ ...current, marketPrice: result.marketPrice }));
-          setStep(3);
-        } catch (reason) {
-          setError(reason instanceof Error ? reason.message : 'Unable to validate Testnet order');
-        }
-        return;
+      try {
+        setPreviewing(true);
+        setError(null);
+        const result = await api.previewTestnetOrder(token, {
+          symbol: form.symbol,
+          quoteAmount: form.baseOrderQuote,
+        });
+        setPreview(result);
+        setForm((current) => ({ ...current, marketPrice: result.marketPrice }));
+        setStep(3);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : 'Unable to validate Testnet order');
+      } finally {
+        setPreviewing(false);
       }
+      return;
     }
     setStep((current) => current + 1);
   }
 
   async function submit() {
+    if (!form.name.trim()) {
+      setError('Bot name is required.');
+      return;
+    }
+    if (duplicateName) {
+      setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
+      return;
+    }
     if (!form.symbol) {
       setError('No tradeable Testnet balance is available. Fund a base asset such as BTC, ETH, BNB, or SOL first.');
       return;
@@ -176,6 +210,7 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
       const { marketPrice, mode, ...payload } = form;
       strategy = await api.createStrategy(token, {
         ...payload,
+        name: payload.name.trim(),
         environment: 'TESTNET',
         paperTrading: mode === 'PAPER',
       });
@@ -231,7 +266,11 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
 
             {step === 1 && (
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="text-sm text-slate-300">Bot name<input value={form.name} onChange={(event) => update('name', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 outline-none focus:border-cyan-300/60" /></label>
+                <label className="text-sm text-slate-300">
+                  Bot name
+                  <input value={form.name} onChange={(event) => update('name', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 outline-none focus:border-cyan-300/60" />
+                  {duplicateName && <span className="mt-1 block text-xs text-rose-300">A bot with this name already exists.</span>}
+                </label>
                 <label className="text-sm text-slate-300">
                   Symbol from available balance
                   <select disabled={loadingBalances || availableSymbols.length === 0} value={form.symbol} onChange={(event) => update('symbol', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#101f32] px-4 py-3 disabled:opacity-50">
@@ -307,9 +346,9 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
             <div className="flex items-center justify-between gap-3">
               <button disabled={step === 1 || submitting} onClick={() => setStep((current) => current - 1)} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm disabled:opacity-40">Back</button>
               {step < 3 ? (
-                <button disabled={previewing || (step === 1 && (loadingBalances || !form.symbol || loadingPrice || !form.marketPrice))} onClick={() => void goNext()} className="rounded-xl bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{previewing ? 'Validating…' : 'Continue'}</button>
+                <button disabled={previewing || duplicateName || !form.name.trim() || (step === 1 && (loadingBalances || !form.symbol || loadingPrice || !form.marketPrice))} onClick={() => void goNext()} className="rounded-xl bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{previewing ? 'Validating…' : 'Continue'}</button>
               ) : (
-                <button disabled={submitting || !form.symbol || !form.marketPrice || (form.mode === 'TESTNET' && !preview)} onClick={submit} className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-60 ${form.mode === 'PAPER' ? 'bg-violet-400' : 'bg-emerald-400'}`}>{submitting ? 'Creating…' : form.mode === 'PAPER' ? 'Create paper bot' : 'Confirm Testnet bot & buy'}</button>
+                <button disabled={submitting || duplicateName || !form.name.trim() || !form.symbol || !form.marketPrice || (form.mode === 'TESTNET' && !preview)} onClick={submit} className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-60 ${form.mode === 'PAPER' ? 'bg-violet-400' : 'bg-emerald-400'}`}>{submitting ? 'Creating…' : form.mode === 'PAPER' ? 'Create paper bot' : 'Confirm Testnet bot & buy'}</button>
               )}
             </div>
           </div>
