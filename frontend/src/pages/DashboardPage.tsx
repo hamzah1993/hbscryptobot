@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { BacktestDashboardPanel } from '../components/BacktestDashboardPanel';
+import { BotManagementPanel } from '../components/BotManagementPanel';
 import { CreateBotWizard } from '../components/CreateBotWizard';
 import { ExchangeAccountsPanel } from '../components/ExchangeAccountsPanel';
 import { MarketChartPanel } from '../components/MarketChartPanel';
@@ -220,6 +221,7 @@ export function DashboardPage() {
       activeNav === 'Trade history' ||
       activeNav === 'Positions' ||
       activeNav === 'Strategies' ||
+      activeNav === 'Bots' ||
       activeNav === 'Notifications'
     ) return;
     let cancelled = false;
@@ -330,6 +332,7 @@ export function DashboardPage() {
 
   const secondaryPage =
     activeNav === 'Backtests' ||
+    activeNav === 'Bots' ||
     activeNav === 'Exchange accounts' ||
     activeNav === 'Trade history' ||
     activeNav === 'Positions' ||
@@ -337,17 +340,19 @@ export function DashboardPage() {
     activeNav === 'Notifications';
   const pageTitle = activeNav === 'Backtests'
     ? 'Backtesting and analytics'
-    : activeNav === 'Exchange accounts'
-      ? 'Exchange accounts'
-      : activeNav === 'Trade history'
-        ? 'Testnet orders'
-        : activeNav === 'Positions'
-          ? 'Testnet positions'
-          : activeNav === 'Strategies'
-            ? 'Strategy action timeline'
-            : activeNav === 'Notifications'
-              ? 'Operational notifications'
-              : 'Trading dashboard';
+    : activeNav === 'Bots'
+      ? 'Bot operations'
+      : activeNav === 'Exchange accounts'
+        ? 'Exchange accounts'
+        : activeNav === 'Trade history'
+          ? 'Testnet orders'
+          : activeNav === 'Positions'
+            ? 'Testnet positions'
+            : activeNav === 'Strategies'
+              ? 'Strategy action timeline'
+              : activeNav === 'Notifications'
+                ? 'Operational notifications'
+                : 'Trading dashboard';
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
@@ -363,6 +368,7 @@ export function DashboardPage() {
           onCreated={() => {
             setShowCreateBot(false);
             loadPositions();
+            setActiveNav('Bots');
           }}
         />
       )}
@@ -441,6 +447,15 @@ export function DashboardPage() {
 
           {activeNav === 'Backtests' && token ? (
             <BacktestDashboardPanel token={token} />
+          ) : activeNav === 'Bots' && token ? (
+            <BotManagementPanel
+              token={token}
+              onViewPaperPosition={(positionId) => {
+                setExpandedPositionId(positionId);
+                setActiveNav('Overview');
+              }}
+              onViewTestnetPosition={() => setActiveNav('Positions')}
+            />
           ) : activeNav === 'Exchange accounts' && token ? (
             <ExchangeAccountsPanel token={token} />
           ) : activeNav === 'Trade history' && token ? (
@@ -471,6 +486,7 @@ export function DashboardPage() {
               <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6">
                 <h3 className="text-lg font-semibold">Trading workspace</h3>
                 <p className="mt-2 text-sm text-slate-400">Use Backtests for historical strategy analysis. Live-money order execution remains disabled.</p>
+                {expandedPositionId && <p className="mt-3 text-xs text-cyan-300">Selected Paper position: {expandedPositionId}</p>}
               </section>
             </>
           )}
