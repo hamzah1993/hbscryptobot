@@ -14,6 +14,8 @@ enum UserRole {
 
 enum ExchangeName {
   BINANCE
+  BYBIT
+  OKX
 }
 
 enum ExchangeEnvironment {
@@ -161,6 +163,7 @@ model ExchangeCredential {
   environment   ExchangeEnvironment @default(TESTNET)
   apiKeyCipher  String
   secretCipher  String
+  passphraseCipher String?
   iv             String
   authTag        String
   createdAt     DateTime            @default(now())
