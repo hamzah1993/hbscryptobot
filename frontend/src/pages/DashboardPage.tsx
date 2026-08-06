@@ -22,15 +22,13 @@ import {
   type TestnetPosition,
   type TradingPosition,
 } from '../lib/api';
+import { useTradingEnvironment } from '../trading/TradingEnvironmentContext';
 
 const navigation = ['Overview', 'Backtests', 'Bots', 'Positions', 'Strategies', 'Notifications', 'Exchange accounts', 'Trade history'];
 const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
 const notificationToastStorageKey = 'hbs-notifications-last-toast-at';
 const browserNotificationStorageKey = 'hbs-browser-notifications-enabled';
 const notificationSoundStorageKey = 'hbs-notification-sounds-enabled';
-const dashboardModeStorageKey = 'hbs-dashboard-mode';
-
-type DashboardMode = 'PAPER' | 'TESTNET';
 type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
 
 function money(value: number) {
@@ -58,6 +56,7 @@ function playNotificationSound(severity: OperationalNotification['severity']) {
 
 export function DashboardPage() {
   const { user, token, logout } = useAuth();
+  const { mode, setMode, liveExecutionEnabled } = useTradingEnvironment();
   const [activeNav, setActiveNav] = useState('Overview');
   const [paperPositions, setPaperPositions] = useState<TradingPosition[]>([]);
   const [testnetPositions, setTestnetPositions] = useState<TestnetPosition[]>([]);
@@ -68,10 +67,10 @@ export function DashboardPage() {
   const [showCreateBot, setShowCreateBot] = useState(false);
   const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
   const [updatingStrategyId, setUpdatingStrategyId] = useState<string | null>(null);
-  const [marketSymbol, setMarketSymbol] = useState('BTCUSDT');
-  const [marketEnvironment, setMarketEnvironment] = useState<BinanceStreamEnvironment>('testnet');
+  const [marketSymbol] = useState('BTCUSDT');
+  const marketEnvironment: BinanceStreamEnvironment = mode === 'LIVE' ? 'live' : 'testnet';
   const [streamStatus, setStreamStatus] = useState<MarketStreamStatus | null>(null);
-  const [streamBusy, setStreamBusy] = useState(false);
+  const [streamBusy] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [showEmergencyStopConfirm, setShowEmergencyStopConfirm] = useState(false);
   const [emergencyStopBusy, setEmergencyStopBusy] = useState(false);
@@ -79,9 +78,6 @@ export function DashboardPage() {
   const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [toastNotifications, setToastNotifications] = useState<OperationalNotification[]>([]);
-  const [dashboardMode, setDashboardMode] = useState<DashboardMode>(() =>
-    window.localStorage.getItem(dashboardModeStorageKey) === 'TESTNET' ? 'TESTNET' : 'PAPER',
-  );
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(
     () => window.localStorage.getItem(browserNotificationStorageKey) === 'true',
   );
@@ -120,13 +116,8 @@ export function DashboardPage() {
   }, [token]);
 
   useEffect(() => {
-    window.localStorage.setItem(dashboardModeStorageKey, dashboardMode);
-  }, [dashboardMode]);
-
-  useEffect(() => {
-    if (!token) return;
-    const active = (dashboardMode === 'PAPER' ? paperPositions : testnetPositions)
-      .filter((position) => position.status === 'OPEN');
+    if (!token || mode === 'LIVE') return;
+    const active = (mode === 'PAPER' ? paperPositions : testnetPositions).filter((position) => position.status === 'OPEN');
     const symbols = [...new Set(active.map((position) => position.symbol))];
     if (symbols.length === 0) return;
     let cancelled = false;
@@ -153,7 +144,7 @@ export function DashboardPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [token, dashboardMode, paperPositions, testnetPositions]);
+  }, [token, mode, paperPositions, testnetPositions]);
 
   useEffect(() => {
     if (!token) {
@@ -288,7 +279,7 @@ export function DashboardPage() {
     }
   }
 
-  const dashboardPositions = dashboardMode === 'PAPER' ? paperPositions : testnetPositions;
+  const dashboardPositions = mode === 'PAPER' ? paperPositions : mode === 'TESTNET' ? testnetPositions : [];
   const openPositions = dashboardPositions.filter((position) => position.status === 'OPEN');
   const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
   const unrealizedPnl = openPositions.reduce((sum, position) => {
@@ -299,21 +290,21 @@ export function DashboardPage() {
   const totalPnl = unrealizedPnl + realizedPnl;
   const runningBots = new Set(openPositions.filter((position) => position.strategy.status === 'RUNNING').map((position) => position.strategy.id)).size;
   const initials = useMemo(() => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB', [user?.fullName]);
+  const environmentLabel = mode === 'PAPER' ? 'Paper' : mode === 'TESTNET' ? 'Binance Testnet' : 'Live';
 
   const stats = [
-    { label: 'Allocated capital', value: money(invested), change: `${openPositions.length} open ${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} position${openPositions.length === 1 ? '' : 's'}` },
-    { label: 'Unrealized P&L', value: money(unrealizedPnl), change: 'Updates from current Testnet market prices' },
-    { label: 'Realized P&L', value: money(realizedPnl), change: 'Closed positions refresh automatically' },
+    { label: 'Allocated capital', value: money(invested), change: mode === 'LIVE' ? 'Live execution is disabled' : `${openPositions.length} open ${environmentLabel} position${openPositions.length === 1 ? '' : 's'}` },
+    { label: 'Unrealized P&L', value: money(unrealizedPnl), change: mode === 'LIVE' ? 'No live positions are loaded' : 'Updates from current market prices' },
+    { label: 'Realized P&L', value: money(realizedPnl), change: mode === 'LIVE' ? 'Live order history is disabled' : 'Closed positions refresh automatically' },
     { label: 'Total P&L', value: money(totalPnl), change: `${runningBots} running bot${runningBots === 1 ? '' : 's'}` },
   ];
 
-  const secondaryPage = ['Backtests', 'Bots', 'Exchange accounts', 'Trade history', 'Positions', 'Strategies', 'Notifications'].includes(activeNav);
-  const pageTitle = activeNav === 'Backtests' ? 'Backtesting and analytics' : activeNav === 'Bots' ? 'Bot operations' : activeNav === 'Exchange accounts' ? 'Exchange accounts' : activeNav === 'Trade history' ? 'Testnet orders' : activeNav === 'Positions' ? 'Paper and Testnet positions' : activeNav === 'Strategies' ? 'Strategy action timeline' : activeNav === 'Notifications' ? 'Operational notifications' : 'Trading dashboard';
+  const pageTitle = activeNav === 'Backtests' ? 'Backtesting and analytics' : activeNav === 'Bots' ? 'Bot operations' : activeNav === 'Exchange accounts' ? 'Exchange accounts' : activeNav === 'Trade history' ? 'Trade history' : activeNav === 'Positions' ? 'Positions' : activeNav === 'Strategies' ? 'Strategy action timeline' : activeNav === 'Notifications' ? 'Operational notifications' : 'Trading dashboard';
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
       <NotificationToastStack notifications={toastNotifications} onDismiss={(id) => setToastNotifications((current) => current.filter((notification) => notification.id !== id))} />
-      {showCreateBot && token && <CreateBotWizard token={token} defaultMode={dashboardMode} onClose={() => setShowCreateBot(false)} onCreated={() => { setShowCreateBot(false); void loadPositions(); setActiveNav('Bots'); }} />}
+      {showCreateBot && token && mode !== 'LIVE' && <CreateBotWizard token={token} defaultMode={mode} onClose={() => setShowCreateBot(false)} onCreated={() => { setShowCreateBot(false); void loadPositions(); setActiveNav('Bots'); }} />}
       {showEmergencyStopConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <section className="w-full max-w-lg rounded-2xl border border-rose-400/30 bg-[#0a1728] p-6 shadow-2xl shadow-rose-950/40">
@@ -337,17 +328,31 @@ export function DashboardPage() {
           <header className="flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-center md:justify-between">
             <div><p className="text-sm text-slate-400">Welcome back, {user?.fullName}</p><h2 className="mt-1 text-3xl font-semibold tracking-tight">{pageTitle}</h2></div>
             <div className="flex flex-wrap items-center gap-3">
+              <div className="flex rounded-xl border border-white/10 bg-white/[0.04] p-1">
+                <button type="button" onClick={() => setMode('PAPER')} className={`rounded-lg px-3 py-2 text-sm ${mode === 'PAPER' ? 'bg-violet-400 text-slate-950' : 'text-violet-300'}`}>Paper</button>
+                <button type="button" onClick={() => setMode('TESTNET')} className={`rounded-lg px-3 py-2 text-sm ${mode === 'TESTNET' ? 'bg-cyan-400 text-slate-950' : 'text-cyan-300'}`}>Binance Testnet</button>
+                <button type="button" onClick={() => setMode('LIVE')} className={`rounded-lg px-3 py-2 text-sm ${mode === 'LIVE' ? 'bg-amber-300 text-slate-950' : 'text-amber-200'}`}>Live</button>
+              </div>
               <button type="button" onClick={toggleNotificationSounds} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08]">{notificationSoundsEnabled ? 'Disable sounds' : 'Enable sounds'}</button>
               {'Notification' in window && (browserNotificationsEnabled ? <button type="button" onClick={disableBrowserNotifications} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08]">Disable browser alerts</button> : <button type="button" onClick={() => void enableBrowserNotifications()} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20">Enable browser alerts</button>)}
-              <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyStopConfirm(true); }} className="rounded-xl border border-rose-400/40 bg-rose-400/10 px-4 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-400/20">Emergency stop</button>
-              {!secondaryPage && <><div className="flex rounded-xl border border-white/10 bg-white/[0.04] p-1"><button type="button" onClick={() => setDashboardMode('PAPER')} className={`rounded-lg px-3 py-2 text-sm ${dashboardMode === 'PAPER' ? 'bg-violet-400 text-slate-950' : 'text-violet-300'}`}>Paper</button><button type="button" onClick={() => setDashboardMode('TESTNET')} className={`rounded-lg px-3 py-2 text-sm ${dashboardMode === 'TESTNET' ? 'bg-cyan-400 text-slate-950' : 'text-cyan-300'}`}>Binance Testnet</button><span className="rounded-lg px-3 py-2 text-sm text-slate-600">Live disabled</span></div><button onClick={() => setShowCreateBot(true)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create bot</button></>}
+              {mode === 'TESTNET' && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyStopConfirm(true); }} className="rounded-xl border border-rose-400/40 bg-rose-400/10 px-4 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-400/20">Emergency stop</button>}
+              {mode !== 'LIVE' && <button onClick={() => setShowCreateBot(true)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create bot</button>}
               <button onClick={logout} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-sm font-semibold">{initials}</button>
             </div>
           </header>
+          {mode === 'LIVE' && !liveExecutionEnabled && <div className="mt-5 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">Live public market data is available. Live bot creation, positions and order execution remain disabled.</div>}
           {emergencyStopResult && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">Emergency stop completed at {new Date(emergencyStopResult.stoppedAt).toLocaleString()}. Stopped {emergencyStopResult.stoppedStrategies} strateg{emergencyStopResult.stoppedStrategies === 1 ? 'y' : 'ies'} and cancelled {emergencyStopResult.cancelledPendingActions} pending action{emergencyStopResult.cancelledPendingActions === 1 ? '' : 's'}.</div>}
-          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? <BotManagementPanel token={token} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} /> : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? <TestnetOrdersPanel token={token} /> : activeNav === 'Positions' && token ? <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={dashboardMode} /> : activeNav === 'Strategies' && token ? <TestnetActionTimelinePanel token={token} /> : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><p className="mt-3 text-xs text-slate-500">Dashboard last updated: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</p><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} defaultEnvironment="testnet" />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {dashboardMode === 'PAPER' ? 'Paper' : 'Binance Testnet'} operations. Live-money order execution remains disabled.</p></section></>}
+          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live bots" /> : <BotManagementPanel token={token} mode={mode} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} />) : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? (mode === 'TESTNET' ? <TestnetOrdersPanel token={token} /> : <EnvironmentEmptyPanel mode={mode} label="trade history" />) : activeNav === 'Positions' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live positions" /> : <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={mode} />) : activeNav === 'Strategies' && token ? (mode === 'TESTNET' ? <TestnetActionTimelinePanel token={token} /> : <EnvironmentEmptyPanel mode={mode} label="strategy action timeline" />) : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><p className="mt-3 text-xs text-slate-500">Dashboard last updated: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</p><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} environment={marketEnvironment} showTestnetOverlays={mode === 'TESTNET'} />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {environmentLabel} operations. Live-money order execution remains disabled.</p>{streamError && <p className="mt-2 text-xs text-amber-300">{streamError}</p>}{streamStatus && !streamBusy && <p className="mt-2 text-xs text-slate-500">Market stream: {streamStatus.connected ? 'connected' : 'disconnected'}</p>}</section></>}
         </section>
       </div>
     </main>
   );
+}
+
+function DisabledLivePanel({ label }: { label: string }) {
+  return <section className="mt-6 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-6"><h3 className="text-xl font-semibold text-amber-100">{label} are disabled</h3><p className="mt-2 text-sm text-amber-50/80">Only public live market data is enabled. Live credentials and real-money execution are not available.</p></section>;
+}
+
+function EnvironmentEmptyPanel({ mode, label }: { mode: 'PAPER' | 'TESTNET' | 'LIVE'; label: string }) {
+  return <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-xl font-semibold">No {mode === 'PAPER' ? 'Paper' : mode === 'TESTNET' ? 'Testnet' : 'Live'} {label}</h3><p className="mt-2 text-sm text-slate-400">The global environment selector is applied across the dashboard.</p></section>;
 }
