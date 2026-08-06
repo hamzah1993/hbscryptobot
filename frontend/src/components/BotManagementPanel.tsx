@@ -241,11 +241,11 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                       <Field label="Bot name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
                       <NumberField label="Risk budget" value={draft.riskBudgetQuote} onChange={(value) => setDraft({ ...draft, riskBudgetQuote: value })} />
                       <NumberField label="Base order" value={draft.baseOrderQuote} onChange={(value) => setDraft({ ...draft, baseOrderQuote: value })} />
-                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value })} />
+                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={0} max={50} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
                       <NumberField label="DCA step (%)" value={draft.dcaStepPercent} onChange={(value) => setDraft({ ...draft, dcaStepPercent: value })} />
                       <NumberField label="DCA multiplier" value={draft.dcaMultiplier} onChange={(value) => setDraft({ ...draft, dcaMultiplier: value })} />
                       <NumberField label="Take profit (%)" value={draft.takeProfitPercent} onChange={(value) => setDraft({ ...draft, takeProfitPercent: value })} />
-                      <NumberField label="Independent from level" value={draft.independentFromLevel} onChange={(value) => setDraft({ ...draft, independentFromLevel: value })} />
+                      <NumberField label="Independent from level" value={draft.independentFromLevel} min={2} max={draft.maxDcaOrders + 2} step={1} onChange={(value) => setDraft({ ...draft, independentFromLevel: value })} />
                       <NumberField label="Recovery max orders" value={draft.recoveryMaxOrders} max={5} onChange={(value) => setDraft({ ...draft, recoveryMaxOrders: value })} />
                       <NumberField label="Recovery global TP (%)" value={draft.recoveryTakeProfitPercent} onChange={(value) => setDraft({ ...draft, recoveryTakeProfitPercent: value })} />
                       <label className="flex items-center gap-3 self-end rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm text-slate-300"><input type="checkbox" checked={draft.recoveryEnabled} onChange={(event) => setDraft({ ...draft, recoveryEnabled: event.target.checked })} className="h-4 w-4 accent-cyan-400" />Dynamic Recovery enabled</label>
@@ -279,6 +279,6 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
   return <label className="text-sm text-slate-300">{label}<input value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 outline-none focus:border-cyan-300/60" /></label>;
 }
 
-function NumberField({ label, value, max, onChange }: { label: string; value: number; max?: number; onChange: (value: number) => void }) {
-  return <label className="text-sm text-slate-300">{label}<input type="number" min="0" max={max} step="any" value={value} onChange={(event) => onChange(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 outline-none focus:border-cyan-300/60" /></label>;
+function NumberField({ label, value, min = 0, max, step = 'any', onChange }: { label: string; value: number; min?: number; max?: number; step?: number | 'any'; onChange: (value: number) => void }) {
+  return <label className="text-sm text-slate-300">{label}<input type="number" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 outline-none focus:border-cyan-300/60" /></label>;
 }

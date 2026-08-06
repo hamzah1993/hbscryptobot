@@ -55,6 +55,47 @@ describe('PaperTradingService recovery mode', () => {
     return { service, prisma, tx, updated };
   }
 
+  it.each([
+    [3, true],
+    [4, false],
+  ])(
+    'classifies paper level #3 using configured independent start #%s',
+    async (independentFromLevel, expectedIndependent) => {
+      const configuredStrategy = { ...strategy, independentFromLevel };
+      const position = {
+        id: 'position-1',
+        userId: 'user-1',
+        status: 'OPEN',
+        totalQuantity: 2,
+        totalCostQuote: 200,
+        averageEntryPrice: 100,
+        dcaCount: 1,
+        recoveryMode: false,
+        recoveryDcaCount: 0,
+        takeProfitPrice: 101.5,
+        nextDcaPrice: 96,
+        strategy: configuredStrategy,
+        orders: [],
+        subPositions: [],
+        realizedPnlQuote: 0,
+      };
+      const { service, tx } = createHarness(position);
+
+      await service.addDca('user-1', { positionId: position.id, marketPrice: 95 });
+
+      expect(tx.tradingOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ level: 3, independent: expectedIndependent }),
+      }));
+      if (expectedIndependent) {
+        expect(tx.tradingSubPosition.create).toHaveBeenCalledWith(expect.objectContaining({
+          data: expect.objectContaining({ level: 3 }),
+        }));
+      } else {
+        expect(tx.tradingSubPosition.create).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it('activates recovery below the first independent entry and recalculates a global TP', async () => {
     const position = {
       id: 'position-1',

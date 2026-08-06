@@ -114,6 +114,31 @@ describe('BacktestDcaSimulatorService', () => {
     expect(result.equityPoints).toHaveLength(4);
   });
 
+  it.each([3, 5])(
+    'switches backtest entries to independent exactly at configured level #%s',
+    (independentFromLevel) => {
+      const result = service.simulate({
+        initialCapital: 5000,
+        riskBudgetQuote: 5000,
+        baseOrderQuote: 100,
+        candles: [{ close: 100 }, { close: 98 }, { close: 96 }, { close: 94 }, { close: 92 }],
+        maxEntries: 5,
+        priceDeviationPercent: 2,
+        volumeMultiplier: 1,
+        takeProfitPercent: 50,
+        independentFromLevel,
+        recoveryEnabled: false,
+      });
+
+      expect(result.trades!.map((trade) => [trade.level, trade.type])).toEqual(
+        [1, 2, 3, 4, 5].map((level) => [
+          level,
+          level >= independentFromLevel ? 'INDEPENDENT_ENTRY' : 'PARENT_ENTRY',
+        ]),
+      );
+    },
+  );
+
   it('keeps parent and independent positions open when their take-profit levels are not reached', () => {
     const result = service.simulate({
       initialCapital: 1000,

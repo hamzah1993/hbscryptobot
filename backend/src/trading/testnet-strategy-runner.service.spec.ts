@@ -115,14 +115,15 @@ describe('TestnetStrategyRunnerService', () => {
     );
   });
 
-  it('switches to an independent entry at the configured level', async () => {
+  it.each([3, 5])('switches to an independent entry at configured level #%s', async (independentFromLevel) => {
     const strategy = {
       ...baseStrategy,
+      independentFromLevel,
       positions: [{
         id: 'position-1',
         totalQuantity: 4,
         totalCostQuote: 300,
-        dcaCount: 2,
+        dcaCount: independentFromLevel - 2,
         nextDcaPrice: 45,
         takeProfitPrice: 80,
         subPositions: [],
@@ -137,8 +138,8 @@ describe('TestnetStrategyRunnerService', () => {
       userId,
       expect.objectContaining({
         actionType: 'INDEPENDENT_ENTRY',
-        level: 4,
-        actionKey: 'strategy:strategy-1:position:position-1:independent-entry:4',
+        level: independentFromLevel,
+        actionKey: `strategy:strategy-1:position:position-1:independent-entry:${independentFromLevel}`,
       }),
     );
   });
