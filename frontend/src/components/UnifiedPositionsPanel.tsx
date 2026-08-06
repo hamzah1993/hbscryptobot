@@ -171,7 +171,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
       });
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 2000);
+    const timer = window.setInterval(() => void refresh(), 1000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -308,7 +308,10 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
         .reduce((cost, subPosition) => cost + Number(subPosition.costQuote), 0);
       return sum + currentPrice * (Number(position.totalQuantity) + independentQuantity) - (Number(position.totalCostQuote) + independentCost);
     }, 0);
-    const realized = allPositions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
+    const realized = allPositions.reduce(
+      (sum, position) => sum + Number(position.realizedPnlQuote) + position.subPositions.reduce((subSum, sub) => subSum + Number(sub.realizedPnlQuote), 0),
+      0,
+    );
     return {
       open: open.length,
       paper: allPositions.filter((position) => position.source === 'PAPER').length,
@@ -325,7 +328,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Unified position operations</p>
             <h3 className="mt-2 text-2xl font-semibold">Paper and Binance Testnet positions</h3>
-            <p className="mt-2 text-sm text-slate-400">Prices update every 2 seconds and position state refreshes every 5 seconds. Live-money positions remain disabled.</p>
+            <p className="mt-2 text-sm text-slate-400">Prices and P&amp;L update every second; filled position state refreshes every 5 seconds. Live-money positions remain disabled.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {(['ALL', 'PAPER', 'TESTNET'] as Mode[]).map((item) => (
@@ -367,8 +370,10 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
             const basketCost = Number(position.totalCostQuote) + independentCost;
             const currentValue = currentPrice * basketQuantity;
             const unrealized = position.status === 'OPEN' ? currentValue - basketCost : 0;
-            const realized = Number(position.realizedPnlQuote);
+            const realized = Number(position.realizedPnlQuote) + position.subPositions.reduce((sum, sub) => sum + Number(sub.realizedPnlQuote), 0);
             const total = unrealized + realized;
+            const activeTakeProfit = position.recoveryMode ? Number(position.recoveryTakeProfitPrice ?? 0) : Number(position.takeProfitPrice ?? 0);
+            const tpDistancePercent = activeTakeProfit > 0 && currentPrice > 0 ? ((activeTakeProfit - currentPrice) / currentPrice) * 100 : null;
             const hasPendingOrder = position.orders.some((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED');
             return (
               <article id={`position-${position.id}`} key={`${position.source}-${position.id}`} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035]">
@@ -397,6 +402,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                       <Metric label="Basket cost" value={money(basketCost)} />
                       <Metric label="Next DCA" value={position.nextDcaPrice ? number(position.nextDcaPrice) : '—'} />
                       <Metric label="Take profit" value={position.takeProfitPrice ? number(position.takeProfitPrice) : '—'} />
+                      <Metric label="Distance to active TP" value={tpDistancePercent === null ? '—' : `${tpDistancePercent.toFixed(2)}%`} />
                       <Metric label="Recovery orders" value={position.recoveryMode ? String(position.recoveryDcaCount) : '—'} />
                       <Metric label="Recovery global TP" value={position.recoveryTakeProfitPrice ? number(position.recoveryTakeProfitPrice) : '—'} />
                       <Metric label="Recovery anchor" value={position.recoveryAnchorPrice ? number(position.recoveryAnchorPrice) : '—'} />
@@ -438,7 +444,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                     <div className="mt-5">
                       <h5 className="text-sm font-semibold">Independent sub-positions</h5>
                       {position.subPositions.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-500">No independent levels have been opened.</p> : (
-                        <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[920px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{editingTp?.subPositionId === sub.id ? <div className="flex min-w-[240px] gap-2"><input autoFocus type="number" min="0.00000001" step="any" value={editingTp.value} onChange={(event) => setEditingTp({ ...editingTp, value: event.target.value })} className="w-32 rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 outline-none ring-violet-400/40 focus:ring" /><button disabled={busyId === sub.id} onClick={() => void saveTakeProfit(position)} className="rounded-lg bg-violet-400 px-2.5 py-1.5 text-xs font-semibold text-slate-950">Save</button><button onClick={() => setEditingTp(null)} className="rounded-lg border border-white/10 px-2 py-1.5 text-xs">Cancel</button></div> : number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3"><div className="flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : null}</div></td></tr>)}</tbody></table></div>
+                        <><div className="mt-3 grid gap-3 md:hidden">{position.subPositions.map((sub) => <div key={sub.id} className="rounded-xl border border-white/10 bg-slate-950/35 p-4"><div className="flex items-center justify-between"><p className="font-semibold">Independent #{sub.level}</p><span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs">{sub.status}</span></div><div className="mt-3 grid grid-cols-2 gap-2"><Metric label="Entry" value={number(sub.entryPrice)} /><Metric label="TP" value={number(sub.takeProfitPrice)} /><Metric label="Cost" value={money(sub.costQuote)} /><Metric label="Realized P&L" value={money(sub.realizedPnlQuote)} /></div><div className="mt-3 flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-2 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' && <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button>}</div></div>)}</div><div className="mt-3 hidden overflow-x-auto md:block"><table className="w-full min-w-[920px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{editingTp?.subPositionId === sub.id ? <div className="flex min-w-[240px] gap-2"><input autoFocus type="number" min="0.00000001" step="any" value={editingTp.value} onChange={(event) => setEditingTp({ ...editingTp, value: event.target.value })} className="w-32 rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 outline-none ring-violet-400/40 focus:ring" /><button disabled={busyId === sub.id} onClick={() => void saveTakeProfit(position)} className="rounded-lg bg-violet-400 px-2.5 py-1.5 text-xs font-semibold text-slate-950">Save</button><button onClick={() => setEditingTp(null)} className="rounded-lg border border-white/10 px-2 py-1.5 text-xs">Cancel</button></div> : number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3"><div className="flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : null}</div></td></tr>)}</tbody></table></div></>
                       )}
                     </div>
                   </div>

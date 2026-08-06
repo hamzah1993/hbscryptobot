@@ -10,7 +10,7 @@ import { NotificationToastStack } from '../components/NotificationToastStack';
 import { NotificationWebhookMetricsPanel } from '../components/NotificationWebhookMetricsPanel';
 import { PortfolioAnalytics } from '../components/PortfolioAnalytics';
 import { TestnetActionTimelinePanel } from '../components/TestnetActionTimelinePanel';
-import { TestnetOrdersPanel } from '../components/TestnetOrdersPanel';
+import { TradeHistoryPanel } from '../components/TradeHistoryPanel';
 import { UnifiedPositionsPanel } from '../components/UnifiedPositionsPanel';
 import { UserProfilePanel } from '../components/UserProfilePanel';
 import {
@@ -30,6 +30,7 @@ const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
 const notificationToastStorageKey = 'hbs-notifications-last-toast-at';
 const browserNotificationStorageKey = 'hbs-browser-notifications-enabled';
 const notificationSoundStorageKey = 'hbs-notification-sounds-enabled';
+const tradingLifecycleEvents = new Set(['ENTRY_FILLED', 'DCA_FILLED', 'INDEPENDENT_OPENED', 'RECOVERY_ACTIVATED', 'RECOVERY_DCA_FILLED', 'INDEPENDENT_TP_HIT', 'PARENT_TP_HIT', 'CYCLE_COMPLETED']);
 type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
 
 function money(value: number) {
@@ -141,7 +142,7 @@ export function DashboardPage() {
       });
     };
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 2000);
+    const timer = window.setInterval(() => void refresh(), 1000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
@@ -166,7 +167,7 @@ export function DashboardPage() {
         const lastToastAt = Number(window.localStorage.getItem(notificationToastStorageKey) ?? 0);
         if (initializedNotificationPolling.current) {
           const freshOperationalAlerts = notifications
-            .filter((notification) => notification.severity !== 'INFO' && new Date(notification.createdAt).getTime() > lastToastAt)
+            .filter((notification) => (notification.severity !== 'INFO' || tradingLifecycleEvents.has(notification.event)) && new Date(notification.createdAt).getTime() > lastToastAt)
             .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
             .slice(-3);
           if (freshOperationalAlerts.length > 0) {
@@ -297,19 +298,32 @@ export function DashboardPage() {
 
   const dashboardPositions = mode === 'PAPER' ? paperPositions : mode === 'TESTNET' ? testnetPositions : [];
   const openPositions = dashboardPositions.filter((position) => position.status === 'OPEN');
-  const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
+  const independentCost = (position: TradingPosition | TestnetPosition) => position.subPositions
+    .filter((subPosition) => subPosition.status === 'OPEN')
+    .reduce((sum, subPosition) => sum + Number(subPosition.costQuote), 0);
+  const independentQuantity = (position: TradingPosition | TestnetPosition) => position.subPositions
+    .filter((subPosition) => subPosition.status === 'OPEN')
+    .reduce((sum, subPosition) => sum + Number(subPosition.quantity), 0);
+  const independentRealized = (position: TradingPosition | TestnetPosition) => position.subPositions
+    .reduce((sum, subPosition) => sum + Number(subPosition.realizedPnlQuote), 0);
+  const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote) + independentCost(position), 0);
   const unrealizedPnl = openPositions.reduce((sum, position) => {
     const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
-    return sum + (currentPrice * Number(position.totalQuantity) - Number(position.totalCostQuote));
+    return sum + (currentPrice * (Number(position.totalQuantity) + independentQuantity(position)) - (Number(position.totalCostQuote) + independentCost(position)));
   }, 0);
-  const realizedPnl = dashboardPositions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
+  const realizedPnl = dashboardPositions.reduce((sum, position) => sum + Number(position.realizedPnlQuote) + independentRealized(position), 0);
   const totalPnl = unrealizedPnl + realizedPnl;
   const runningBots = new Set(openPositions.filter((position) => position.strategy.status === 'RUNNING').map((position) => position.strategy.id)).size;
+  const pausedBots = new Set(openPositions.filter((position) => position.strategy.status === 'PAUSED').map((position) => position.strategy.id)).size;
+  const recoveryPositions = openPositions.filter((position) => position.recoveryMode).length;
+  const openRiskBudget = openPositions.reduce((sum, position) => sum + Number(position.strategy.riskBudgetQuote), 0);
+  const remainingRiskBudget = Math.max(openRiskBudget - invested, 0);
+  const riskUtilization = openRiskBudget > 0 ? (invested / openRiskBudget) * 100 : 0;
   const initials = useMemo(() => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB', [user?.fullName]);
   const environmentLabel = mode === 'PAPER' ? 'Paper' : mode === 'TESTNET' ? 'Binance Testnet' : 'Live';
 
   const stats = [
-    { label: 'Allocated capital', value: money(invested), change: mode === 'LIVE' ? 'Live execution is disabled' : `${openPositions.length} open ${environmentLabel} position${openPositions.length === 1 ? '' : 's'}` },
+    { label: 'Risk / exposure', value: money(invested), change: mode === 'LIVE' ? 'Live execution is disabled' : `${openPositions.length} open ${environmentLabel} position${openPositions.length === 1 ? '' : 's'} · independent legs included` },
     { label: 'Unrealized P&L', value: money(unrealizedPnl), change: mode === 'LIVE' ? 'No live positions are loaded' : 'Updates from current market prices' },
     { label: 'Realized P&L', value: money(realizedPnl), change: mode === 'LIVE' ? 'Live order history is disabled' : 'Closed positions refresh automatically' },
     { label: 'Total P&L', value: money(totalPnl), change: `${runningBots} running bot${runningBots === 1 ? '' : 's'}` },
@@ -397,7 +411,7 @@ export function DashboardPage() {
           </header>
           {mode === 'LIVE' && !liveExecutionEnabled && <div className="mt-5 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">Live public market data is available. Live bot creation, positions and order execution remain disabled.</div>}
           {emergencyStopResult && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">Emergency stop completed at {new Date(emergencyStopResult.stoppedAt).toLocaleString()}. Stopped {emergencyStopResult.stoppedStrategies} strateg{emergencyStopResult.stoppedStrategies === 1 ? 'y' : 'ies'} and cancelled {emergencyStopResult.cancelledPendingActions} pending action{emergencyStopResult.cancelledPendingActions === 1 ? '' : 's'}.</div>}
-          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live bots" /> : <BotManagementPanel token={token} mode={mode} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} />) : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? (mode === 'TESTNET' ? <TestnetOrdersPanel token={token} /> : <EnvironmentEmptyPanel mode={mode} label="trade history" />) : activeNav === 'Positions' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live positions" /> : <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={mode} />) : activeNav === 'Strategies' && token ? (mode === 'TESTNET' ? <TestnetActionTimelinePanel token={token} /> : <EnvironmentEmptyPanel mode={mode} label="strategy action timeline" />) : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : activeNav === 'Profile' && user ? <UserProfilePanel user={user} onLogout={logout} /> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><p className="mt-3 text-xs text-slate-500">Dashboard last updated: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</p><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} environment={marketEnvironment} showTestnetOverlays={mode === 'TESTNET'} />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {environmentLabel} operations. Live-money order execution remains disabled.</p>{streamError && <p className="mt-2 text-xs text-amber-300">{streamError}</p>}{streamStatus && !streamBusy && <p className="mt-2 text-xs text-slate-500">Market stream: {streamStatus.connected ? 'connected' : 'disconnected'}</p>}</section></>}
+          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live bots" /> : <BotManagementPanel token={token} mode={mode} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} />) : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live trade history" /> : <TradeHistoryPanel token={token} mode={mode} />) : activeNav === 'Positions' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live positions" /> : <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={mode} />) : activeNav === 'Strategies' && token ? (mode === 'TESTNET' ? <TestnetActionTimelinePanel token={token} /> : <EnvironmentEmptyPanel mode={mode} label="strategy action timeline" />) : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : activeNav === 'Profile' && user ? <UserProfilePanel user={user} onLogout={logout} /> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section>{mode !== 'LIVE' && <section className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-4 sm:grid-cols-2 xl:grid-cols-4"><DashboardMiniMetric label="Bot state" value={`${runningBots} running · ${pausedBots} paused`} /><DashboardMiniMetric label="Recovery" value={`${recoveryPositions} active`} /><DashboardMiniMetric label="Risk utilization" value={`${riskUtilization.toFixed(1)}% of ${money(openRiskBudget)}`} /><DashboardMiniMetric label="Risk budget remaining" value={money(remainingRiskBudget)} /></section>}<p className="mt-3 text-xs text-slate-500">Dashboard last updated: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</p><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} environment={marketEnvironment} showTestnetOverlays={mode === 'TESTNET'} />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {environmentLabel} operations. Live-money order execution remains disabled.</p>{streamError && <p className="mt-2 text-xs text-amber-300">{streamError}</p>}{streamStatus && !streamBusy && <p className="mt-2 text-xs text-slate-500">Market stream: {streamStatus.connected ? 'connected' : 'disconnected'}</p>}</section></>}
         </section>
       </div>
     </main>
@@ -410,4 +424,8 @@ function DisabledLivePanel({ label }: { label: string }) {
 
 function EnvironmentEmptyPanel({ mode, label }: { mode: 'PAPER' | 'TESTNET' | 'LIVE'; label: string }) {
   return <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-xl font-semibold">No {mode === 'PAPER' ? 'Paper' : mode === 'TESTNET' ? 'Testnet' : 'Live'} {label}</h3><p className="mt-2 text-sm text-slate-400">The global environment selector is applied across the dashboard.</p></section>;
+}
+
+function DashboardMiniMetric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl bg-slate-950/30 p-3"><p className="text-[11px] uppercase tracking-wider text-slate-500">{label}</p><p className="mt-1.5 text-sm font-semibold text-slate-200">{value}</p></div>;
 }

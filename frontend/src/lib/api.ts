@@ -14,6 +14,7 @@ export type TradingOrder = {
   level: number;
   independent: boolean;
   quoteAmount: string;
+  feeQuote?: string | null;
   averageFillPrice: string | null;
   createdAt: string;
 };
@@ -266,6 +267,7 @@ export type TestnetOrder = {
   price: string | null;
   filledQuantity: string;
   quoteAmount: string;
+  feeQuote: string | null;
   averageFillPrice: string | null;
   createdAt: string;
   updatedAt: string;
@@ -328,6 +330,7 @@ export type TestnetPosition = {
     quantity: string;
     filledQuantity: string;
     quoteAmount: string;
+    feeQuote?: string | null;
     averageFillPrice: string | null;
     createdAt: string;
     updatedAt: string;
