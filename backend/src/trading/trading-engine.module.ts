@@ -24,6 +24,7 @@ import { TestnetActionTimelineService } from './testnet-action-timeline.service'
 import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
 import { TestnetFillAccountingService } from './testnet-fill-accounting.service';
 import { TestnetOrderSyncSchedulerService } from './testnet-order-sync-scheduler.service';
+import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 import { TestnetStrategyRiskService } from './testnet-strategy-risk.service';
@@ -63,6 +64,7 @@ import { TradingEngineService } from './trading-engine.service';
       provide: TestnetStrategyExecutionService,
       useExisting: RiskAwareTestnetStrategyExecutionService,
     },
+    TestnetRunnerHealthService,
     TestnetOrderSyncSchedulerService,
     TestnetStrategyActionService,
     TestnetActionRetrySchedulerService,
@@ -92,6 +94,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetActionTimelineService,
     TestnetEmergencyStopService,
     TestnetStrategyRunnerService,
+    TestnetRunnerHealthService,
   ],
 })
 export class TradingEngineModule {}
