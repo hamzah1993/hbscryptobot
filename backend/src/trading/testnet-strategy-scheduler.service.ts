@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
+import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
 
 const TESTNET_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-strategy-scheduler';
@@ -23,6 +24,7 @@ export class TestnetStrategySchedulerService {
     private readonly prisma: PrismaService,
     private readonly runner: TestnetStrategyRunnerService,
     private readonly redisLock: RedisLockService,
+    private readonly health: TestnetRunnerHealthService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
@@ -37,12 +39,14 @@ export class TestnetStrategySchedulerService {
         TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
         getLockTtlMilliseconds(),
       );
+      this.health.markRedisAvailable();
 
       if (!lock) return;
 
       const users = await this.prisma.tradingStrategy.findMany({
         where: {
           status: 'RUNNING',
+          mode: 'BINANCE_TESTNET',
           paperTrading: false,
           environment: 'TESTNET',
         },
@@ -60,13 +64,12 @@ export class TestnetStrategySchedulerService {
         errors += results.filter((result) => result.action === 'ERROR').length;
       }
 
-      if (opened > 0) {
-        this.logger.log(`Opened ${opened} automatic Binance testnet position(s)`);
-      }
-      if (errors > 0) {
-        this.logger.warn(`${errors} automatic Binance testnet strategy tick(s) failed`);
-      }
+      this.health.markStrategyTick();
+      if (opened > 0) this.logger.log(`Opened ${opened} automatic Binance testnet position(s)`);
+      if (errors > 0) this.logger.warn(`${errors} automatic Binance testnet strategy tick(s) failed`);
     } catch (error) {
+      this.health.markRedisUnavailable(error);
+      this.health.markError(error);
       this.logger.error(
         'Scheduled automatic Binance testnet strategy execution failed',
         error instanceof Error ? error.stack : String(error),
@@ -76,10 +79,9 @@ export class TestnetStrategySchedulerService {
         try {
           await this.redisLock.release(lock);
         } catch (error) {
+          this.health.markError(error);
           this.logger.warn(
-            `Failed to release the Testnet strategy scheduler lock: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            `Failed to release the Testnet strategy scheduler lock: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }
