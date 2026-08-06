@@ -17,6 +17,9 @@ describe('BacktestCandleRunnerService', () => {
     const simulator = {
       simulate: jest.fn(),
     };
+    const binanceImporter = {
+      import: jest.fn().mockResolvedValue({ imported: 0, pages: 0 }),
+    };
 
     return {
       service: new BacktestCandleRunnerService(
@@ -24,11 +27,13 @@ describe('BacktestCandleRunnerService', () => {
         execution as any,
         candles as any,
         simulator as any,
+        binanceImporter as any,
       ),
       runs,
       execution,
       candles,
       simulator,
+      binanceImporter,
     };
   }
 
@@ -219,8 +224,62 @@ describe('BacktestCandleRunnerService', () => {
     );
   });
 
+  it('automatically imports missing Binance candles and runs the backtest', async () => {
+    const {
+      service,
+      runs,
+      execution,
+      candles,
+      simulator,
+      binanceImporter,
+    } = createService();
+    const run = createRun();
+    const importedCandles = [
+      { openTime: run.startTime, close: '100' },
+      { openTime: new Date(run.startTime.getTime() + 300_000), close: '101' },
+    ];
+    const result = {
+      endingCapital: '1001.00000000',
+      realizedPnlQuote: '1.00000000',
+      returnPercent: '0.100000',
+      maxDrawdownPercent: '0.000000',
+      tradeCount: 1,
+    };
+
+    runs.get.mockResolvedValue(run);
+    execution.start.mockResolvedValue({ ...run, status: 'RUNNING' });
+    candles.list.mockResolvedValueOnce([]).mockResolvedValueOnce(importedCandles);
+    binanceImporter.import.mockResolvedValue({ imported: 2, pages: 1 });
+    simulator.simulate.mockReturnValue(result);
+    execution.complete.mockResolvedValue({ id: run.id, status: 'COMPLETED' });
+
+    await service.run('user-1', run.id);
+
+    expect(binanceImporter.import).toHaveBeenCalledWith({
+      symbol: 'BTCUSDT',
+      interval: '5m',
+      limit: 1000,
+      startTime: run.startTime.getTime(),
+      endTime: run.endTime.getTime(),
+      maxPages: 1000,
+    });
+    expect(candles.list).toHaveBeenCalledTimes(2);
+    expect(simulator.simulate).toHaveBeenCalledWith(
+      expect.objectContaining({ candles: importedCandles }),
+    );
+    expect(execution.complete).toHaveBeenCalledWith(run.id, result);
+    expect(execution.fail).not.toHaveBeenCalled();
+  });
+
   it('marks the run failed when no historical candles are available', async () => {
-    const { service, runs, execution, candles, simulator } = createService();
+    const {
+      service,
+      runs,
+      execution,
+      candles,
+      simulator,
+      binanceImporter,
+    } = createService();
     const run = createRun({
       symbol: 'ETHUSDT',
       interval: '1h',
@@ -237,6 +296,14 @@ describe('BacktestCandleRunnerService', () => {
 
     expect(simulator.simulate).not.toHaveBeenCalled();
     expect(execution.complete).not.toHaveBeenCalled();
+    expect(binanceImporter.import).toHaveBeenCalledWith({
+      symbol: 'ETHUSDT',
+      interval: '1h',
+      limit: 1000,
+      startTime: run.startTime.getTime(),
+      endTime: run.endTime.getTime(),
+      maxPages: 1000,
+    });
     expect(execution.fail).toHaveBeenCalledWith(
       'run-1',
       expect.any(BadRequestException),

@@ -46,9 +46,9 @@ export class BinanceHistoricalCandleImporterService {
     }
 
     const maxPages = request.maxPages ?? 1;
-    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 100) {
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 1000) {
       throw new BadRequestException(
-        'Candle import maxPages must be an integer between 1 and 100',
+        'Candle import maxPages must be an integer between 1 and 1000',
       );
     }
 
