@@ -284,8 +284,16 @@ export class TestnetStrategyRunnerService {
       const multiplier = Number(strategy.dcaMultiplier);
       const baseOrderQuote = Number(strategy.baseOrderQuote);
       const requestedQuote = baseOrderQuote * Math.pow(multiplier, dcaCount + 1);
+      const openIndependentCost = (openPosition.subPositions ?? []).reduce(
+        (sum: number, subPosition: any) => {
+          const costQuote = Number(subPosition.costQuote);
+          return sum + (Number.isFinite(costQuote) && costQuote > 0 ? costQuote : 0);
+        },
+        0,
+      );
+      const deployedQuote = Number(openPosition.totalCostQuote) + openIndependentCost;
       const remainingBudget = Math.max(
-        Number(strategy.riskBudgetQuote) - Number(openPosition.totalCostQuote),
+        Number(strategy.riskBudgetQuote) - deployedQuote,
         0,
       );
       const quoteAmount = Math.min(requestedQuote, remainingBudget);
