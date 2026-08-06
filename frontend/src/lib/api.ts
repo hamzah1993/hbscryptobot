@@ -444,6 +444,8 @@ export const api = {
     request<{ deleted: boolean }>(`/strategies/${strategyId}`, { method: 'DELETE', headers: authHeaders(token) }),
   setStrategyStatus: (token: string, strategyId: string, status: StrategyStatus) =>
     request<TradingStrategy>(`/strategies/${strategyId}/status`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ status }) }),
+  executeTestnetOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number }) =>
+    request<unknown>(`/strategies/${strategyId}/testnet-order`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   listBacktests: (token: string, limit = 100) =>
     request<BacktestRun[]>(`/backtests?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   createBacktest: (token: string, payload: CreateBacktestPayload) =>
