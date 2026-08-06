@@ -90,6 +90,19 @@ export class StrategyController {
     );
   }
 
+  @Post('testnet-positions/:positionId/close')
+  closeTestnetPosition(
+    @Req() request: AuthenticatedRequest,
+    @Param('positionId') positionId: string,
+    @Body() body: { subPositionId?: string },
+  ) {
+    return this.testnetExecution.closePosition(
+      request.user.sub,
+      positionId,
+      body.subPositionId,
+    );
+  }
+
   @Post('testnet-actions/:actionId/retry')
   retryTestnetAction(
     @Req() request: AuthenticatedRequest,
