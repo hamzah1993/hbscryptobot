@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type CreateStrategyPayload, type TradingStrategy } from '../lib/api';
+import { api, type CreateStrategyPayload, type TestnetOrderPreview, type TradingStrategy } from '../lib/api';
 
 type Props = {
   token: string;
@@ -35,6 +35,8 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
   const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
   const [loadingBalances, setLoadingBalances] = useState(true);
   const [loadingPrice, setLoadingPrice] = useState(false);
+  const [preview, setPreview] = useState<TestnetOrderPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   const estimatedLevels = useMemo(() => form.maxDcaOrders + 1, [form.maxDcaOrders]);
   const estimatedInitialQuantity = useMemo(
@@ -71,6 +73,7 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
     if (!form.symbol) return;
     let cancelled = false;
     setLoadingPrice(true);
+    setPreview(null);
     setError(null);
     api.getMarketCandles(token, form.symbol, '1m', 2, 'testnet')
       .then((result) => {
@@ -91,6 +94,10 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
     };
   }, [token, form.symbol]);
 
+  useEffect(() => {
+    setPreview(null);
+  }, [form.mode, form.symbol, form.baseOrderQuote]);
+
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
@@ -105,6 +112,47 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
         ? mode === 'PAPER' ? 'Paper DCA Bot' : 'Testnet DCA Bot'
         : current.name,
     }));
+    setPreview(null);
+  }
+
+  async function loadPreview() {
+    if (form.mode !== 'TESTNET') return;
+    setPreviewing(true);
+    setError(null);
+    try {
+      const result = await api.previewTestnetOrder(token, {
+        symbol: form.symbol,
+        quoteAmount: form.baseOrderQuote,
+      });
+      setPreview(result);
+      setForm((current) => ({ ...current, marketPrice: result.marketPrice }));
+    } catch (reason) {
+      setPreview(null);
+      setError(reason instanceof Error ? reason.message : 'Unable to validate Testnet order');
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function goNext() {
+    if (step === 2 && form.mode === 'TESTNET') {
+      await loadPreview();
+      if (!preview && !previewing) {
+        try {
+          const result = await api.previewTestnetOrder(token, {
+            symbol: form.symbol,
+            quoteAmount: form.baseOrderQuote,
+          });
+          setPreview(result);
+          setForm((current) => ({ ...current, marketPrice: result.marketPrice }));
+          setStep(3);
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : 'Unable to validate Testnet order');
+        }
+        return;
+      }
+    }
+    setStep((current) => current + 1);
   }
 
   async function submit() {
@@ -116,16 +164,17 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
       setError('A valid current market price is required.');
       return;
     }
-    if (form.mode === 'TESTNET' && (!Number.isFinite(estimatedInitialQuantity) || estimatedInitialQuantity <= 0)) {
-      setError('The initial Testnet quantity is invalid. Check the base order and market price.');
+    if (form.mode === 'TESTNET' && !preview) {
+      setError('Refresh and confirm the Binance Testnet order preview before creating the bot.');
       return;
     }
 
     setSubmitting(true);
     setError(null);
+    let strategy: TradingStrategy | null = null;
     try {
       const { marketPrice, mode, ...payload } = form;
-      const strategy = await api.createStrategy(token, {
+      strategy = await api.createStrategy(token, {
         ...payload,
         environment: 'TESTNET',
         paperTrading: mode === 'PAPER',
@@ -137,12 +186,15 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
         await api.setStrategyStatus(token, strategy.id, 'PAUSED');
         await api.executeTestnetOrder(token, strategy.id, {
           side: 'BUY',
-          quantity: estimatedInitialQuantity,
+          quantity: Number(preview?.normalizedQuantity ?? 0),
         });
       }
 
       onCreated(strategy);
     } catch (reason) {
+      if (strategy && form.mode === 'TESTNET') {
+        await api.deleteStrategy(token, strategy.id).catch(() => undefined);
+      }
       setError(reason instanceof Error ? reason.message : 'Unable to create bot');
     } finally {
       setSubmitting(false);
@@ -191,7 +243,7 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
                 <label className="text-sm text-slate-300 sm:col-span-2">
                   Entry price
                   <input type="number" min="0" step="any" value={form.marketPrice || ''} placeholder={loadingPrice ? 'Loading current market price…' : 'Current market price'} onChange={(event) => update('marketPrice', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 outline-none focus:border-cyan-300/60" />
-                  <span className="mt-1 block text-xs text-slate-500">Loaded from Binance Testnet. Paper mode allows an override; Testnet mode uses it to preview quantity.</span>
+                  <span className="mt-1 block text-xs text-slate-500">Loaded from Binance Testnet. Paper mode allows an override; Testnet mode is revalidated before order submission.</span>
                 </label>
               </div>
             )}
@@ -219,16 +271,31 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
                     ['Mode', form.mode === 'PAPER' ? 'Paper' : 'Binance Testnet'],
                     ['Strategy', form.name],
                     ['Symbol', form.symbol || 'Not available'],
-                    ['Entry price', form.marketPrice ? `$${form.marketPrice}` : 'Unavailable'],
+                    ['Market price', `$${preview?.marketPrice ?? form.marketPrice}`],
                     ['Risk budget', `$${form.riskBudgetQuote}`],
                     ['Base order', `$${form.baseOrderQuote}`],
-                    ['Initial quantity', estimatedInitialQuantity ? estimatedInitialQuantity.toPrecision(8) : 'Unavailable'],
+                    ['Initial quantity', form.mode === 'TESTNET' ? preview?.normalizedQuantity ?? 'Preview required' : estimatedInitialQuantity.toPrecision(8)],
                     ['Planned levels', String(estimatedLevels)],
                     ['Take profit', `${form.takeProfitPercent}%`],
                   ].map(([label, value]) => <div key={label} className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><p className="text-xs uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 break-all font-medium">{value}</p></div>)}
                 </div>
+
+                {form.mode === 'TESTNET' && preview && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <PreviewMetric label={`Available ${preview.quoteAsset}`} value={preview.availableQuote} />
+                    <PreviewMetric label="Estimated spend" value={preview.estimatedSpend} />
+                    <PreviewMetric label={`Remaining ${preview.quoteAsset}`} value={preview.remainingQuote} />
+                    <PreviewMetric label="Minimum notional" value={preview.minNotional} />
+                    <PreviewMetric label="Step size" value={preview.stepSize} raw />
+                    <PreviewMetric label="Minimum quantity" value={preview.minQuantity} />
+                  </div>
+                )}
+
                 {form.mode === 'TESTNET' ? (
-                  <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">Creating this bot will create a paused Binance Testnet strategy and immediately submit one Testnet BUY market order using the estimated quantity above. No Live-money order is permitted.</p>
+                  <div className="space-y-3">
+                    <p className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm leading-6 text-amber-100">Creating this bot submits one Binance Testnet BUY market order using the exchange-normalized quantity. Live-money execution remains disabled.</p>
+                    <button type="button" onClick={() => void loadPreview()} disabled={previewing} className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-200 disabled:opacity-50">{previewing ? 'Validating Binance filters…' : 'Refresh Testnet order preview'}</button>
+                  </div>
                 ) : (
                   <p className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-3 text-sm leading-6 text-violet-100">Creating this bot opens a simulated Paper position only. No Binance order is submitted.</p>
                 )}
@@ -240,14 +307,23 @@ export function CreateBotWizard({ token, onClose, onCreated }: Props) {
             <div className="flex items-center justify-between gap-3">
               <button disabled={step === 1 || submitting} onClick={() => setStep((current) => current - 1)} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm disabled:opacity-40">Back</button>
               {step < 3 ? (
-                <button disabled={step === 1 && (loadingBalances || !form.symbol || loadingPrice || !form.marketPrice)} onClick={() => setStep((current) => current + 1)} className="rounded-xl bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">Continue</button>
+                <button disabled={previewing || (step === 1 && (loadingBalances || !form.symbol || loadingPrice || !form.marketPrice))} onClick={() => void goNext()} className="rounded-xl bg-cyan-400 px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{previewing ? 'Validating…' : 'Continue'}</button>
               ) : (
-                <button disabled={submitting || !form.symbol || !form.marketPrice} onClick={submit} className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-60 ${form.mode === 'PAPER' ? 'bg-violet-400' : 'bg-emerald-400'}`}>{submitting ? 'Creating…' : form.mode === 'PAPER' ? 'Create paper bot' : 'Create Testnet bot & buy'}</button>
+                <button disabled={submitting || !form.symbol || !form.marketPrice || (form.mode === 'TESTNET' && !preview)} onClick={submit} className={`rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-60 ${form.mode === 'PAPER' ? 'bg-violet-400' : 'bg-emerald-400'}`}>{submitting ? 'Creating…' : form.mode === 'PAPER' ? 'Create paper bot' : 'Confirm Testnet bot & buy'}</button>
               )}
             </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PreviewMetric({ label, value, raw = false }: { label: string; value: number | string; raw?: boolean }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-2 break-all font-medium">{raw ? String(value) : Number(value).toLocaleString(undefined, { maximumFractionDigits: 8 })}</p>
     </div>
   );
 }
