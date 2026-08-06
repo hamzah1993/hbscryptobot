@@ -147,15 +147,20 @@ export class BinanceTestnetOrderService {
     );
   }
 
-  private getQuantityFilter(filters: BinanceSymbolFilter[]) {
-    return filters.find((filter) => filter.filterType === 'MARKET_LOT_SIZE')
-      ?? filters.find((filter) => filter.filterType === 'LOT_SIZE')
-      ?? {};
+  private getQuantityFilter(filters: BinanceSymbolFilter[]): BinanceSymbolFilter {
+    const filter = filters.find((item) => item.filterType === 'MARKET_LOT_SIZE')
+      ?? filters.find((item) => item.filterType === 'LOT_SIZE');
+
+    if (!filter) {
+      throw new BadRequestException('Binance quantity filter is unavailable');
+    }
+
+    return filter;
   }
 
   private normalizeQuantity(quantity: number, filters: BinanceSymbolFilter[]) {
     const lotSize = this.getQuantityFilter(filters);
-    if (!lotSize?.stepSize || !lotSize.minQty || !lotSize.maxQty) {
+    if (!lotSize.stepSize || !lotSize.minQty || !lotSize.maxQty) {
       throw new BadRequestException('Binance quantity filter is unavailable');
     }
 
