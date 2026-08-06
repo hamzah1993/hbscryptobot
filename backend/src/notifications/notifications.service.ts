@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma, type NotificationSeverity as PrismaNotificationSeverity } from '@prisma/client';
 import { createHmac, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationChannelsService } from './notification-channels.service';
 
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 
@@ -71,7 +72,10 @@ export class NotificationsService implements OnModuleInit {
     retried: 0,
   };
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly channels: NotificationChannelsService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.restoreWebhookMetricsSnapshot();
@@ -89,6 +93,7 @@ export class NotificationsService implements OnModuleInit {
 
     if (stored.userId) {
       void this.persist(stored);
+      void this.channels.deliver(stored);
     }
 
     const context = {

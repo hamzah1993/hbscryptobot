@@ -83,6 +83,21 @@ export type OperationalNotification = {
   createdAt: string;
 };
 
+export type NotificationChannelSettings = {
+  email: {
+    enabled: boolean;
+    address: string;
+    minimumSeverity: NotificationSeverity;
+    providerConfigured: boolean;
+  };
+  telegram: {
+    enabled: boolean;
+    chatId: string;
+    minimumSeverity: NotificationSeverity;
+    providerConfigured: boolean;
+  };
+};
+
 export type ExchangeCredentialSummary = {
   id: string;
   exchange: 'BINANCE';
@@ -533,6 +548,16 @@ export const api = {
     requestText(`/backtests/${encodeURIComponent(runId)}/export/equity.csv`, token),
   listNotifications: (token: string, limit = 100) =>
     request<OperationalNotification[]>(`/strategies/notifications?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
+  getNotificationChannels: (token: string) =>
+    request<NotificationChannelSettings>('/strategies/notifications/channels', { headers: authHeaders(token) }),
+  updateNotificationChannels: (token: string, payload: Omit<NotificationChannelSettings, 'email' | 'telegram'> & {
+    email: Omit<NotificationChannelSettings['email'], 'providerConfigured'>;
+    telegram: Omit<NotificationChannelSettings['telegram'], 'providerConfigured'>;
+  }) => request<NotificationChannelSettings>('/strategies/notifications/channels', {
+    method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
+  }),
+  testNotificationChannel: (token: string, channel: 'email' | 'telegram') =>
+    request<{ delivered: true; channel: 'EMAIL' | 'TELEGRAM' }>(`/strategies/notifications/channels/${channel}/test`, { method: 'POST', headers: authHeaders(token) }),
   listTestnetOrders: (token: string, limit = 100) =>
     request<TestnetOrder[]>(`/strategies/testnet-orders?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   syncTestnetOrder: (token: string, tradingOrderId: string) =>
