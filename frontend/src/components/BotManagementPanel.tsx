@@ -11,6 +11,7 @@ import {
 
 type Props = {
   token: string;
+  mode: 'PAPER' | 'TESTNET';
   onViewPaperPosition: (positionId: string) => void;
   onViewTestnetPosition: (positionId: string) => void;
 };
@@ -37,7 +38,7 @@ const toEditable = (strategy: TradingStrategy): EditableStrategy => ({
   independentFromLevel: Number(strategy.independentFromLevel ?? 5),
 });
 
-export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPosition }: Props) {
+export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTestnetPosition }: Props) {
   const [strategies, setStrategies] = useState<TradingStrategy[]>([]);
   const [paperPositions, setPaperPositions] = useState<TradingPosition[]>([]);
   const [testnetPositions, setTestnetPositions] = useState<TestnetPosition[]>([]);
@@ -56,7 +57,7 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
         api.listStrategies(token),
         api.listPaperPositions(token),
         api.listTestnetPositions(token, 250),
-        api.getTestnetRunnerHealth(token),
+        mode === 'TESTNET' ? api.getTestnetRunnerHealth(token) : Promise.resolve(null),
       ]);
       setStrategies(strategyResult);
       setPaperPositions(paperResult);
@@ -71,11 +72,12 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
 
   useEffect(() => {
     void load();
+    if (mode !== 'TESTNET') return;
     const timer = window.setInterval(() => {
       void api.getTestnetRunnerHealth(token).then(setRunnerHealth).catch(() => undefined);
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [token]);
+  }, [token, mode]);
 
   const positionsByStrategy = useMemo(() => {
     const paper = new Map<string, TradingPosition[]>();
@@ -92,6 +94,11 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
     }
     return { paper, testnet };
   }, [paperPositions, testnetPositions]);
+
+  const visibleStrategies = useMemo(
+    () => strategies.filter((strategy) => mode === 'PAPER' ? strategy.paperTrading : !strategy.paperTrading && strategy.environment === 'TESTNET'),
+    [strategies, mode],
+  );
 
   async function updateStatus(strategyId: string, status: StrategyStatus) {
     setBusyId(strategyId);
@@ -154,12 +161,12 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Bot operations</p>
-            <h3 className="mt-2 text-2xl font-semibold">My bots</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Manage Paper and Binance Testnet strategies, review linked positions, and safely change operating status.</p>
+            <h3 className="mt-2 text-2xl font-semibold">{mode === 'PAPER' ? 'Paper bots' : 'Binance Testnet bots'}</h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Only the globally selected environment is shown here.</p>
           </div>
           <button onClick={() => void load()} disabled={loading} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh bots'}</button>
         </div>
-        {runnerHealth && (
+        {mode === 'TESTNET' && runnerHealth && (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <HealthMetric label="Strategy runner" value={runnerHealth.scheduler} />
             <HealthMetric label="Order sync" value={runnerHealth.orderSync} />
@@ -167,20 +174,20 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
             <HealthMetric label="Redis lock" value={runnerHealth.redis} />
           </div>
         )}
-        {runnerHealth?.lastError && <p className="mt-3 text-xs text-amber-200">Last runner error: {runnerHealth.lastError}</p>}
+        {mode === 'TESTNET' && runnerHealth?.lastError && <p className="mt-3 text-xs text-amber-200">Last runner error: {runnerHealth.lastError}</p>}
       </div>
 
       {error && <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
 
       {loading ? (
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-10 text-center text-sm text-slate-500">Loading bots…</div>
-      ) : strategies.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-10 text-center text-sm text-slate-500">No bots have been created yet.</div>
+      ) : visibleStrategies.length === 0 ? (
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-10 text-center text-sm text-slate-500">No {mode === 'PAPER' ? 'Paper' : 'Testnet'} bots have been created yet.</div>
       ) : (
         <div className="space-y-4">
-          {strategies.map((strategy) => {
-            const paper = positionsByStrategy.paper.get(strategy.id) ?? [];
-            const testnet = positionsByStrategy.testnet.get(strategy.id) ?? [];
+          {visibleStrategies.map((strategy) => {
+            const paper = mode === 'PAPER' ? positionsByStrategy.paper.get(strategy.id) ?? [] : [];
+            const testnet = mode === 'TESTNET' ? positionsByStrategy.testnet.get(strategy.id) ?? [] : [];
             const linkedPositionCount = paper.length + testnet.length;
             const pendingOrders = testnet.flatMap((position) => position.orders).filter((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED').length;
             const status = strategy.status ?? 'STOPPED';
@@ -194,7 +201,7 @@ export function BotManagementPanel({ token, onViewPaperPosition, onViewTestnetPo
                     <div className="flex flex-wrap items-center gap-2">
                       <h4 className="text-lg font-semibold">{strategy.name}</h4>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status === 'RUNNING' ? 'bg-emerald-400/15 text-emerald-300' : status === 'PAUSED' ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-300'}`}>{status}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${strategy.paperTrading ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{strategy.paperTrading ? 'Paper' : 'Binance Testnet'}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${mode === 'PAPER' ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{mode === 'PAPER' ? 'Paper' : 'Binance Testnet'}</span>
                       {pendingOrders > 0 && <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-300">{pendingOrders} pending order{pendingOrders === 1 ? '' : 's'}</span>}
                     </div>
                     <p className="mt-2 text-sm text-slate-400">{strategy.symbol}</p>
