@@ -135,6 +135,73 @@ describe('TestnetStrategyRunnerService', () => {
     );
   });
 
+  it('counts open independent exposure against the hard risk budget', async () => {
+    const strategy = {
+      ...baseStrategy,
+      positions: [{
+        id: 'position-1',
+        totalQuantity: 5,
+        totalCostQuote: 500,
+        dcaCount: 2,
+        nextDcaPrice: 45,
+        takeProfitPrice: 80,
+        subPositions: [{
+          id: 'sub-existing',
+          level: 4,
+          quantity: 5,
+          costQuote: 450,
+          takeProfitPrice: 90,
+        }],
+      }],
+    };
+    const { service, testnetExecution } = createService([strategy], 40);
+
+    const result = await service.runUserStrategies(userId);
+
+    expect(result[0]).toMatchObject({
+      action: 'INDEPENDENT_ENTRY',
+      quantity: 1.25,
+    });
+    expect(testnetExecution.executeMarketOrder).toHaveBeenCalledWith(
+      userId,
+      expect.objectContaining({
+        actionType: 'INDEPENDENT_ENTRY',
+        level: 4,
+        quantity: 1.25,
+      }),
+    );
+  });
+
+  it('holds when parent plus open independent exposure exhausts the risk budget', async () => {
+    const strategy = {
+      ...baseStrategy,
+      positions: [{
+        id: 'position-1',
+        totalQuantity: 5,
+        totalCostQuote: 500,
+        dcaCount: 2,
+        nextDcaPrice: 45,
+        takeProfitPrice: 80,
+        subPositions: [{
+          id: 'sub-existing',
+          level: 4,
+          quantity: 5,
+          costQuote: 500,
+          takeProfitPrice: 90,
+        }],
+      }],
+    };
+    const { service, testnetExecution } = createService([strategy], 40);
+
+    const result = await service.runUserStrategies(userId);
+
+    expect(result[0]).toMatchObject({
+      action: 'HOLD',
+      message: 'No remaining risk budget is available for DCA',
+    });
+    expect(testnetExecution.executeMarketOrder).not.toHaveBeenCalled();
+  });
+
   it('prioritizes an independent take-profit exit', async () => {
     const strategy = {
       ...baseStrategy,
