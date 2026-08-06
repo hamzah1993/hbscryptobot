@@ -61,6 +61,8 @@ describe('TestnetActionRetrySchedulerService', () => {
       actionKey: dueAction.actionKey,
       level: 2,
       triggerPrice: 95,
+      orderType: 'LIMIT',
+      limitPrice: 95,
       allowRunningStrategy: true,
       retryActionId: 'action-1',
     });

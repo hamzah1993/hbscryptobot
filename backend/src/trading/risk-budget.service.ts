@@ -6,6 +6,7 @@ export interface DcaPlanInput {
   maxDcaOrders: number;
   dcaStepPercent: number;
   dcaMultiplier: number;
+  dcaMultipliers?: number[];
   takeProfitPercent: number;
   independentFromLevel: number;
 }
@@ -26,7 +27,7 @@ export class RiskBudgetService {
     let allocated = 0;
 
     for (let level = 1; level <= input.maxDcaOrders + 1; level += 1) {
-      const rawAmount = input.baseOrderQuote * input.dcaMultiplier ** (level - 1);
+      const rawAmount = input.baseOrderQuote * this.multiplierForLevel(input, level);
       const remaining = input.riskBudgetQuote - allocated;
       if (remaining <= 0) break;
 
@@ -49,6 +50,14 @@ export class RiskBudgetService {
     return levels;
   }
 
+  multiplierForLevel(input: Pick<DcaPlanInput, 'dcaMultiplier' | 'dcaMultipliers'>, level: number) {
+    if (level <= 1) return 1;
+    const configured = input.dcaMultipliers ?? [];
+    const configuredMultiplier = configured[level - 2];
+    if (Number.isFinite(configuredMultiplier) && configuredMultiplier > 0) return configuredMultiplier;
+    return input.dcaMultiplier ** (level - 1);
+  }
+
   assertWithinBudget(plannedQuote: number, alreadyAllocatedQuote: number, riskBudgetQuote: number) {
     if (plannedQuote <= 0) throw new BadRequestException('Order allocation must be positive');
     if (alreadyAllocatedQuote + plannedQuote > riskBudgetQuote + Number.EPSILON) {
@@ -64,6 +73,9 @@ export class RiskBudgetService {
     }
     if (input.dcaStepPercent <= 0) throw new BadRequestException('DCA step must be positive');
     if (input.dcaMultiplier < 1) throw new BadRequestException('DCA multiplier cannot be below 1');
+    if (input.dcaMultipliers && input.dcaMultipliers.some((value) => !Number.isFinite(value) || value <= 0)) {
+      throw new BadRequestException('Every DCA multiplier must be a positive number');
+    }
     if (input.takeProfitPercent <= 0) throw new BadRequestException('Take-profit must be positive');
     if (
       !Number.isInteger(input.independentFromLevel) ||

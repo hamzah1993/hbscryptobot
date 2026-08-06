@@ -37,6 +37,28 @@ export class TestnetStrategyRiskService {
     }
 
     if (actionType === 'INITIAL_ENTRY' && !openPosition) {
+      const openPairPositions = await this.prisma.tradingPosition.findMany({
+        where: { userId, status: 'OPEN' },
+        select: { symbol: true },
+      });
+      const distinctOpenPairs = new Set(openPairPositions.map((position) => String(position.symbol).toUpperCase()));
+      if (!distinctOpenPairs.has(String(strategy.symbol).toUpperCase()) && distinctOpenPairs.size >= Number(strategy.maxOpenPairs ?? 5)) {
+        throw new BadRequestException('Maximum simultaneously open pairs reached');
+      }
+
+      const cooldownMinutes = Number(strategy.cooldownMinutes ?? 60);
+      if (cooldownMinutes > 0) {
+        const latestClosed = await this.prisma.tradingPosition.findFirst({
+          where: { userId, strategyId: strategy.id, symbol: strategy.symbol, status: 'CLOSED', closedAt: { not: null } },
+          select: { closedAt: true },
+          orderBy: { closedAt: 'desc' },
+        });
+        if (latestClosed?.closedAt) {
+          const cooldownEndsAt = latestClosed.closedAt.getTime() + cooldownMinutes * 60_000;
+          if (Date.now() < cooldownEndsAt) throw new BadRequestException('Strategy is still in its post-take-profit cooldown period');
+        }
+      }
+
       const openParents = await this.prisma.tradingPosition.count({
         where: { userId, strategyId: strategy.id, status: 'OPEN' },
       });
@@ -60,7 +82,7 @@ export class TestnetStrategyRiskService {
 
     if (
       estimatedOrderQuote > 0 &&
-      actionType && ['INITIAL_ENTRY', 'DCA_ENTRY', 'INDEPENDENT_ENTRY', 'RECOVERY_DCA_ENTRY'].includes(actionType) &&
+      (!actionType || ['INITIAL_ENTRY', 'DCA_ENTRY', 'INDEPENDENT_ENTRY', 'RECOVERY_DCA_ENTRY'].includes(actionType)) &&
       totalExposure + estimatedOrderQuote > Number(strategy.riskBudgetQuote) + Number.EPSILON
     ) {
       throw new BadRequestException('Order would exceed the configured fixed risk budget');

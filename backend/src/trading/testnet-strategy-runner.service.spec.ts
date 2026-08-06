@@ -86,6 +86,9 @@ describe('TestnetStrategyRunnerService', () => {
       level: 1,
       triggerPrice: 50,
       plannedQuoteAmount: 100,
+      orderType: 'LIMIT',
+      limitPrice: 50,
+      signalAtMs: expect.any(Number),
       allowRunningStrategy: true,
     });
     expect(redisLock.release).toHaveBeenCalledTimes(1);

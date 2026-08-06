@@ -34,16 +34,16 @@ describe('BacktestDcaSimulatorService', () => {
   it('uses a volume multiplier to increase later allocations', () => {
     const result = service.simulate({
       initialCapital: new Prisma.Decimal('700'),
-      candles: [{ close: '100' }, { close: '90' }, { close: '100' }],
+      candles: [{ close: '100' }, { close: '95' }, { close: '90.25' }],
       maxEntries: 3,
       priceDeviationPercent: '5',
       volumeMultiplier: '2',
     });
 
     expect(result.tradeCount).toBe(3);
-    expect(result.endingCapital).toBe('766.66666667');
-    expect(result.realizedPnlQuote).toBe('66.66666667');
-    expect(result.returnPercent).toBe('9.523810');
+    expect(result.trades?.map((trade) => trade.quoteAmount)).toEqual([
+      '100.00000000', '200.00000000', '400.00000000',
+    ]);
   });
 
   it('applies entry and exit fees plus adverse slippage', () => {

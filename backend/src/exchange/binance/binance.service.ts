@@ -11,11 +11,14 @@ export type BinanceMarketOrderParams = {
   clientOrderId?: string;
 };
 
+export type BinanceLimitOrderParams = BinanceMarketOrderParams & { price: string };
+
 export type BinanceSymbolFilter = {
   filterType: string;
   minQty?: string;
   maxQty?: string;
   stepSize?: string;
+  tickSize?: string;
   minNotional?: string;
   notional?: string;
   applyToMarket?: boolean;
@@ -297,6 +300,24 @@ export class BinanceService {
       payload.newClientOrderId = params.clientOrderId;
     }
 
+    return this.signedRequest('/api/v3/order', 'POST', payload, apiKey, apiSecret, environment);
+  }
+
+  async placeLimitOrder(
+    params: BinanceLimitOrderParams,
+    apiKey: string,
+    apiSecret: string,
+    environment: BinanceEnvironment = 'testnet',
+  ) {
+    if (environment !== 'testnet') throw new BadRequestException('Live Binance order execution is disabled');
+    if (!Number.isFinite(Number(params.quantity)) || Number(params.quantity) <= 0) throw new BadRequestException('Order quantity must be positive');
+    if (!Number.isFinite(Number(params.price)) || Number(params.price) <= 0) throw new BadRequestException('Limit price must be positive');
+
+    const payload: Record<string, string> = {
+      symbol: params.symbol.trim().toUpperCase(), side: params.side, type: 'LIMIT',
+      quantity: params.quantity, price: params.price, timeInForce: 'GTC', newOrderRespType: 'FULL',
+    };
+    if (params.clientOrderId) payload.newClientOrderId = params.clientOrderId;
     return this.signedRequest('/api/v3/order', 'POST', payload, apiKey, apiSecret, environment);
   }
 

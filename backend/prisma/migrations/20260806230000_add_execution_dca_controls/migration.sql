@@ -1,0 +1,14 @@
+ALTER TABLE "TradingStrategy"
+ADD COLUMN "dcaMultipliers" JSONB NOT NULL DEFAULT '[1,1.5,2,3,5]',
+ADD COLUMN "subPositionTriggerPercent" DECIMAL(10,4) NOT NULL DEFAULT 2,
+ADD COLUMN "subPositionTakeProfitPercent" DECIMAL(10,4) NOT NULL DEFAULT 1.5,
+ADD COLUMN "basePositionPercent" DECIMAL(10,4) NOT NULL DEFAULT 1,
+ADD COLUMN "maxTotalRiskPercent" DECIMAL(10,4) NOT NULL DEFAULT 3,
+ADD COLUMN "maxOpenPairs" INTEGER NOT NULL DEFAULT 5,
+ADD COLUMN "cooldownMinutes" INTEGER NOT NULL DEFAULT 60;
+
+ALTER TABLE "TradingStrategy" ALTER COLUMN "maxDcaOrders" SET DEFAULT 5;
+
+ALTER TABLE "StrategyAction" ALTER COLUMN "maxAttempts" SET DEFAULT 4;
+
+ALTER TABLE "TradingOrder" ADD COLUMN "executionLatencyMs" INTEGER;

@@ -300,6 +300,31 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     });
   });
 
+  it('keeps DCA count at zero when a pending manual initial limit entry fills on sync', async () => {
+    const { service, tradingPosition } = createService({
+      strategyAction: null,
+      level: 1,
+      filledQuantity: 0,
+      quoteAmount: 0,
+      accountedFilledQuantity: 0,
+      accountedQuoteAmount: 0,
+    }, {
+      status: 'FILLED',
+      executedQty: '1',
+      cummulativeQuoteQty: '100',
+    }, {
+      totalQuantity: 0,
+      totalCostQuote: 0,
+      averageEntryPrice: 0,
+      dcaCount: 0,
+    });
+
+    await service.syncOrder(userId, 'order-1');
+    expect(tradingPosition.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ dcaCount: 0, totalQuantity: 1, totalCostQuote: 100 }),
+    }));
+  });
+
   it('does not double-account a fill already fully accounted', async () => {
     const { service, tradingPosition, tradingSubPosition, tradingOrder } = createService({
       status: 'FILLED',

@@ -47,4 +47,29 @@ describe('TestnetStrategyRiskService fixed budget', () => {
       'user-1', strategy, position, 'DCA_ENTRY', 100.01,
     )).rejects.toThrow('Order would exceed the configured fixed risk budget');
   });
+
+  it('blocks a new distinct pair when the per-user open-pair ceiling is reached', async () => {
+    const prisma = {
+      tradingPosition: {
+        findMany: jest.fn().mockResolvedValue(Array.from({ length: 5 }, (_, index) => ({ symbol: `PAIR${index}USDT` }))),
+      },
+    } as any;
+    const service = new TestnetStrategyRiskService(prisma);
+    await expect(service.assertCanExecute('user-1', {
+      ...strategy, symbol: 'BTCUSDT', maxOpenPairs: 5, cooldownMinutes: 0,
+    }, null, 'INITIAL_ENTRY', 100)).rejects.toThrow('Maximum simultaneously open pairs reached');
+  });
+
+  it('blocks a new cycle until the configured post-TP cooldown expires', async () => {
+    const prisma = {
+      tradingPosition: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue({ closedAt: new Date(Date.now() - 30 * 60_000) }),
+      },
+    } as any;
+    const service = new TestnetStrategyRiskService(prisma);
+    await expect(service.assertCanExecute('user-1', {
+      ...strategy, symbol: 'BTCUSDT', maxOpenPairs: 5, cooldownMinutes: 60,
+    }, null, 'INITIAL_ENTRY', 100)).rejects.toThrow('post-take-profit cooldown');
+  });
 });

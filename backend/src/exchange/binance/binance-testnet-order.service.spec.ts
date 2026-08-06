@@ -44,4 +44,25 @@ describe('BinanceTestnetOrderService client-order recovery', () => {
     await expect(service.findOrderByClientOrderId('user-1', 'BTCUSDT', 'hbs-unknown'))
       .rejects.toThrow('Gateway timeout');
   });
+
+  it('places entries as normalized GTC limit orders', async () => {
+    const binance = {
+      getSymbolInfo: jest.fn().mockResolvedValue({
+        baseAsset: 'BTC', quoteAsset: 'USDT', filters: [
+          { filterType: 'LOT_SIZE', minQty: '0.001', maxQty: '100', stepSize: '0.001' },
+          { filterType: 'PRICE_FILTER', tickSize: '0.10' },
+          { filterType: 'MIN_NOTIONAL', minNotional: '5' },
+        ],
+      }),
+      placeLimitOrder: jest.fn().mockResolvedValue({ orderId: 42, status: 'NEW' }),
+    } as any;
+    const credentials = { getBinance: jest.fn().mockResolvedValue({ apiKey: 'key', apiSecret: 'secret' }) } as any;
+    const service = new BinanceTestnetOrderService(binance, credentials);
+
+    await service.placeLimitOrder('user-1', { symbol: 'btcusdt', side: 'BUY', quantity: 0.1019, price: 100.19, clientOrderId: 'hbs-entry' });
+    expect(binance.placeLimitOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'BTCUSDT', side: 'BUY', quantity: '0.101', price: '100.1', clientOrderId: 'hbs-entry' }),
+      'key', 'secret', 'testnet',
+    );
+  });
 });

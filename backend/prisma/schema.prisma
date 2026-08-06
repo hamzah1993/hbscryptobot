@@ -177,11 +177,18 @@ model TradingStrategy {
   paperTrading                 Boolean               @default(true)
   riskBudgetQuote              Decimal               @db.Decimal(28, 8)
   baseOrderQuote               Decimal               @db.Decimal(28, 8)
-  maxDcaOrders                 Int                   @default(8)
+  maxDcaOrders                 Int                   @default(5)
   dcaStepPercent               Decimal               @db.Decimal(10, 4)
   dcaMultiplier                Decimal               @default(1) @db.Decimal(10, 4)
+  dcaMultipliers               Json                  @default("[1,1.5,2,3,5]")
   takeProfitPercent            Decimal               @db.Decimal(10, 4)
+  subPositionTriggerPercent    Decimal               @default(2) @db.Decimal(10, 4)
+  subPositionTakeProfitPercent Decimal               @default(1.5) @db.Decimal(10, 4)
   independentFromLevel         Int                   @default(5)
+  basePositionPercent          Decimal               @default(1) @db.Decimal(10, 4)
+  maxTotalRiskPercent          Decimal               @default(3) @db.Decimal(10, 4)
+  maxOpenPairs                 Int                   @default(5)
+  cooldownMinutes              Int                   @default(60)
   recoveryEnabled              Boolean               @default(true)
   recoveryMaxOrders            Int                   @default(5)
   recoveryStepPercents         Json                  @default("[5,8,12,18,25]")
@@ -278,6 +285,7 @@ model TradingOrder {
   averageFillPrice         Decimal?             @db.Decimal(28, 12)
   accountedFilledQuantity  Decimal              @default(0) @db.Decimal(28, 12)
   accountedQuoteAmount     Decimal              @default(0) @db.Decimal(28, 8)
+  executionLatencyMs       Int?
   errorMessage             String?
   strategyAction           StrategyAction?
   position                 TradingPosition      @relation(fields: [positionId], references: [id], onDelete: Cascade)
@@ -304,7 +312,7 @@ model StrategyAction {
   failureCategory  StrategyActionFailureCategory?
   retryable        Boolean                       @default(false)
   attemptCount     Int                           @default(0)
-  maxAttempts      Int                           @default(5)
+  maxAttempts      Int                           @default(4)
   lastAttemptedAt  DateTime?
   nextRetryAt      DateTime?
   level            Int?

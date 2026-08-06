@@ -148,12 +148,16 @@ export class StrategyController {
   executeTestnetOrder(
     @Req() request: AuthenticatedRequest,
     @Param('strategyId') strategyId: string,
-    @Body() body: { side: 'BUY' | 'SELL'; quantity: number },
+    @Body() body: { side: 'BUY' | 'SELL'; quantity: number; type?: 'MARKET' | 'LIMIT'; price?: number },
   ) {
     return this.testnetExecution.executeMarketOrder(request.user.sub, {
       strategyId,
       side: body.side,
       quantity: body.quantity,
+      orderType: body.type ?? 'MARKET',
+      limitPrice: body.type === 'LIMIT' ? Number(body.price) : null,
+      triggerPrice: body.price ? Number(body.price) : null,
+      plannedQuoteAmount: body.side === 'BUY' && body.price ? body.quantity * Number(body.price) : null,
     });
   }
 

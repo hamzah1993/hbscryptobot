@@ -14,8 +14,15 @@ export type StrategyInput = {
   maxDcaOrders: number;
   dcaStepPercent: number;
   dcaMultiplier: number;
+  dcaMultipliers?: number[];
   takeProfitPercent: number;
+  subPositionTriggerPercent?: number;
+  subPositionTakeProfitPercent?: number;
   independentFromLevel: number;
+  basePositionPercent?: number;
+  maxTotalRiskPercent?: number;
+  maxOpenPairs?: number;
+  cooldownMinutes?: number;
   recoveryEnabled?: boolean;
   recoveryMaxOrders?: number;
   recoveryStepPercents?: number[];
@@ -49,8 +56,15 @@ export class StrategyService {
           maxDcaOrders: normalized.maxDcaOrders,
           dcaStepPercent: normalized.dcaStepPercent,
           dcaMultiplier: normalized.dcaMultiplier,
+          dcaMultipliers: normalized.dcaMultipliers,
           takeProfitPercent: normalized.takeProfitPercent,
+          subPositionTriggerPercent: normalized.subPositionTriggerPercent,
+          subPositionTakeProfitPercent: normalized.subPositionTakeProfitPercent,
           independentFromLevel: normalized.independentFromLevel,
+          basePositionPercent: normalized.basePositionPercent,
+          maxTotalRiskPercent: normalized.maxTotalRiskPercent,
+          maxOpenPairs: normalized.maxOpenPairs,
+          cooldownMinutes: normalized.cooldownMinutes,
           recoveryEnabled: normalized.recoveryEnabled,
           recoveryMaxOrders: normalized.recoveryMaxOrders,
           recoveryStepPercents: normalized.recoveryStepPercents,
@@ -91,8 +105,15 @@ export class StrategyService {
       maxDcaOrders: input.maxDcaOrders ?? existing.maxDcaOrders,
       dcaStepPercent: input.dcaStepPercent ?? Number(existing.dcaStepPercent),
       dcaMultiplier: input.dcaMultiplier ?? Number(existing.dcaMultiplier),
+      dcaMultipliers: input.dcaMultipliers ?? (existing.dcaMultipliers as number[]),
       takeProfitPercent: input.takeProfitPercent ?? Number(existing.takeProfitPercent),
+      subPositionTriggerPercent: input.subPositionTriggerPercent ?? Number(existing.subPositionTriggerPercent),
+      subPositionTakeProfitPercent: input.subPositionTakeProfitPercent ?? Number(existing.subPositionTakeProfitPercent),
       independentFromLevel: input.independentFromLevel ?? existing.independentFromLevel,
+      basePositionPercent: input.basePositionPercent ?? Number(existing.basePositionPercent),
+      maxTotalRiskPercent: input.maxTotalRiskPercent ?? Number(existing.maxTotalRiskPercent),
+      maxOpenPairs: input.maxOpenPairs ?? existing.maxOpenPairs,
+      cooldownMinutes: input.cooldownMinutes ?? existing.cooldownMinutes,
       recoveryEnabled: input.recoveryEnabled ?? existing.recoveryEnabled,
       recoveryMaxOrders: input.recoveryMaxOrders ?? existing.recoveryMaxOrders,
       recoveryStepPercents: input.recoveryStepPercents ?? (existing.recoveryStepPercents as number[]),
@@ -159,15 +180,43 @@ export class StrategyService {
       maxDcaOrders: Number(input.maxDcaOrders),
       dcaStepPercent: Number(input.dcaStepPercent),
       dcaMultiplier: Number(input.dcaMultiplier),
+      dcaMultipliers: (input.dcaMultipliers ?? [1, 1.5, 2, 3, 5]).map(Number),
       takeProfitPercent: Number(input.takeProfitPercent),
+      subPositionTriggerPercent: Number(input.subPositionTriggerPercent ?? 2),
+      subPositionTakeProfitPercent: Number(input.subPositionTakeProfitPercent ?? 1.5),
       independentFromLevel: Number(input.independentFromLevel),
+      basePositionPercent: Number(input.basePositionPercent ?? 1),
+      maxTotalRiskPercent: Number(input.maxTotalRiskPercent ?? 3),
+      maxOpenPairs: Number(input.maxOpenPairs ?? 5),
+      cooldownMinutes: Number(input.cooldownMinutes ?? 60),
       recoveryEnabled: input.recoveryEnabled ?? true,
       recoveryMaxOrders: Number(input.recoveryMaxOrders ?? 5),
       recoveryStepPercents: (input.recoveryStepPercents ?? [5, 8, 12, 18, 25]).map(Number),
       recoveryMultipliers: (input.recoveryMultipliers ?? [1, 1.5, 2, 3, 5]).map(Number),
       recoveryTakeProfitPercent: Number(input.recoveryTakeProfitPercent ?? 1.5),
     } as const;
+    this.validateConfigRanges(normalized);
     this.recoveryStrategy.normalizeConfig(normalized);
     return normalized;
+  }
+
+  private validateConfigRanges(input: {
+    maxDcaOrders: number; dcaStepPercent: number; dcaMultipliers: number[]; takeProfitPercent: number;
+    subPositionTriggerPercent: number; subPositionTakeProfitPercent: number; basePositionPercent: number;
+    maxTotalRiskPercent: number; maxOpenPairs: number; cooldownMinutes: number;
+  }) {
+    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 3 || input.maxDcaOrders > 10) {
+      throw new BadRequestException('DCA levels must be an integer between 3 and 10');
+    }
+    if (input.dcaStepPercent < 3 || input.dcaStepPercent > 15) throw new BadRequestException('DCA trigger must be between 3% and 15%');
+    if (input.takeProfitPercent < 0.5 || input.takeProfitPercent > 5) throw new BadRequestException('Global take-profit must be between 0.5% and 5%');
+    if (input.subPositionTriggerPercent < 0.5 || input.subPositionTriggerPercent > 5) throw new BadRequestException('Sub-position trigger must be between 0.5% and 5%');
+    if (input.subPositionTakeProfitPercent < 0.5 || input.subPositionTakeProfitPercent > 5) throw new BadRequestException('Sub-position take-profit must be between 0.5% and 5%');
+    if (input.basePositionPercent < 0.1 || input.basePositionPercent > 5) throw new BadRequestException('Base position size must be between 0.1% and 5% of capital');
+    if (input.maxTotalRiskPercent < 1 || input.maxTotalRiskPercent > 10) throw new BadRequestException('Maximum total risk must be between 1% and 10% of capital');
+    if (!Number.isInteger(input.maxOpenPairs) || input.maxOpenPairs < 1 || input.maxOpenPairs > 20) throw new BadRequestException('Maximum open pairs must be between 1 and 20');
+    if (!Number.isInteger(input.cooldownMinutes) || input.cooldownMinutes < 0 || input.cooldownMinutes > 1440) throw new BadRequestException('Cooldown must be between 0 and 1440 minutes');
+    if (input.dcaMultipliers.length < input.maxDcaOrders) throw new BadRequestException('DCA multipliers must cover every configured DCA level');
+    if (input.dcaMultipliers.some((value) => !Number.isFinite(value) || value <= 0)) throw new BadRequestException('Every DCA multiplier must be a positive number');
   }
 }

@@ -67,6 +67,8 @@ export class TestnetActionRetrySchedulerService {
             actionKey: action.actionKey,
             level: action.level,
             triggerPrice: action.triggerPrice ? Number(action.triggerPrice) : null,
+            orderType: action.side === 'BUY' ? 'LIMIT' : 'MARKET',
+            limitPrice: action.side === 'BUY' && action.triggerPrice ? Number(action.triggerPrice) : null,
             allowRunningStrategy: true,
             retryActionId: action.id,
           });
