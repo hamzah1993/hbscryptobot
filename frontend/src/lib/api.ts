@@ -5,6 +5,7 @@ export type AuthUser = {
   email: string;
   fullName: string;
   role: string;
+  createdAt?: string;
 };
 
 export type TradingOrder = {
