@@ -142,7 +142,7 @@ describe('TestnetStrategyRunnerService', () => {
         id: 'position-1',
         totalQuantity: 5,
         totalCostQuote: 500,
-        dcaCount: 2,
+        dcaCount: 3,
         nextDcaPrice: 45,
         takeProfitPrice: 80,
         subPositions: [{
@@ -166,7 +166,7 @@ describe('TestnetStrategyRunnerService', () => {
       userId,
       expect.objectContaining({
         actionType: 'INDEPENDENT_ENTRY',
-        level: 4,
+        level: 5,
         quantity: 1.25,
       }),
     );
@@ -179,7 +179,7 @@ describe('TestnetStrategyRunnerService', () => {
         id: 'position-1',
         totalQuantity: 5,
         totalCostQuote: 500,
-        dcaCount: 2,
+        dcaCount: 3,
         nextDcaPrice: 45,
         takeProfitPrice: 80,
         subPositions: [{
@@ -200,6 +200,41 @@ describe('TestnetStrategyRunnerService', () => {
       message: 'No remaining risk budget is available for DCA',
     });
     expect(testnetExecution.executeMarketOrder).not.toHaveBeenCalled();
+  });
+
+  it('progresses from a filled independent level to the next configured level', async () => {
+    const strategy = {
+      ...baseStrategy,
+      maxDcaOrders: 5,
+      positions: [{
+        id: 'position-1',
+        totalQuantity: 4,
+        totalCostQuote: 300,
+        dcaCount: 4,
+        nextDcaPrice: 35,
+        takeProfitPrice: 80,
+        subPositions: [{
+          id: 'sub-5',
+          level: 5,
+          quantity: 2,
+          costQuote: 80,
+          takeProfitPrice: 50,
+        }],
+      }],
+    };
+    const { service, testnetExecution } = createService([strategy], 30);
+
+    const result = await service.runUserStrategies(userId);
+
+    expect(result[0].action).toBe('INDEPENDENT_ENTRY');
+    expect(testnetExecution.executeMarketOrder).toHaveBeenCalledWith(
+      userId,
+      expect.objectContaining({
+        actionType: 'INDEPENDENT_ENTRY',
+        level: 6,
+        actionKey: 'strategy:strategy-1:position:position-1:independent-entry:6',
+      }),
+    );
   });
 
   it('prioritizes an independent take-profit exit', async () => {
