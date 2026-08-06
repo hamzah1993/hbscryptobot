@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
+import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
@@ -23,20 +24,18 @@ export class TestnetActionRetrySchedulerService {
     private readonly actions: TestnetStrategyActionService,
     private readonly execution: TestnetStrategyExecutionService,
     private readonly redisLock: RedisLockService,
+    private readonly health: TestnetRunnerHealthService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
   async runDueRetries() {
     if (this.running) return;
-
     this.running = true;
     let lock: RedisLock | null = null;
 
     try {
-      lock = await this.redisLock.acquire(
-        RETRY_SCHEDULER_LOCK_KEY,
-        getRetrySchedulerLockTtlMilliseconds(),
-      );
+      lock = await this.redisLock.acquire(RETRY_SCHEDULER_LOCK_KEY, getRetrySchedulerLockTtlMilliseconds());
+      this.health.markRedisAvailable();
       if (!lock) return;
 
       const dueActions = await this.prisma.strategyAction.findMany({
@@ -44,36 +43,24 @@ export class TestnetActionRetrySchedulerService {
           status: 'FAILED',
           retryable: true,
           nextRetryAt: { lte: new Date() },
-          strategy: {
-            status: 'RUNNING',
-            environment: 'TESTNET',
-            paperTrading: false,
-          },
+          strategy: { status: 'RUNNING', mode: 'BINANCE_TESTNET', environment: 'TESTNET', paperTrading: false },
         },
-        include: {
-          strategy: true,
-          position: true,
-          subPosition: true,
-          order: true,
-        },
+        include: { strategy: true, position: true, subPosition: true, order: true },
         orderBy: [{ nextRetryAt: 'asc' }, { createdAt: 'asc' }],
         take: 50,
       });
 
       let retried = 0;
       let failed = 0;
-
       for (const action of dueActions) {
         try {
           const claimed = await this.actions.claimRetry(action.id);
           if (!claimed) continue;
-
           if (action.order?.status === 'PENDING' || action.order?.status === 'PARTIALLY_FILLED') {
             await this.actions.markFailed(action.id, new Error('Linked Testnet order is still unresolved'));
             failed += 1;
             continue;
           }
-
           await this.execution.executeMarketOrder(action.userId, {
             strategyId: action.strategyId,
             side: action.side,
@@ -87,38 +74,30 @@ export class TestnetActionRetrySchedulerService {
           retried += 1;
         } catch (error: unknown) {
           failed += 1;
+          this.health.markError(error);
           try {
             await this.actions.markFailed(action.id, error);
           } catch (markError) {
-            this.logger.error(
-              `Failed to persist retry outcome for Testnet action ${action.id}`,
-              markError instanceof Error ? markError.stack : String(markError),
-            );
+            this.health.markError(markError);
+            this.logger.error(`Failed to persist retry outcome for Testnet action ${action.id}`, markError instanceof Error ? markError.stack : String(markError));
           }
         }
       }
 
-      if (retried > 0) {
-        this.logger.log(`Retried ${retried} due Binance Testnet action(s)`);
-      }
-      if (failed > 0) {
-        this.logger.warn(`${failed} Binance Testnet retry attempt(s) failed`);
-      }
+      this.health.markRetryTick();
+      if (retried > 0) this.logger.log(`Retried ${retried} due Binance Testnet action(s)`);
+      if (failed > 0) this.logger.warn(`${failed} Binance Testnet retry attempt(s) failed`);
     } catch (error: unknown) {
-      this.logger.error(
-        'Scheduled Binance Testnet action retry processing failed',
-        error instanceof Error ? error.stack : String(error),
-      );
+      this.health.markRedisUnavailable(error);
+      this.health.markError(error);
+      this.logger.error('Scheduled Binance Testnet action retry processing failed', error instanceof Error ? error.stack : String(error));
     } finally {
       if (lock) {
         try {
           await this.redisLock.release(lock);
         } catch (error: unknown) {
-          this.logger.warn(
-            `Failed to release Testnet retry scheduler lock: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+          this.health.markError(error);
+          this.logger.warn(`Failed to release Testnet retry scheduler lock: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       this.running = false;
