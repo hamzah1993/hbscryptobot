@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MarketDataService } from '../market/market-data.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
-import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+import { TestnetStrategyExecutionRouterService } from './testnet-strategy-execution-router.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
 
 export type TestnetStrategyRunnerAction =
@@ -50,7 +50,7 @@ export class TestnetStrategyRunnerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly marketData: MarketDataService,
-    private readonly testnetExecution: TestnetStrategyExecutionService,
+    private readonly testnetExecution: TestnetStrategyExecutionRouterService,
     private readonly redisLock: RedisLockService,
     private readonly recoveryStrategy: RecoveryStrategyService,
   ) {}

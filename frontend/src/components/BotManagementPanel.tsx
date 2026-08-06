@@ -181,7 +181,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Bot operations</p>
-            <h3 className="mt-2 text-2xl font-semibold">{mode === 'PAPER' ? 'Paper bots' : 'Binance Testnet bots'}</h3>
+            <h3 className="mt-2 text-2xl font-semibold">{mode === 'PAPER' ? 'Paper bots' : 'Testnet / Demo bots'}</h3>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Only the globally selected environment is shown here.</p>
           </div>
           <button onClick={() => void load()} disabled={loading} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh bots'}</button>
@@ -221,7 +221,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                     <div className="flex flex-wrap items-center gap-2">
                       <h4 className="text-lg font-semibold">{strategy.name}</h4>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status === 'RUNNING' ? 'bg-emerald-400/15 text-emerald-300' : status === 'PAUSED' ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-300'}`}>{status}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${mode === 'PAPER' ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{mode === 'PAPER' ? 'Paper' : 'Binance Testnet'}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${mode === 'PAPER' ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{mode === 'PAPER' ? 'Paper' : strategy.exchange === 'OKX' ? 'OKX Demo' : `${strategy.exchange ?? 'BINANCE'} Testnet`}</span>
                       {pendingOrders > 0 && <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-300">{pendingOrders} pending order{pendingOrders === 1 ? '' : 's'}</span>}
                     </div>
                     <p className="mt-2 text-sm text-slate-400">{strategy.symbol}</p>
@@ -255,7 +255,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                       <Field label="Bot name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
                       <NumberField label="Risk budget" value={draft.riskBudgetQuote} onChange={(value) => setDraft({ ...draft, riskBudgetQuote: value })} />
                       <NumberField label="Base order" value={draft.baseOrderQuote} onChange={(value) => setDraft({ ...draft, baseOrderQuote: value })} />
-                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={3} max={10} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
+                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={3} max={5} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
                       <NumberField label="DCA trigger (%)" value={draft.dcaStepPercent} min={3} max={15} onChange={(value) => setDraft({ ...draft, dcaStepPercent: value })} />
                       <Field label="DCA multipliers" value={draft.dcaMultipliers.join(', ')} onChange={(value) => setDraft({ ...draft, dcaMultipliers: value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0) })} />
                       <NumberField label="Global TP (%)" value={draft.takeProfitPercent} min={0.5} max={5} onChange={(value) => setDraft({ ...draft, takeProfitPercent: value })} />

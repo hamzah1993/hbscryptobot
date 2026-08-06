@@ -30,6 +30,7 @@ import { TestnetOrderSyncSchedulerService } from './testnet-order-sync-scheduler
 import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+import { TestnetStrategyExecutionRouterService } from './testnet-strategy-execution-router.service';
 import { TestnetStrategyRiskService } from './testnet-strategy-risk.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
 import { TestnetStrategySchedulerService } from './testnet-strategy-scheduler.service';
@@ -77,6 +78,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetActionTimelineService,
     TestnetEmergencyStopService,
     TestnetStrategyRunnerService,
+    TestnetStrategyExecutionRouterService,
     TestnetStrategySchedulerService,
   ],
   exports: [
@@ -101,6 +103,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetActionTimelineService,
     TestnetEmergencyStopService,
     TestnetStrategyRunnerService,
+    TestnetStrategyExecutionRouterService,
     TestnetRunnerHealthService,
   ],
 })

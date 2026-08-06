@@ -10,6 +10,7 @@ type Props = {
 
 type BotMode = 'PAPER' | 'TESTNET';
 type EntryOrderType = 'LIMIT' | 'MARKET';
+type BotExchange = 'BINANCE' | 'BYBIT' | 'OKX';
 type Balance = { asset: string; free: number; locked: number };
 
 type WizardForm = CreateStrategyPayload & {
@@ -20,13 +21,14 @@ type WizardForm = CreateStrategyPayload & {
 };
 
 const initialForm: WizardForm = {
-  name: 'Testnet DCA Bot', symbol: '', environment: 'TESTNET', paperTrading: false,
+  name: 'Testnet DCA Bot', symbol: '', exchange: 'BINANCE', environment: 'TESTNET', paperTrading: false,
   riskBudgetQuote: 1000, baseOrderQuote: 100, maxDcaOrders: 5, dcaStepPercent: 5,
   dcaMultiplier: 1.5, dcaMultipliers: [1, 1.5, 2, 3, 5], takeProfitPercent: 1.5,
   subPositionTriggerPercent: 2, subPositionTakeProfitPercent: 1.5, independentFromLevel: 5,
   basePositionPercent: 1, maxTotalRiskPercent: 3, maxOpenPairs: 5, cooldownMinutes: 60,
   recoveryEnabled: true, recoveryMaxOrders: 5, recoveryStepPercents: [5, 8, 12, 18, 25],
   recoveryMultipliers: [1, 1.5, 2, 3, 5], recoveryTakeProfitPercent: 1.5,
+  maxStrategyExposureQuote: 1000, maxOrderQuote: 500, maxDailyRealizedLossQuote: 100,
   marketPrice: 0, mode: 'TESTNET', entryOrderType: 'MARKET', entryLimitPrice: 0,
 };
 
@@ -67,6 +69,8 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   }, [form.baseOrderQuote, form.dcaMultiplier, form.dcaMultipliers, form.maxDcaOrders, form.riskBudgetQuote]);
   const remainingRiskBudget = Math.max(form.riskBudgetQuote - form.baseOrderQuote, 0);
   const recoveryReserve = Math.max(form.riskBudgetQuote - plannedDcaExposure, 0);
+  const exchangeRoutingLocked = form.mode === 'TESTNET' && form.exchange !== 'BINANCE';
+  const exchangeLabel = form.exchange === 'OKX' ? 'OKX Demo' : `${form.exchange[0]}${form.exchange.slice(1).toLowerCase()} Testnet`;
 
   useEffect(() => {
     if (form.mode !== 'TESTNET' || quoteBalance <= 0) return;
@@ -86,6 +90,12 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   async function refreshBalances() {
     setLoadingBalances(true);
     try {
+      if (form.mode === 'TESTNET' && form.exchange !== 'BINANCE') {
+        setBalances([]);
+        setAvailableSymbols(['BTCUSDT', 'ETHUSDT']);
+        setForm((current) => ({ ...current, symbol: current.symbol || 'BTCUSDT' }));
+        return;
+      }
       const result = await api.getBinanceTestnetBalances(token);
       const nextBalances = result.balances.map((balance) => ({ ...balance, asset: balance.asset.toUpperCase() }));
       setBalances(nextBalances);
@@ -103,7 +113,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     }
   }
 
-  useEffect(() => { void refreshBalances(); }, [token]);
+  useEffect(() => { void refreshBalances(); }, [token, form.exchange, form.mode]);
 
   useEffect(() => {
     if (!form.symbol) return;
@@ -136,7 +146,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   }
 
   async function loadPreview() {
-    if (form.mode !== 'TESTNET') return;
+    if (form.mode !== 'TESTNET' || form.exchange !== 'BINANCE') return;
     setPreviewing(true); setError(null);
     try {
       await refreshBalances();
@@ -153,7 +163,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
     if (form.mode === 'TESTNET' && form.entryOrderType === 'LIMIT' && (!Number.isFinite(form.entryLimitPrice) || form.entryLimitPrice <= 0)) return setError('Enter a positive Limit Buy price.');
     if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
-    if (step === 2 && form.mode === 'TESTNET') {
+    if (step === 2 && form.mode === 'TESTNET' && form.exchange === 'BINANCE') {
       setPreviewing(true);
       try {
         const result = await api.previewTestnetOrder(token, { symbol: form.symbol, quoteAmount: form.baseOrderQuote });
@@ -168,6 +178,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   async function submit() {
     if (!form.name.trim()) return setError('Bot name is required.');
     if (duplicateName) return setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
+    if (exchangeRoutingLocked) return setError(`${exchangeLabel} strategy routing stays locked until its credential-backed E2E lifecycle test passes.`);
     if (!form.symbol || !form.marketPrice) return setError('A symbol and current market price are required.');
     if (form.mode === 'TESTNET' && form.entryOrderType === 'LIMIT' && (!Number.isFinite(form.entryLimitPrice) || form.entryLimitPrice <= 0)) return setError('Enter a positive Limit Buy price.');
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
@@ -204,21 +215,23 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   const metric = (label: string, value: string) => <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><p className="text-xs uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 break-all font-medium">{value}</p></div>;
 
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 p-2 backdrop-blur-sm sm:p-4"><div className="flex min-h-full items-start justify-center py-2 sm:items-center sm:py-6"><div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0a1728] shadow-2xl sm:max-h-[calc(100dvh-3rem)]">
-    <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-4 sm:px-6"><div><p className="text-xs uppercase tracking-[0.28em] text-cyan-300">Create bot</p><h2 className="mt-1 text-xl font-semibold">{form.mode === 'PAPER' ? 'Paper strategy setup' : 'Binance Testnet setup'}</h2></div><button onClick={onClose} className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300">Close</button></div>
+    <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-4 sm:px-6"><div><p className="text-xs uppercase tracking-[0.28em] text-cyan-300">Create bot</p><h2 className="mt-1 text-xl font-semibold">{form.mode === 'PAPER' ? 'Paper strategy setup' : `${exchangeLabel} setup`}</h2></div><button onClick={onClose} className="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300">Close</button></div>
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-      <div className="mb-5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">Environment: <strong>{form.mode === 'PAPER' ? 'Paper' : 'Binance Testnet'}</strong>. Change it from the global header before opening Create Bot.</div>
+      <div className="mb-5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-300">Environment: <strong>{form.mode === 'PAPER' ? 'Paper' : exchangeLabel}</strong>. PAPER / TESTNET / LIVE remains controlled from the global header.</div>
       <div className="mb-6 grid grid-cols-3 gap-2 text-xs">{['Basics', 'Risk & DCA', 'Review'].map((label, index) => <div key={label} className={`rounded-xl px-2 py-2 text-center ${step === index + 1 ? 'bg-cyan-400 text-slate-950' : 'bg-white/[0.04] text-slate-400'}`}>{index + 1}. {label}</div>)}</div>
       {error && <div className="mb-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
       {step === 1 && <div className="grid gap-4 sm:grid-cols-2">
         <label className="text-sm text-slate-300">Bot name<input value={form.name} onChange={(event) => update('name', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" />{duplicateName && <span className="mt-1 block text-xs text-rose-300">A bot with this name already exists.</span>}</label>
+        {form.mode === 'TESTNET' && <label className="text-sm text-slate-300">Exchange<select value={form.exchange} onChange={(event) => update('exchange', event.target.value as BotExchange)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#101f32] px-4 py-3"><option value="BINANCE">Binance</option><option value="BYBIT">Bybit</option><option value="OKX">OKX</option></select></label>}
         <label className="text-sm text-slate-300">Symbol pair<select disabled={loadingBalances} value={form.symbol} onChange={(event) => update('symbol', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#101f32] px-4 py-3">{availableSymbols.map((symbol) => <option key={symbol}>{symbol}</option>)}</select></label>
+        {exchangeRoutingLocked && <div className="sm:col-span-2 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">{exchangeLabel} is available as a bot exchange, but strategy execution stays locked until its credential-backed Demo/Testnet E2E lifecycle test passes.</div>}
         {form.mode === 'TESTNET' && <div className="sm:col-span-2"><p className="text-sm text-slate-300">Initial buy type</p><div className="mt-2 grid grid-cols-2 gap-3"><button type="button" onClick={() => update('entryOrderType', 'MARKET')} className={`rounded-xl border px-4 py-3 text-left ${form.entryOrderType === 'MARKET' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-white/10 bg-white/[0.04] text-slate-300'}`}><span className="block font-medium">Market Buy</span><span className="mt-1 block text-xs opacity-70">Buy at the current market price</span></button><button type="button" onClick={() => update('entryOrderType', 'LIMIT')} className={`rounded-xl border px-4 py-3 text-left ${form.entryOrderType === 'LIMIT' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-white/10 bg-white/[0.04] text-slate-300'}`}><span className="block font-medium">Limit Buy</span><span className="mt-1 block text-xs opacity-70">You choose the buy price</span></button></div></div>}
         {form.mode === 'PAPER'
           ? <label className="text-sm text-slate-300 sm:col-span-2">Entry price<input type="number" min="0" step="any" value={form.marketPrice || ''} placeholder={loadingPrice ? 'Loading…' : 'Current market price'} onChange={(event) => update('marketPrice', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
           : form.entryOrderType === 'LIMIT'
             ? <label className="text-sm text-slate-300 sm:col-span-2">Limit Buy price<input type="number" min="0" step="any" value={form.entryLimitPrice || ''} placeholder="Enter your limit price" onChange={(event) => update('entryLimitPrice', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">Current market: {loadingPrice ? 'Loading…' : form.marketPrice > 0 ? `$${form.marketPrice.toLocaleString()}` : 'Unavailable'}</span></label>
             : <div className="sm:col-span-2">{metric('Market Buy price', loadingPrice ? 'Loading…' : form.marketPrice > 0 ? `$${form.marketPrice.toLocaleString()}` : 'Unavailable')}</div>}
-        {form.mode === 'TESTNET' && <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}{metric(`Available ${pair.quoteAsset}`, quoteBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}<button type="button" onClick={() => void refreshBalances()} className="sm:col-span-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-200">Refresh balances</button></div>}
+        {form.mode === 'TESTNET' && form.exchange === 'BINANCE' && <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}{metric(`Available ${pair.quoteAsset}`, quoteBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}<button type="button" onClick={() => void refreshBalances()} className="sm:col-span-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-200">Refresh balances</button></div>}
       </div>}
       {step === 2 && <div className="grid gap-4 sm:grid-cols-2">{[
         ['riskBudgetQuote','Fixed risk budget (USDT)'],['baseOrderQuote','Base order (USDT)'],['dcaStepPercent','DCA trigger from last entry (%)'],['takeProfitPercent','Global TP after DCA (%)'],['subPositionTriggerPercent','Sub-position trigger (%)'],['subPositionTakeProfitPercent','Sub-position TP (%)'],
@@ -228,7 +241,10 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
       })}
         <label className="text-sm text-slate-300">Base position (% capital)<input type="number" min="0.1" max="5" step="0.1" value={form.basePositionPercent} onChange={(event) => update('basePositionPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300">Max total risk per pair (% capital)<input type="number" min="1" max="10" step="0.1" value={form.maxTotalRiskPercent} onChange={(event) => update('maxTotalRiskPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
-        <label className="text-sm text-slate-300">Maximum DCA orders<input type="number" min="3" max="10" step="1" value={form.maxDcaOrders} onChange={(event) => update('maxDcaOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300">Maximum DCA orders<input type="number" min="3" max="5" step="1" value={form.maxDcaOrders} onChange={(event) => update('maxDcaOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">Hard capped at 5 DCA levels.</span></label>
+        <label className="text-sm text-slate-300">Maximum single order (USDT)<input type="number" min="0.01" step="any" value={form.maxOrderQuote ?? ''} onChange={(event) => update('maxOrderQuote', event.target.value ? Number(event.target.value) : null)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300">Maximum strategy exposure (USDT)<input type="number" min="0.01" step="any" value={form.maxStrategyExposureQuote ?? ''} onChange={(event) => update('maxStrategyExposureQuote', event.target.value ? Number(event.target.value) : null)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        <label className="text-sm text-slate-300">Daily realized loss stop (USDT)<input type="number" min="0.01" step="any" value={form.maxDailyRealizedLossQuote ?? ''} onChange={(event) => update('maxDailyRealizedLossQuote', event.target.value ? Number(event.target.value) : null)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300 sm:col-span-2">DCA size multipliers<input value={form.dcaMultipliers.join(', ')} onChange={(event) => update('dcaMultipliers', event.target.value.split(',').map((value) => Number(value.trim())).filter((value) => Number.isFinite(value)))} placeholder="1, 1.5, 2, 3, 5" className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">One multiplier per DCA level. Defaults: 1×, 1.5×, 2×, 3×, 5×.</span></label>
         <label className="text-sm text-slate-300">Maximum open pairs<input type="number" min="1" max="20" step="1" value={form.maxOpenPairs} onChange={(event) => update('maxOpenPairs', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300">Cooldown after TP (minutes)<input type="number" min="0" max="1440" step="1" value={form.cooldownMinutes} onChange={(event) => update('cooldownMinutes', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
