@@ -79,11 +79,19 @@ export class ProductionReadinessService {
     const liveChecks = {
       productionHardeningReady,
       operationalNotificationProvider: hardeningChecks.operationalNotificationProvider,
+      fixedRiskBudgetEnforced: true,
+      perBotRiskCeilingsImplemented: true,
+      dailyLossGateImplemented: true,
+      emergencyExitWorkflowImplemented: true,
+      emergencyReentryBlockImplemented: true,
+      binanceStrategyRoutingVerified: true,
+      bybitStrategyRoutingVerified: false,
+      okxStrategyRoutingVerified: false,
       liveFeatureFlag,
       liveRoutingImplemented,
       liveCredentialsConfigured: credentialGroups.some((group) => group.environment === 'LIVE' && group._count._all > 0),
       explicitLiveConfirmationImplemented: false,
-      emergencyExitImplemented: false,
+      liveEmergencyExitAdapterVerified: false,
     };
 
     return {

@@ -27,6 +27,10 @@ enum TradingMode {
   PAPER
   BINANCE_TESTNET
   BINANCE_LIVE
+  BYBIT_TESTNET
+  BYBIT_LIVE
+  OKX_TESTNET
+  OKX_LIVE
 }
 
 enum StrategyStatus {

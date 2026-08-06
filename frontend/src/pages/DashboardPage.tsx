@@ -21,6 +21,7 @@ import {
   type OperationalNotification,
   type StrategyStatus,
   type TestnetEmergencyStopResponse,
+  type TestnetEmergencyExitResponse,
   type TestnetPosition,
   type TradingPosition,
 } from '../lib/api';
@@ -81,6 +82,9 @@ export function DashboardPage() {
   const [emergencyStopBusy, setEmergencyStopBusy] = useState(false);
   const [emergencyStopResult, setEmergencyStopResult] = useState<TestnetEmergencyStopResponse | null>(null);
   const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
+  const [showEmergencyExitConfirm, setShowEmergencyExitConfirm] = useState(false);
+  const [emergencyExitBusy, setEmergencyExitBusy] = useState(false);
+  const [emergencyExitResult, setEmergencyExitResult] = useState<TestnetEmergencyExitResponse | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [toastNotifications, setToastNotifications] = useState<OperationalNotification[]>([]);
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(
@@ -288,6 +292,23 @@ export function DashboardPage() {
     }
   }
 
+  async function runEmergencyExit() {
+    if (!token) return;
+    setEmergencyExitBusy(true);
+    setEmergencyStopError(null);
+    setEmergencyExitResult(null);
+    try {
+      const result = await api.emergencyExitTestnet(token);
+      setEmergencyExitResult(result);
+      setShowEmergencyExitConfirm(false);
+      await loadPositions(true);
+    } catch (reason: unknown) {
+      setEmergencyStopError(reason instanceof Error ? reason.message : 'Unable to emergency-exit Testnet positions');
+    } finally {
+      setEmergencyExitBusy(false);
+    }
+  }
+
   const dashboardPositions = mode === 'PAPER' ? paperPositions : mode === 'TESTNET' ? testnetPositions : [];
   const openPositions = dashboardPositions.filter((position) => position.status === 'OPEN');
   const independentCost = (position: TradingPosition | TestnetPosition) => position.subPositions
@@ -337,11 +358,26 @@ export function DashboardPage() {
           <section className="w-full max-w-lg rounded-2xl border border-rose-400/30 bg-[#0a1728] p-6 shadow-2xl shadow-rose-950/40">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-rose-300">Testnet safety control</p>
             <h3 className="mt-3 text-2xl font-semibold">Stop all Testnet strategies?</h3>
-            <p className="mt-3 text-sm leading-6 text-slate-400">This stops every running or paused non-paper Testnet strategy and cancels pending strategy actions. It does not cancel already-submitted Binance orders or close open positions.</p>
+            <p className="mt-3 text-sm leading-6 text-slate-400">This stops every running or paused non-paper Testnet strategy and cancels pending strategy actions and cancellable Binance orders. It does not close open positions.</p>
             {emergencyStopError && <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{emergencyStopError}</p>}
             <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button type="button" disabled={emergencyStopBusy} onClick={() => setShowEmergencyStopConfirm(false)} className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 disabled:opacity-50">Keep running</button>
               <button type="button" disabled={emergencyStopBusy} onClick={() => void runEmergencyStop()} className="rounded-xl bg-rose-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{emergencyStopBusy ? 'Stopping…' : 'Confirm emergency stop'}</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {showEmergencyExitConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
+          <section className="w-full max-w-lg rounded-2xl border border-rose-500/40 bg-[#0a1728] p-6 shadow-2xl shadow-rose-950/50">
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-rose-300">Emergency market exit</p>
+            <h3 className="mt-3 text-2xl font-semibold">Close all Binance Testnet exposure now?</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-300">This pauses automation, cancels pending execution where possible, submits MARKET sells for open parent and independent positions, then leaves every affected bot STOPPED so it cannot reopen.</p>
+            <p className="mt-3 text-xs font-semibold text-rose-200">This is an exit action, not the normal Emergency Stop.</p>
+            {emergencyStopError && <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{emergencyStopError}</p>}
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button type="button" disabled={emergencyExitBusy} onClick={() => setShowEmergencyExitConfirm(false)} className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-300 disabled:opacity-50">Cancel</button>
+              <button type="button" disabled={emergencyExitBusy} onClick={() => void runEmergencyExit()} className="rounded-xl bg-rose-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{emergencyExitBusy ? 'Closing…' : 'MARKET close all'}</button>
             </div>
           </section>
         </div>
@@ -396,14 +432,16 @@ export function DashboardPage() {
               </div>
               <button type="button" onClick={toggleNotificationSounds} className="hidden rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] sm:block">{notificationSoundsEnabled ? 'Disable sounds' : 'Enable sounds'}</button>
               {'Notification' in window && (browserNotificationsEnabled ? <button type="button" onClick={disableBrowserNotifications} className="hidden rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] md:block">Disable browser alerts</button> : <button type="button" onClick={() => void enableBrowserNotifications()} className="hidden rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20 md:block">Enable browser alerts</button>)}
-              {mode === 'TESTNET' && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyStopConfirm(true); }} className="rounded-xl border border-rose-400/40 bg-rose-400/10 px-4 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-400/20">Emergency stop</button>}
+              {mode === 'TESTNET' && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyStopConfirm(true); }} className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2.5 text-sm font-semibold text-amber-200 hover:bg-amber-400/20">Emergency stop</button>}
+              {mode === 'TESTNET' && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyExitConfirm(true); }} className="rounded-xl border border-rose-500/50 bg-rose-500/15 px-4 py-2.5 text-sm font-semibold text-rose-100 hover:bg-rose-500/25">Emergency exit</button>}
               {mode !== 'LIVE' && <button onClick={() => setShowCreateBot(true)} className="flex-1 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 sm:flex-none">Create bot</button>}
               <button type="button" onClick={() => selectNavigation('Profile')} aria-label="Open profile" className="hidden h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-sm font-semibold lg:flex">{initials}</button>
             </div>
           </header>
           {mode === 'LIVE' && !liveExecutionEnabled && <div className="mt-5 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">Live public market data is available. Live bot creation, positions and order execution remain disabled.</div>}
           {mode === 'LIVE' && token && <ProductionReadinessPanel token={token} />}
-          {emergencyStopResult && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">Emergency stop completed at {new Date(emergencyStopResult.stoppedAt).toLocaleString()}. Stopped {emergencyStopResult.stoppedStrategies} strateg{emergencyStopResult.stoppedStrategies === 1 ? 'y' : 'ies'} and cancelled {emergencyStopResult.cancelledPendingActions} pending action{emergencyStopResult.cancelledPendingActions === 1 ? '' : 's'}.</div>}
+          {emergencyStopResult && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">Emergency stop completed at {new Date(emergencyStopResult.stoppedAt).toLocaleString()}. Stopped {emergencyStopResult.stoppedStrategies} strateg{emergencyStopResult.stoppedStrategies === 1 ? 'y' : 'ies'} and cancelled {emergencyStopResult.cancelledPendingOrRetryableActions ?? emergencyStopResult.cancelledPendingActions ?? 0} pending/retryable actions.</div>}
+          {emergencyExitResult && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">Emergency exit submitted {emergencyExitResult.exitOrdersSubmitted} market close order{emergencyExitResult.exitOrdersSubmitted === 1 ? '' : 's'} across {emergencyExitResult.positionsFound} position{emergencyExitResult.positionsFound === 1 ? '' : 's'}. Re-entry is blocked. Failures: {emergencyExitResult.failedCloses + emergencyExitResult.cancellationFailures}.</div>}
           {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live bots" /> : <BotManagementPanel token={token} mode={mode} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} />) : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live trade history" /> : <TradeHistoryPanel token={token} mode={mode} />) : activeNav === 'Positions' && token ? (mode === 'LIVE' ? <DisabledLivePanel label="Live positions" /> : <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={mode} />) : activeNav === 'Strategies' && token ? (mode === 'TESTNET' ? <TestnetActionTimelinePanel token={token} /> : <EnvironmentEmptyPanel mode={mode} label="strategy action timeline" />) : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : activeNav === 'Profile' && user ? <UserProfilePanel user={user} onLogout={logout} /> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section>{mode !== 'LIVE' && <section className="mt-4 grid gap-3 rounded-2xl border border-white/10 bg-white/[0.025] p-4 sm:grid-cols-2 xl:grid-cols-4"><DashboardMiniMetric label="Bot state" value={`${runningBots} running · ${pausedBots} paused`} /><DashboardMiniMetric label="Recovery" value={`${recoveryPositions} active`} /><DashboardMiniMetric label="Risk utilization" value={`${riskUtilization.toFixed(1)}% of ${money(openRiskBudget)}`} /><DashboardMiniMetric label="Risk budget remaining" value={money(remainingRiskBudget)} /></section>}<p className="mt-3 text-xs text-slate-500">Dashboard last updated: {lastUpdatedAt ? lastUpdatedAt.toLocaleTimeString() : '—'}</p><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} environment={marketEnvironment} showTestnetOverlays={mode === 'TESTNET'} />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {environmentLabel} operations. Live-money order execution remains disabled.</p>{streamError && <p className="mt-2 text-xs text-amber-300">{streamError}</p>}{streamStatus && !streamBusy && <p className="mt-2 text-xs text-slate-500">Market stream: {streamStatus.connected ? 'connected' : 'disconnected'}</p>}</section></>}
         </section>
       </div>

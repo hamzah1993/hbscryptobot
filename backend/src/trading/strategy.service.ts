@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { ExchangeName, Prisma, TradingMode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
@@ -7,6 +7,7 @@ import { RecoveryStrategyService } from './recovery-strategy.service';
 export type StrategyInput = {
   name: string;
   symbol: string;
+  exchange?: 'BINANCE' | 'BYBIT' | 'OKX';
   environment?: 'TESTNET' | 'LIVE';
   paperTrading?: boolean;
   riskBudgetQuote: number;
@@ -28,6 +29,9 @@ export type StrategyInput = {
   recoveryStepPercents?: number[];
   recoveryMultipliers?: number[];
   recoveryTakeProfitPercent?: number;
+  maxStrategyExposureQuote?: number | null;
+  maxOrderQuote?: number | null;
+  maxDailyRealizedLossQuote?: number | null;
 };
 
 @Injectable()
@@ -48,6 +52,7 @@ export class StrategyService {
           userId,
           name: normalized.name,
           symbol: normalized.symbol,
+          exchange: normalized.exchange,
           environment: normalized.environment,
           mode: normalized.mode,
           paperTrading: normalized.paperTrading,
@@ -70,6 +75,9 @@ export class StrategyService {
           recoveryStepPercents: normalized.recoveryStepPercents,
           recoveryMultipliers: normalized.recoveryMultipliers,
           recoveryTakeProfitPercent: normalized.recoveryTakeProfitPercent,
+          maxStrategyExposureQuote: normalized.maxStrategyExposureQuote,
+          maxOrderQuote: normalized.maxOrderQuote,
+          maxDailyRealizedLossQuote: normalized.maxDailyRealizedLossQuote,
         },
       });
     } catch (error) {
@@ -98,6 +106,7 @@ export class StrategyService {
     const merged = this.normalize({
       name: input.name ?? existing.name,
       symbol: input.symbol ?? existing.symbol,
+      exchange: input.exchange ?? existing.exchange,
       environment: input.environment ?? existing.environment,
       paperTrading: input.paperTrading ?? existing.paperTrading,
       riskBudgetQuote: input.riskBudgetQuote ?? Number(existing.riskBudgetQuote),
@@ -119,6 +128,9 @@ export class StrategyService {
       recoveryStepPercents: input.recoveryStepPercents ?? (existing.recoveryStepPercents as number[]),
       recoveryMultipliers: input.recoveryMultipliers ?? (existing.recoveryMultipliers as number[]),
       recoveryTakeProfitPercent: input.recoveryTakeProfitPercent ?? Number(existing.recoveryTakeProfitPercent),
+      maxStrategyExposureQuote: input.maxStrategyExposureQuote !== undefined ? input.maxStrategyExposureQuote : existing.maxStrategyExposureQuote === null ? null : Number(existing.maxStrategyExposureQuote),
+      maxOrderQuote: input.maxOrderQuote !== undefined ? input.maxOrderQuote : existing.maxOrderQuote === null ? null : Number(existing.maxOrderQuote),
+      maxDailyRealizedLossQuote: input.maxDailyRealizedLossQuote !== undefined ? input.maxDailyRealizedLossQuote : existing.maxDailyRealizedLossQuote === null ? null : Number(existing.maxDailyRealizedLossQuote),
     });
     this.riskBudget.buildPlan(merged);
 
@@ -163,15 +175,15 @@ export class StrategyService {
 
     const environment = input.environment ?? 'TESTNET';
     const paperTrading = input.paperTrading ?? true;
+    const exchange = ExchangeName[input.exchange ?? 'BINANCE'];
     const mode = paperTrading
-      ? 'PAPER'
-      : environment === 'TESTNET'
-        ? 'BINANCE_TESTNET'
-        : 'BINANCE_LIVE';
+      ? TradingMode.PAPER
+      : TradingMode[`${exchange}_${environment}` as keyof typeof TradingMode];
 
     const normalized = {
       name,
       symbol,
+      exchange,
       environment,
       mode,
       paperTrading,
@@ -194,6 +206,9 @@ export class StrategyService {
       recoveryStepPercents: (input.recoveryStepPercents ?? [5, 8, 12, 18, 25]).map(Number),
       recoveryMultipliers: (input.recoveryMultipliers ?? [1, 1.5, 2, 3, 5]).map(Number),
       recoveryTakeProfitPercent: Number(input.recoveryTakeProfitPercent ?? 1.5),
+      maxStrategyExposureQuote: input.maxStrategyExposureQuote == null ? null : Number(input.maxStrategyExposureQuote),
+      maxOrderQuote: input.maxOrderQuote == null ? null : Number(input.maxOrderQuote),
+      maxDailyRealizedLossQuote: input.maxDailyRealizedLossQuote == null ? null : Number(input.maxDailyRealizedLossQuote),
     } as const;
     this.validateConfigRanges(normalized);
     this.recoveryStrategy.normalizeConfig(normalized);
@@ -204,9 +219,10 @@ export class StrategyService {
     maxDcaOrders: number; dcaStepPercent: number; dcaMultipliers: number[]; takeProfitPercent: number;
     subPositionTriggerPercent: number; subPositionTakeProfitPercent: number; basePositionPercent: number;
     maxTotalRiskPercent: number; maxOpenPairs: number; cooldownMinutes: number;
+    maxStrategyExposureQuote: number | null; maxOrderQuote: number | null; maxDailyRealizedLossQuote: number | null;
   }) {
-    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 3 || input.maxDcaOrders > 10) {
-      throw new BadRequestException('DCA levels must be an integer between 3 and 10');
+    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 3 || input.maxDcaOrders > 5) {
+      throw new BadRequestException('DCA levels must be an integer between 3 and 5');
     }
     if (input.dcaStepPercent < 3 || input.dcaStepPercent > 15) throw new BadRequestException('DCA trigger must be between 3% and 15%');
     if (input.takeProfitPercent < 0.5 || input.takeProfitPercent > 5) throw new BadRequestException('Global take-profit must be between 0.5% and 5%');
@@ -218,5 +234,14 @@ export class StrategyService {
     if (!Number.isInteger(input.cooldownMinutes) || input.cooldownMinutes < 0 || input.cooldownMinutes > 1440) throw new BadRequestException('Cooldown must be between 0 and 1440 minutes');
     if (input.dcaMultipliers.length < input.maxDcaOrders) throw new BadRequestException('DCA multipliers must cover every configured DCA level');
     if (input.dcaMultipliers.some((value) => !Number.isFinite(value) || value <= 0)) throw new BadRequestException('Every DCA multiplier must be a positive number');
+    for (const [label, value] of [
+      ['Maximum strategy exposure', input.maxStrategyExposureQuote],
+      ['Maximum order value', input.maxOrderQuote],
+      ['Maximum daily realized loss', input.maxDailyRealizedLossQuote],
+    ] as const) {
+      if (value !== null && value !== undefined && (!Number.isFinite(value) || value <= 0)) {
+        throw new BadRequestException(`${label} must be greater than zero when configured`);
+      }
+    }
   }
 }

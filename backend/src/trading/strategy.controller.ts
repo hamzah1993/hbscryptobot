@@ -141,6 +141,11 @@ export class StrategyController {
     return this.testnetEmergencyStop.stopUserStrategies(request.user.sub);
   }
 
+  @Post('testnet-emergency-exit')
+  emergencyExit(@Req() request: AuthenticatedRequest) {
+    return this.testnetEmergencyStop.exitUserPositions(request.user.sub);
+  }
+
   @Post()
   create(@Req() request: AuthenticatedRequest, @Body() body: StrategyInput) {
     return this.strategies.create(request.user.sub, body);

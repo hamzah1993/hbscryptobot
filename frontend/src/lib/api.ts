@@ -206,6 +206,7 @@ export type TradingStrategy = {
   id: string;
   name: string;
   symbol: string;
+  exchange?: 'BINANCE' | 'BYBIT' | 'OKX';
   status?: StrategyStatus;
   environment?: ExchangeEnvironment;
   paperTrading: boolean;
@@ -228,6 +229,9 @@ export type TradingStrategy = {
   recoveryStepPercents?: number[];
   recoveryMultipliers?: number[];
   recoveryTakeProfitPercent?: string;
+  maxStrategyExposureQuote?: string | null;
+  maxOrderQuote?: string | null;
+  maxDailyRealizedLossQuote?: string | null;
 };
 
 export type TradingPosition = {
@@ -455,7 +459,19 @@ export type TestnetEmergencyStopResponse = {
   environment: 'TESTNET';
   stoppedAt: string;
   stoppedStrategies: number;
-  cancelledPendingActions: number;
+  cancelledPendingActions?: number;
+  cancelledPendingOrRetryableActions?: number;
+};
+
+export type TestnetEmergencyExitResponse = {
+  environment: 'TESTNET';
+  exchange: 'BINANCE';
+  startedAt: string;
+  positionsFound: number;
+  exitOrdersSubmitted: number;
+  failedCloses: number;
+  cancellationFailures: number;
+  reentryBlocked: boolean;
 };
 
 export type MarketCandle = {
@@ -505,6 +521,7 @@ type AuthResponse = {
 export type CreateStrategyPayload = {
   name: string;
   symbol: string;
+  exchange: 'BINANCE' | 'BYBIT' | 'OKX';
   environment: ExchangeEnvironment;
   paperTrading: boolean;
   riskBudgetQuote: number;
@@ -526,6 +543,9 @@ export type CreateStrategyPayload = {
   recoveryStepPercents: number[];
   recoveryMultipliers: number[];
   recoveryTakeProfitPercent: number;
+  maxStrategyExposureQuote: number | null;
+  maxOrderQuote: number | null;
+  maxDailyRealizedLossQuote: number | null;
 };
 
 export type CreateBacktestPayload = {
@@ -641,6 +661,8 @@ export const api = {
     request<TestnetAction[]>(`/strategies/testnet-actions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   stopTestnetStrategies: (token: string) =>
     request<TestnetEmergencyStopResponse>('/strategies/testnet-emergency-stop', { method: 'POST', headers: authHeaders(token) }),
+  emergencyExitTestnet: (token: string) =>
+    request<TestnetEmergencyExitResponse>('/strategies/testnet-emergency-exit', { method: 'POST', headers: authHeaders(token) }),
   listExchangeCredentials: (token: string) =>
     request<ExchangeCredentialSummary[]>('/exchange/credentials', { headers: authHeaders(token) }),
   saveBinanceCredentials: (token: string, payload: { apiKey: string; apiSecret: string; environment: ExchangeEnvironment }) =>
