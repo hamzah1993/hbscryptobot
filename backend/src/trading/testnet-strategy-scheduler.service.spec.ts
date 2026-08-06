@@ -14,12 +14,19 @@ describe('TestnetStrategySchedulerService lock recovery', () => {
       acquire: jest.fn(),
       release: jest.fn(),
     } as any;
+    const health = {
+      markRedisAvailable: jest.fn(),
+      markRedisUnavailable: jest.fn(),
+      markRunnerTick: jest.fn(),
+      markError: jest.fn(),
+    } as any;
 
     return {
-      service: new TestnetStrategySchedulerService(prisma, runner, redisLock),
+      service: new TestnetStrategySchedulerService(prisma, runner, redisLock, health),
       prisma,
       runner,
       redisLock,
+      health,
     };
   }
 

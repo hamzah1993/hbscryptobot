@@ -111,7 +111,7 @@ export class BinanceTestnetOrderService {
         symbol,
         side: input.side,
         quantity: normalizedQuantity,
-        clientOrderId: input.clientOrderId,
+        clientOrderId: this.normalizeClientOrderId(input.clientOrderId),
       },
       credential.apiKey,
       credential.apiSecret,
@@ -233,6 +233,15 @@ export class BinanceTestnetOrderService {
       );
     }
     return formatted;
+  }
+
+  private normalizeClientOrderId(value?: string) {
+    if (!value) return undefined;
+    const normalized = value.replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 36);
+    if (!normalized) {
+      throw new BadRequestException('Unable to generate a valid Binance client order ID');
+    }
+    return normalized;
   }
 
   private assertMinimumNotional(
