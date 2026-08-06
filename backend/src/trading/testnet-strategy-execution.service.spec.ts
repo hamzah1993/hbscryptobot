@@ -166,6 +166,42 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     });
   });
 
+  it('does not advance an independent level twice on a later partial-fill sync', async () => {
+    const existingSubPosition = {
+      id: 'sub-1',
+      positionId: 'position-1',
+      level: 5,
+      status: 'OPEN',
+      quantity: 0.5,
+      costQuote: 50,
+      entryPrice: 100,
+      takeProfitPrice: 110,
+      realizedPnlQuote: 0,
+    };
+    const { service, tradingPosition } = createService(
+      {
+        independent: true,
+        level: 5,
+        subPositionId: 'sub-1',
+        subPosition: existingSubPosition,
+        filledQuantity: 0.5,
+        quoteAmount: 50,
+        accountedFilledQuantity: 0.5,
+        accountedQuoteAmount: 50,
+      },
+      {
+        status: 'FILLED',
+        executedQty: '1',
+        cummulativeQuoteQty: '100',
+      },
+      { dcaCount: 4 },
+    );
+
+    await service.syncOrder(userId, 'order-1');
+
+    expect(tradingPosition.update).not.toHaveBeenCalled();
+  });
+
   it('accounts only newly confirmed parent BUY fill deltas', async () => {
     const { service, tradingPosition, tradingOrder, strategyAction } = createService();
 
