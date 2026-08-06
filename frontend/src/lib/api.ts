@@ -117,6 +117,7 @@ export type TestnetOrderPreview = {
   estimatedSpend: number;
   availableQuote: number;
   remainingQuote: number;
+  quantityFilterType: 'MARKET_LOT_SIZE' | 'LOT_SIZE';
   minQuantity: number;
   maxQuantity: number;
   stepSize: string;
