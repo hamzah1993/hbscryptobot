@@ -16,6 +16,7 @@ import {
 
 type Props = {
   token: string;
+  defaultEnvironment?: BinanceStreamEnvironment;
 };
 
 const intervals: BinanceKlineInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
@@ -46,11 +47,11 @@ const markerLabel = (order: TestnetOrder) => {
   }
 };
 
-export function MarketChartPanel({ token }: Props) {
+export function MarketChartPanel({ token, defaultEnvironment = 'testnet' }: Props) {
   const [symbolInput, setSymbolInput] = useState('BTCUSDT');
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [interval, setInterval] = useState<BinanceKlineInterval>('5m');
-  const [environment, setEnvironment] = useState<BinanceStreamEnvironment>('testnet');
+  const [environment, setEnvironment] = useState<BinanceStreamEnvironment>(defaultEnvironment);
   const [candles, setCandles] = useState<MarketCandle[]>([]);
   const [positions, setPositions] = useState<TestnetPosition[]>([]);
   const [orders, setOrders] = useState<TestnetOrder[]>([]);
@@ -61,6 +62,8 @@ export function MarketChartPanel({ token }: Props) {
   const [streaming, setStreaming] = useState(false);
   const [streamStale, setStreamStale] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+
+  useEffect(() => setEnvironment(defaultEnvironment), [defaultEnvironment]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -169,7 +172,6 @@ export function MarketChartPanel({ token }: Props) {
   }, [token, symbol, interval, environment]);
 
   const chartData = useMemo<TradingViewCandle[]>(() => candles.map((candle) => ({ time: candle.time as TradingViewCandle['time'], open: candle.open, high: candle.high, low: candle.low, close: candle.close })), [candles]);
-
   const positionLevels = useMemo<TradingViewPriceLevel[]>(() => positions.flatMap((position) => [
     { label: 'Average entry', value: Number(position.averageEntryPrice), kind: 'ENTRY' as const },
     { label: 'Next DCA', value: Number(position.nextDcaPrice ?? 0), kind: 'DCA' as const },
