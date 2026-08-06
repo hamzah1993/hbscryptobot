@@ -139,7 +139,8 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
         const streamed = await api.getStreamedMarketPrice(token, currentSymbol, 'testnet');
         if (streamed?.price && Number.isFinite(streamed.price)) return [currentSymbol, streamed.price] as const;
         const candles = await api.getMarketCandles(token, currentSymbol, '1m', 1, 'testnet');
-        return [currentSymbol, candles.candles.at(-1)?.close ?? 0] as const;
+        const latestCandle = candles.candles[candles.candles.length - 1];
+        return [currentSymbol, latestCandle?.close ?? 0] as const;
       }));
       if (cancelled) return;
       setPrices((current) => {
