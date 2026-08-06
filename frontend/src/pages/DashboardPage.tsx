@@ -19,6 +19,7 @@ import {
   type OperationalNotification,
   type StrategyStatus,
   type TestnetEmergencyStopResponse,
+  type TestnetPosition,
   type TradingPosition,
 } from '../lib/api';
 
@@ -27,10 +28,10 @@ const notificationSeenStorageKey = 'hbs-notifications-last-seen-at';
 const notificationToastStorageKey = 'hbs-notifications-last-toast-at';
 const browserNotificationStorageKey = 'hbs-browser-notifications-enabled';
 const notificationSoundStorageKey = 'hbs-notification-sounds-enabled';
+const dashboardModeStorageKey = 'hbs-dashboard-mode';
 
-type AudioWindow = Window & typeof globalThis & {
-  webkitAudioContext?: typeof AudioContext;
-};
+type DashboardMode = 'PAPER' | 'TESTNET';
+type AudioWindow = Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
 
 function money(value: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
@@ -40,7 +41,6 @@ function playNotificationSound(severity: OperationalNotification['severity']) {
   const audioWindow = window as AudioWindow;
   const AudioContextClass = audioWindow.AudioContext || audioWindow.webkitAudioContext;
   if (!AudioContextClass) return;
-
   const context = new AudioContextClass();
   const oscillator = context.createOscillator();
   const gain = context.createGain();
@@ -59,7 +59,8 @@ function playNotificationSound(severity: OperationalNotification['severity']) {
 export function DashboardPage() {
   const { user, token, logout } = useAuth();
   const [activeNav, setActiveNav] = useState('Overview');
-  const [positions, setPositions] = useState<TradingPosition[]>([]);
+  const [paperPositions, setPaperPositions] = useState<TradingPosition[]>([]);
+  const [testnetPositions, setTestnetPositions] = useState<TestnetPosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateBot, setShowCreateBot] = useState(false);
@@ -76,6 +77,9 @@ export function DashboardPage() {
   const [emergencyStopError, setEmergencyStopError] = useState<string | null>(null);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [toastNotifications, setToastNotifications] = useState<OperationalNotification[]>([]);
+  const [dashboardMode, setDashboardMode] = useState<DashboardMode>(() =>
+    window.localStorage.getItem(dashboardModeStorageKey) === 'TESTNET' ? 'TESTNET' : 'PAPER',
+  );
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(
     () => window.localStorage.getItem(browserNotificationStorageKey) === 'true',
   );
@@ -89,11 +93,13 @@ export function DashboardPage() {
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError(null);
-    api.listPaperPositions(token)
-      .then(setPositions)
+    Promise.all([api.listPaperPositions(token), api.listTestnetPositions(token, 250)])
+      .then(([paper, testnet]) => {
+        setPaperPositions(paper);
+        setTestnetPositions(testnet);
+      })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Unable to load positions'))
       .finally(() => setLoading(false));
   }
@@ -103,38 +109,30 @@ export function DashboardPage() {
   }, [token]);
 
   useEffect(() => {
+    window.localStorage.setItem(dashboardModeStorageKey, dashboardMode);
+  }, [dashboardMode]);
+
+  useEffect(() => {
     if (!token) {
       setUnreadNotifications(0);
       setToastNotifications([]);
       initializedNotificationPolling.current = false;
       return;
     }
-
     let cancelled = false;
     const refreshNotifications = async () => {
       try {
         const notifications = await api.listNotifications(token, 250);
         if (cancelled) return;
-
         const seenAt = Number(window.localStorage.getItem(notificationSeenStorageKey) ?? 0);
-        setUnreadNotifications(
-          notifications.filter((notification) => new Date(notification.createdAt).getTime() > seenAt).length,
-        );
-
-        const latestTimestamp = notifications.reduce(
-          (latest, notification) => Math.max(latest, new Date(notification.createdAt).getTime()),
-          0,
-        );
+        setUnreadNotifications(notifications.filter((notification) => new Date(notification.createdAt).getTime() > seenAt).length);
+        const latestTimestamp = notifications.reduce((latest, notification) => Math.max(latest, new Date(notification.createdAt).getTime()), 0);
         const lastToastAt = Number(window.localStorage.getItem(notificationToastStorageKey) ?? 0);
-
         if (initializedNotificationPolling.current) {
           const freshOperationalAlerts = notifications
-            .filter((notification) => (
-              notification.severity !== 'INFO' && new Date(notification.createdAt).getTime() > lastToastAt
-            ))
+            .filter((notification) => notification.severity !== 'INFO' && new Date(notification.createdAt).getTime() > lastToastAt)
             .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
             .slice(-3);
-
           if (freshOperationalAlerts.length > 0) {
             setToastNotifications((current) => {
               const merged = [...current];
@@ -143,41 +141,23 @@ export function DashboardPage() {
               }
               return merged.slice(-3);
             });
-
             if (notificationSoundsEnabled) {
-              playNotificationSound(
-                freshOperationalAlerts.some((notification) => notification.severity === 'CRITICAL')
-                  ? 'CRITICAL'
-                  : 'WARNING',
-              );
+              playNotificationSound(freshOperationalAlerts.some((notification) => notification.severity === 'CRITICAL') ? 'CRITICAL' : 'WARNING');
             }
-
-            if (
-              browserNotificationsEnabled &&
-              'Notification' in window &&
-              window.Notification.permission === 'granted' &&
-              document.visibilityState !== 'visible'
-            ) {
+            if (browserNotificationsEnabled && 'Notification' in window && window.Notification.permission === 'granted' && document.visibilityState !== 'visible') {
               for (const notification of freshOperationalAlerts) {
-                new window.Notification(`HBS Trading · ${notification.severity}`, {
-                  body: notification.message,
-                  tag: notification.id,
-                });
+                new window.Notification(`HBS Trading · ${notification.severity}`, { body: notification.message, tag: notification.id });
               }
             }
           }
         } else {
           initializedNotificationPolling.current = true;
         }
-
-        if (latestTimestamp > lastToastAt) {
-          window.localStorage.setItem(notificationToastStorageKey, String(latestTimestamp));
-        }
+        if (latestTimestamp > lastToastAt) window.localStorage.setItem(notificationToastStorageKey, String(latestTimestamp));
       } catch {
         if (!cancelled) setUnreadNotifications(0);
       }
     };
-
     void refreshNotifications();
     const interval = window.setInterval(() => void refreshNotifications(), 15_000);
     return () => {
@@ -213,18 +193,8 @@ export function DashboardPage() {
   }
 
   useEffect(() => {
-    if (
-      !token ||
-      activeNav === 'Backtests' ||
-      activeNav === 'Exchange accounts' ||
-      activeNav === 'Trade history' ||
-      activeNav === 'Positions' ||
-      activeNav === 'Strategies' ||
-      activeNav === 'Bots' ||
-      activeNav === 'Notifications'
-    ) return;
+    if (!token || ['Backtests', 'Exchange accounts', 'Trade history', 'Positions', 'Strategies', 'Bots', 'Notifications'].includes(activeNav)) return;
     let cancelled = false;
-
     const refresh = async () => {
       try {
         const status = await api.getMarketStreamStatus(token, marketSymbol, marketEnvironment);
@@ -236,7 +206,6 @@ export function DashboardPage() {
         if (!cancelled) setStreamError(reason instanceof Error ? reason.message : 'Unable to load market stream status');
       }
     };
-
     void refresh();
     const interval = window.setInterval(() => void refresh(), 3000);
     return () => {
@@ -251,11 +220,8 @@ export function DashboardPage() {
     setError(null);
     try {
       const strategy = await api.setStrategyStatus(token, strategyId, status);
-      setPositions((current) => current.map((position) => (
-        position.strategy.id === strategyId
-          ? { ...position, strategy: { ...position.strategy, ...strategy } }
-          : position
-      )));
+      setPaperPositions((current) => current.map((position) => position.strategy.id === strategyId ? { ...position, strategy: { ...position.strategy, ...strategy } } : position));
+      setTestnetPositions((current) => current.map((position) => position.strategy.id === strategyId ? { ...position, strategy: { ...position.strategy, ...strategy } } : position));
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Unable to update strategy');
     } finally {
@@ -279,50 +245,29 @@ export function DashboardPage() {
     }
   }
 
-  const openPositions = positions.filter((position) => position.status === 'OPEN');
+  const dashboardPositions = dashboardMode === 'PAPER' ? paperPositions : testnetPositions;
+  const openPositions = dashboardPositions.filter((position) => position.status === 'OPEN');
   const invested = openPositions.reduce((sum, position) => sum + Number(position.totalCostQuote), 0);
-  const realizedPnl = positions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
+  const realizedPnl = dashboardPositions.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
   const runningBots = new Set(openPositions.filter((position) => position.strategy.status === 'RUNNING').map((position) => position.strategy.id)).size;
-  const independentPositions = positions.flatMap((position) => position.subPositions ?? []);
+  const independentPositions = dashboardPositions.flatMap((position) => position.subPositions ?? []);
   const openIndependentPositions = independentPositions.filter((subPosition) => subPosition.status === 'OPEN');
-
-  const initials = useMemo(
-    () => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB',
-    [user?.fullName],
-  );
+  const initials = useMemo(() => user?.fullName?.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase() || 'HB', [user?.fullName]);
 
   const stats = [
-    { label: 'Allocated capital', value: money(invested), change: `${openPositions.length} open position${openPositions.length === 1 ? '' : 's'}` },
-    { label: 'Realized P&L', value: money(realizedPnl), change: realizedPnl >= 0 ? 'Paper trading gains' : 'Paper trading loss' },
-    { label: 'Running bots', value: String(runningBots), change: 'Strategies actively processed by the scheduler' },
+    { label: 'Allocated capital', value: money(invested), change: `${openPositions.length} open ${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} position${openPositions.length === 1 ? '' : 's'}` },
+    { label: 'Realized P&L', value: money(realizedPnl), change: realizedPnl >= 0 ? `${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} gains` : `${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} loss` },
+    { label: 'Running bots', value: String(runningBots), change: `${dashboardMode === 'PAPER' ? 'Paper' : 'Testnet'} strategies actively processed` },
     { label: 'Independent legs', value: String(openIndependentPositions.length), change: `${independentPositions.length} total sub-position${independentPositions.length === 1 ? '' : 's'}` },
   ];
 
   const secondaryPage = ['Backtests', 'Bots', 'Exchange accounts', 'Trade history', 'Positions', 'Strategies', 'Notifications'].includes(activeNav);
-  const pageTitle = activeNav === 'Backtests'
-    ? 'Backtesting and analytics'
-    : activeNav === 'Bots'
-      ? 'Bot operations'
-      : activeNav === 'Exchange accounts'
-        ? 'Exchange accounts'
-        : activeNav === 'Trade history'
-          ? 'Testnet orders'
-          : activeNav === 'Positions'
-            ? 'Paper and Testnet positions'
-            : activeNav === 'Strategies'
-              ? 'Strategy action timeline'
-              : activeNav === 'Notifications'
-                ? 'Operational notifications'
-                : 'Trading dashboard';
+  const pageTitle = activeNav === 'Backtests' ? 'Backtesting and analytics' : activeNav === 'Bots' ? 'Bot operations' : activeNav === 'Exchange accounts' ? 'Exchange accounts' : activeNav === 'Trade history' ? 'Testnet orders' : activeNav === 'Positions' ? 'Paper and Testnet positions' : activeNav === 'Strategies' ? 'Strategy action timeline' : activeNav === 'Notifications' ? 'Operational notifications' : 'Trading dashboard';
 
   return (
     <main className="min-h-screen bg-[#07111f] text-slate-100">
       <NotificationToastStack notifications={toastNotifications} onDismiss={(id) => setToastNotifications((current) => current.filter((notification) => notification.id !== id))} />
-
-      {showCreateBot && token && (
-        <CreateBotWizard token={token} onClose={() => setShowCreateBot(false)} onCreated={() => { setShowCreateBot(false); loadPositions(); setActiveNav('Bots'); }} />
-      )}
-
+      {showCreateBot && token && <CreateBotWizard token={token} defaultMode={dashboardMode} onClose={() => setShowCreateBot(false)} onCreated={() => { setShowCreateBot(false); loadPositions(); setActiveNav('Bots'); }} />}
       {showEmergencyStopConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <section className="w-full max-w-lg rounded-2xl border border-rose-400/30 bg-[#0a1728] p-6 shadow-2xl shadow-rose-950/40">
@@ -337,18 +282,11 @@ export function DashboardPage() {
           </section>
         </div>
       )}
-
       <div className="min-h-screen lg:grid lg:grid-cols-[260px_1fr]">
         <aside className="border-b border-white/10 bg-[#0a1728] px-5 py-5 lg:min-h-screen lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between lg:block">
-            <div><p className="text-xs font-semibold uppercase tracking-[0.32em] text-cyan-400">HBS Trading</p><h1 className="mt-2 text-xl font-semibold">Control Center</h1></div>
-            <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300">Systems online</span>
-          </div>
-          <nav className="mt-7 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">
-            {navigation.map((item) => <button key={item} onClick={() => setActiveNav(item)} className={`flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition ${activeNav === item ? 'bg-cyan-400 text-slate-950' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}><span>{item}</span>{item === 'Notifications' && unreadNotifications > 0 && <span className={`ml-3 rounded-full px-2 py-0.5 text-xs font-semibold ${activeNav === item ? 'bg-slate-950/15 text-slate-950' : 'bg-rose-400/20 text-rose-200'}`}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</button>)}
-          </nav>
+          <div className="flex items-center justify-between lg:block"><div><p className="text-xs font-semibold uppercase tracking-[0.32em] text-cyan-400">HBS Trading</p><h1 className="mt-2 text-xl font-semibold">Control Center</h1></div><span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300">Systems online</span></div>
+          <nav className="mt-7 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1">{navigation.map((item) => <button key={item} onClick={() => setActiveNav(item)} className={`flex items-center justify-between rounded-xl px-4 py-3 text-left text-sm transition ${activeNav === item ? 'bg-cyan-400 text-slate-950' : 'text-slate-300 hover:bg-white/5 hover:text-white'}`}><span>{item}</span>{item === 'Notifications' && unreadNotifications > 0 && <span className={`ml-3 rounded-full px-2 py-0.5 text-xs font-semibold ${activeNav === item ? 'bg-slate-950/15 text-slate-950' : 'bg-rose-400/20 text-rose-200'}`}>{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</button>)}</nav>
         </aside>
-
         <section className="px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
           <header className="flex flex-col gap-4 border-b border-white/10 pb-6 md:flex-row md:items-center md:justify-between">
             <div><p className="text-sm text-slate-400">Welcome back, {user?.fullName}</p><h2 className="mt-1 text-3xl font-semibold tracking-tight">{pageTitle}</h2></div>
@@ -356,21 +294,12 @@ export function DashboardPage() {
               <button type="button" onClick={toggleNotificationSounds} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08]">{notificationSoundsEnabled ? 'Disable sounds' : 'Enable sounds'}</button>
               {'Notification' in window && (browserNotificationsEnabled ? <button type="button" onClick={disableBrowserNotifications} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08]">Disable browser alerts</button> : <button type="button" onClick={() => void enableBrowserNotifications()} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20">Enable browser alerts</button>)}
               <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyStopConfirm(true); }} className="rounded-xl border border-rose-400/40 bg-rose-400/10 px-4 py-2.5 text-sm font-semibold text-rose-200 hover:bg-rose-400/20">Emergency stop</button>
-              {!secondaryPage && <><div className="flex rounded-xl border border-white/10 bg-white/[0.04] p-1"><span className="rounded-lg bg-cyan-400 px-3 py-2 text-sm text-slate-950">Paper</span><span className="rounded-lg px-3 py-2 text-sm text-cyan-300">Binance Testnet</span><span className="rounded-lg px-3 py-2 text-sm text-slate-600">Live disabled</span></div><button onClick={() => setShowCreateBot(true)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create bot</button></>}
+              {!secondaryPage && <><div className="flex rounded-xl border border-white/10 bg-white/[0.04] p-1"><button type="button" onClick={() => setDashboardMode('PAPER')} className={`rounded-lg px-3 py-2 text-sm ${dashboardMode === 'PAPER' ? 'bg-violet-400 text-slate-950' : 'text-violet-300'}`}>Paper</button><button type="button" onClick={() => setDashboardMode('TESTNET')} className={`rounded-lg px-3 py-2 text-sm ${dashboardMode === 'TESTNET' ? 'bg-cyan-400 text-slate-950' : 'text-cyan-300'}`}>Binance Testnet</button><span className="rounded-lg px-3 py-2 text-sm text-slate-600">Live disabled</span></div><button onClick={() => setShowCreateBot(true)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950">Create bot</button></>}
               <button onClick={logout} className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-sm font-semibold">{initials}</button>
             </div>
           </header>
-
           {emergencyStopResult && <div className="mt-5 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200">Emergency stop completed at {new Date(emergencyStopResult.stoppedAt).toLocaleString()}. Stopped {emergencyStopResult.stoppedStrategies} strateg{emergencyStopResult.stoppedStrategies === 1 ? 'y' : 'ies'} and cancelled {emergencyStopResult.cancelledPendingActions} pending action{emergencyStopResult.cancelledPendingActions === 1 ? '' : 's'}.</div>}
-
-          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} />
-            : activeNav === 'Bots' && token ? <BotManagementPanel token={token} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} />
-              : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} />
-                : activeNav === 'Trade history' && token ? <TestnetOrdersPanel token={token} />
-                  : activeNav === 'Positions' && token ? <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} />
-                    : activeNav === 'Strategies' && token ? <TestnetActionTimelinePanel token={token} />
-                      : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></>
-                        : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><PortfolioAnalytics positions={positions} loading={loading} />{token && <MarketChartPanel token={token} />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Paper and Binance Testnet operations are available. Live-money order execution remains disabled.</p></section></>}
+          {activeNav === 'Backtests' && token ? <BacktestDashboardPanel token={token} /> : activeNav === 'Bots' && token ? <BotManagementPanel token={token} onViewPaperPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} onViewTestnetPosition={(positionId) => { setExpandedPositionId(positionId); setActiveNav('Positions'); }} /> : activeNav === 'Exchange accounts' && token ? <ExchangeAccountsPanel token={token} /> : activeNav === 'Trade history' && token ? <TestnetOrdersPanel token={token} /> : activeNav === 'Positions' && token ? <UnifiedPositionsPanel token={token} initialPositionId={expandedPositionId} initialMode={dashboardMode} /> : activeNav === 'Strategies' && token ? <TestnetActionTimelinePanel token={token} /> : activeNav === 'Notifications' && token ? <><NotificationWebhookMetricsPanel token={token} /><NotificationsPanel token={token} /></> : <>{error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}<section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{stats.map((stat) => <article key={stat.label} className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-white/[0.02] p-5"><p className="text-sm text-slate-400">{stat.label}</p><p className="mt-3 text-2xl font-semibold">{loading ? '—' : stat.value}</p><p className="mt-2 text-xs text-cyan-300">{stat.change}</p></article>)}</section><PortfolioAnalytics positions={dashboardPositions as TradingPosition[]} loading={loading} />{token && <MarketChartPanel token={token} defaultEnvironment="testnet" />}<section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-6"><h3 className="text-lg font-semibold">Trading workspace</h3><p className="mt-2 text-sm text-slate-400">Dashboard is showing {dashboardMode === 'PAPER' ? 'Paper' : 'Binance Testnet'} operations. Live-money order execution remains disabled.</p></section></>}
         </section>
       </div>
     </main>

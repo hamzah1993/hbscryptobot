@@ -4,6 +4,7 @@ import { api, type TestnetPosition, type TradingPosition } from '../lib/api';
 type Props = {
   token: string;
   initialPositionId?: string | null;
+  initialMode?: 'PAPER' | 'TESTNET';
 };
 
 type Mode = 'ALL' | 'PAPER' | 'TESTNET';
@@ -39,10 +40,10 @@ function number(value: string | number | null | undefined) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 8 }).format(numeric);
 }
 
-export function UnifiedPositionsPanel({ token, initialPositionId = null }: Props) {
+export function UnifiedPositionsPanel({ token, initialPositionId = null, initialMode }: Props) {
   const [paperPositions, setPaperPositions] = useState<TradingPosition[]>([]);
   const [testnetPositions, setTestnetPositions] = useState<TestnetPosition[]>([]);
-  const [mode, setMode] = useState<Mode>('ALL');
+  const [mode, setMode] = useState<Mode>(initialMode ?? 'ALL');
   const [openOnly, setOpenOnly] = useState(true);
   const [symbol, setSymbol] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(initialPositionId);
@@ -77,6 +78,10 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null }: Props
   useEffect(() => {
     if (initialPositionId) setExpandedId(initialPositionId);
   }, [initialPositionId]);
+
+  useEffect(() => {
+    if (initialMode) setMode(initialMode);
+  }, [initialMode]);
 
   const allPositions = useMemo<UnifiedPosition[]>(() => [
     ...paperPositions.map((position) => ({
