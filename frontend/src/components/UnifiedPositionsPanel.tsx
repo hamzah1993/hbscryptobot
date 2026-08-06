@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type StrategyStatus, type TakeProfitTarget, type TestnetPosition, type TradingPosition } from '../lib/api';
 import { subscribeSharedMarketPrice } from '../lib/sharedMarketPriceFeed';
+import { ConfirmDialog } from './ConfirmDialog';
 
 type Props = {
   token: string;
@@ -60,6 +61,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editingTp, setEditingTp] = useState<{ positionId: string; target: TakeProfitTarget; subPositionId?: string; label: string; value: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ title: string; description: string; confirmLabel: string; tone?: 'default' | 'danger'; busyId: string; action: () => Promise<void> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
 
@@ -181,7 +183,6 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
 
   async function changeStatus(position: UnifiedPosition, status: StrategyStatus) {
     const label = status === 'PAUSED' ? 'pause' : status === 'RUNNING' ? 'resume' : 'stop';
-    if (!window.confirm(`${label[0].toUpperCase()}${label.slice(1)} bot “${position.strategyName}”? This changes future automation only and does not close the position.`)) return;
     setBusyId(position.id);
     try {
       await api.setStrategyStatus(token, position.strategyId, status);
@@ -195,7 +196,6 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
 
   async function closePaper(position: UnifiedPosition) {
     const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
-    if (!window.confirm(`Close Paper position ${position.symbol} now at approximately ${currentPrice}? This realizes the current simulated P&L.`)) return;
     setBusyId(position.id);
     try {
       await api.closePaperPosition(token, position.id, currentPrice);
@@ -211,9 +211,6 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
     const subPosition = subPositionId ? position.subPositions.find((item) => item.id === subPositionId) : null;
     const quantity = Number(subPosition?.quantity ?? position.totalQuantity);
-    const estimatedValue = quantity * currentPrice;
-    const target = subPosition ? `independent level #${subPosition.level}` : 'parent position';
-    if (!window.confirm(`Close ${target} for ${position.symbol}?\n\nQuantity: ${number(quantity)}\nEstimated value: ${money(estimatedValue)}\n\nThis submits a Binance Testnet SELL market order. The bot must be paused and no order may be pending.`)) return;
     setBusyId(subPositionId ?? position.id);
     try {
       await api.closeTestnetPosition(token, position.id, subPositionId);
@@ -223,6 +220,52 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     } finally {
       setBusyId(null);
     }
+  }
+
+  function confirmStatusChange(position: UnifiedPosition, status: StrategyStatus) {
+    const verb = status === 'PAUSED' ? 'Pause' : status === 'RUNNING' ? 'Resume' : 'Stop';
+    setConfirmation({
+      title: `${verb} ${position.strategyName}?`,
+      description: `${verb} changes future automation only. It does not close the current ${position.symbol} position.`,
+      confirmLabel: `${verb} bot`,
+      tone: status === 'STOPPED' ? 'danger' : 'default',
+      busyId: position.id,
+      action: () => changeStatus(position, status),
+    });
+  }
+
+  function confirmPaperClose(position: UnifiedPosition) {
+    const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
+    setConfirmation({
+      title: `Close ${position.symbol} Paper position?`,
+      description: `Approximate price: ${number(currentPrice)}\nThis will realize the current simulated P&L.`,
+      confirmLabel: 'Close position',
+      tone: 'danger',
+      busyId: position.id,
+      action: () => closePaper(position),
+    });
+  }
+
+  function confirmTestnetClose(position: UnifiedPosition, subPositionId?: string) {
+    const currentPrice = prices[position.symbol] ?? Number(position.averageEntryPrice);
+    const subPosition = subPositionId ? position.subPositions.find((item) => item.id === subPositionId) : null;
+    const quantity = Number(subPosition?.quantity ?? position.totalQuantity);
+    const target = subPosition ? `independent level #${subPosition.level}` : 'parent position';
+    setConfirmation({
+      title: `Close ${target}?`,
+      description: `${position.symbol} · Quantity: ${number(quantity)}\nEstimated value: ${money(quantity * currentPrice)}\n\nThis submits a Binance Testnet SELL market order.`,
+      confirmLabel: 'Submit Testnet sell',
+      tone: 'danger',
+      busyId: subPositionId ?? position.id,
+      action: () => closeTestnet(position, subPositionId),
+    });
+  }
+
+  async function runConfirmedAction() {
+    if (!confirmation) return;
+    const pending = confirmation;
+    await pending.action();
+    setConfirmation(null);
   }
 
   async function syncTestnet(position: UnifiedPosition) {
@@ -407,11 +450,11 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                       <h5 className="text-sm font-semibold">Manual controls</h5>
                       <p className="mt-2 text-xs leading-5 text-slate-500">Pause and stop affect future bot actions only. Closing a position is a separate confirmed action.</p>
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <button disabled={busyId === position.id || position.strategyStatus === 'PAUSED'} onClick={() => void changeStatus(position, 'PAUSED')} className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-40">Pause bot</button>
-                        <button disabled={busyId === position.id || position.strategyStatus === 'RUNNING'} onClick={() => void changeStatus(position, 'RUNNING')} className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-40">Resume bot</button>
-                        <button disabled={busyId === position.id || position.strategyStatus === 'STOPPED'} onClick={() => void changeStatus(position, 'STOPPED')} className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-40">Stop bot</button>
-                        {position.source === 'PAPER' && position.status === 'OPEN' && <button disabled={busyId === position.id} onClick={() => void closePaper(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Paper position</button>}
-                        {position.source === 'TESTNET' && position.status === 'OPEN' && <button disabled={busyId === position.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Testnet parent</button>}
+                        <button disabled={busyId === position.id || position.strategyStatus === 'PAUSED'} onClick={() => confirmStatusChange(position, 'PAUSED')} className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-40">Pause bot</button>
+                        <button disabled={busyId === position.id || position.strategyStatus === 'RUNNING'} onClick={() => confirmStatusChange(position, 'RUNNING')} className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-200 disabled:opacity-40">Resume bot</button>
+                        <button disabled={busyId === position.id || position.strategyStatus === 'STOPPED'} onClick={() => confirmStatusChange(position, 'STOPPED')} className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-40">Stop bot</button>
+                        {position.source === 'PAPER' && position.status === 'OPEN' && <button disabled={busyId === position.id} onClick={() => confirmPaperClose(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Paper position</button>}
+                        {position.source === 'TESTNET' && position.status === 'OPEN' && <button disabled={busyId === position.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => confirmTestnetClose(position)} className="rounded-xl bg-rose-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">Close Testnet parent</button>}
                         {position.source === 'TESTNET' && <button disabled={busyId === position.id} onClick={() => void syncTestnet(position)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-200 disabled:opacity-40">Sync pending orders</button>}
                         {position.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === position.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'PARENT', position.takeProfitPrice)} className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-2 text-sm font-semibold text-violet-200 disabled:opacity-40">Edit parent TP</button>}
                         {position.status === 'OPEN' && position.recoveryMode && <button disabled={busyId === position.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'RECOVERY', position.recoveryTakeProfitPrice)} className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-4 py-2 text-sm font-semibold text-violet-200 disabled:opacity-40">Edit global TP</button>}
@@ -435,7 +478,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
                     <div className="mt-5">
                       <h5 className="text-sm font-semibold">Independent sub-positions</h5>
                       {position.subPositions.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-500">No independent levels have been opened.</p> : (
-                        <><div className="mt-3 grid gap-3 md:hidden">{position.subPositions.map((sub) => <div key={sub.id} className="rounded-xl border border-white/10 bg-slate-950/35 p-4"><div className="flex items-center justify-between"><p className="font-semibold">Independent #{sub.level}</p><span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs">{sub.status}</span></div><div className="mt-3 grid grid-cols-2 gap-2"><Metric label="Entry" value={number(sub.entryPrice)} /><Metric label="TP" value={number(sub.takeProfitPrice)} /><Metric label="Cost" value={money(sub.costQuote)} /><Metric label="Realized P&L" value={money(sub.realizedPnlQuote)} /></div><div className="mt-3 flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-2 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' && <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button>}</div></div>)}</div><div className="mt-3 hidden overflow-x-auto md:block"><table className="w-full min-w-[920px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{editingTp?.subPositionId === sub.id ? <div className="flex min-w-[240px] gap-2"><input autoFocus type="number" min="0.00000001" step="any" value={editingTp.value} onChange={(event) => setEditingTp({ ...editingTp, value: event.target.value })} className="w-32 rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 outline-none ring-violet-400/40 focus:ring" /><button disabled={busyId === sub.id} onClick={() => void saveTakeProfit(position)} className="rounded-lg bg-violet-400 px-2.5 py-1.5 text-xs font-semibold text-slate-950">Save</button><button onClick={() => setEditingTp(null)} className="rounded-lg border border-white/10 px-2 py-1.5 text-xs">Cancel</button></div> : number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3"><div className="flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => void closeTestnet(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : null}</div></td></tr>)}</tbody></table></div></>
+                        <><div className="mt-3 grid gap-3 md:hidden">{position.subPositions.map((sub) => <div key={sub.id} className="rounded-xl border border-white/10 bg-slate-950/35 p-4"><div className="flex items-center justify-between"><p className="font-semibold">Independent #{sub.level}</p><span className="rounded-full bg-white/[0.06] px-2.5 py-1 text-xs">{sub.status}</span></div><div className="mt-3 grid grid-cols-2 gap-2"><Metric label="Entry" value={number(sub.entryPrice)} /><Metric label="TP" value={number(sub.takeProfitPrice)} /><Metric label="Cost" value={money(sub.costQuote)} /><Metric label="Realized P&L" value={money(sub.realizedPnlQuote)} /></div><div className="mt-3 flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-2 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' && <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => confirmTestnetClose(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button>}</div></div>)}</div><div className="mt-3 hidden overflow-x-auto md:block"><table className="w-full min-w-[920px] text-left text-sm"><thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Level</th><th className="pb-3">Status</th><th className="pb-3">Quantity</th><th className="pb-3">Cost</th><th className="pb-3">Entry</th><th className="pb-3">TP</th><th className="pb-3">P&L</th><th className="pb-3">Control</th></tr></thead><tbody>{position.subPositions.map((sub) => <tr key={sub.id} className="border-t border-white/10"><td className="py-3">#{sub.level}</td><td className="py-3">{sub.status}</td><td className="py-3">{number(sub.quantity)}</td><td className="py-3">{money(sub.costQuote)}</td><td className="py-3">{number(sub.entryPrice)}</td><td className="py-3">{editingTp?.subPositionId === sub.id ? <div className="flex min-w-[240px] gap-2"><input autoFocus type="number" min="0.00000001" step="any" value={editingTp.value} onChange={(event) => setEditingTp({ ...editingTp, value: event.target.value })} className="w-32 rounded-lg border border-white/10 bg-slate-950/60 px-2 py-1.5 outline-none ring-violet-400/40 focus:ring" /><button disabled={busyId === sub.id} onClick={() => void saveTakeProfit(position)} className="rounded-lg bg-violet-400 px-2.5 py-1.5 text-xs font-semibold text-slate-950">Save</button><button onClick={() => setEditingTp(null)} className="rounded-lg border border-white/10 px-2 py-1.5 text-xs">Cancel</button></div> : number(sub.takeProfitPrice)}</td><td className="py-3">{money(sub.realizedPnlQuote)}</td><td className="py-3"><div className="flex gap-2">{sub.status === 'OPEN' && !position.recoveryMode && <button disabled={busyId === sub.id || (position.source === 'TESTNET' && (position.strategyStatus !== 'PAUSED' || hasPendingOrder))} onClick={() => beginTakeProfitEdit(position, 'INDEPENDENT', sub.takeProfitPrice, sub.id)} className="rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-1.5 text-xs font-semibold text-violet-200 disabled:opacity-40">Edit TP</button>}{position.source === 'TESTNET' && sub.status === 'OPEN' ? <button disabled={busyId === sub.id || position.strategyStatus !== 'PAUSED' || hasPendingOrder} onClick={() => confirmTestnetClose(position, sub.id)} className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3 py-1.5 text-xs font-semibold text-rose-200 disabled:opacity-40">Close leg</button> : null}</div></td></tr>)}</tbody></table></div></>
                       )}
                     </div>
                   </div>
@@ -445,6 +488,16 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
           })}
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(confirmation)}
+        title={confirmation?.title ?? ''}
+        description={confirmation?.description ?? ''}
+        confirmLabel={confirmation?.confirmLabel ?? 'Confirm'}
+        tone={confirmation?.tone}
+        busy={confirmation ? busyId === confirmation.busyId : false}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => void runConfirmedAction()}
+      />
     </section>
   );
 }
