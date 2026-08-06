@@ -24,6 +24,7 @@ At minimum, verify:
 - `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`
 - `REDIS_URL`
 - `JWT_SECRET`
+- `FRONTEND_URL` (public frontend origin used to build password-reset links)
 - `EXCHANGE_CREDENTIALS_KEY`
 - `VITE_API_URL`
 - rate-limit settings
@@ -209,7 +210,7 @@ Do not automatically roll back the database merely because an application deploy
 - rotate `JWT_SECRET`, webhook secrets, and database credentials as appropriate
 - rotate `EXCHANGE_CREDENTIALS_KEY` only with a planned credential re-encryption process
 - inspect audit and access logs
-- invalidate active sessions where supported
+- change/reset the affected account password to invalidate all active sessions
 
 ## 10. Monitoring baseline
 

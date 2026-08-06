@@ -130,6 +130,7 @@ model User {
   id                  String                    @id @default(uuid())
   email               String                    @unique
   passwordHash        String
+  authVersion         Int                       @default(0)
   fullName            String
   role                UserRole                  @default(USER)
   exchangeCredentials ExchangeCredential[]
@@ -141,8 +142,36 @@ model User {
   notificationPreference NotificationPreference?
   liveSafetyProfile   LiveTradingSafetyProfile?
   backtestRuns        BacktestRun[]
+  passwordResetTokens PasswordResetToken[]
+  knownDevices        UserKnownDevice[]
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model UserKnownDevice {
+  id           String   @id @default(uuid())
+  userId       String
+  deviceHash   String
+  userAgent    String?
+  ipAddress    String?
+  firstLoginAt DateTime @default(now())
+  lastLoginAt  DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceHash])
+  @@index([userId, lastLoginAt])
 }
 
 model LiveTradingSafetyProfile {
