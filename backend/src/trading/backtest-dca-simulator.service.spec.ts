@@ -179,6 +179,75 @@ describe('BacktestDcaSimulatorService', () => {
     expect(result.tradeCount).toBe(3);
   });
 
+  it('runs a full main-to-independent-to-recovery lifecycle, closes the basket, and resets', () => {
+    const riskBudgetQuote = 5000;
+    const result = service.simulate({
+      initialCapital: 5000,
+      riskBudgetQuote,
+      baseOrderQuote: 100,
+      candles: [
+        { close: 100 }, // #1 main
+        { close: 98 },  // #2 main
+        { close: 96 },  // #3 main
+        { close: 94 },  // #4 main
+        { close: 92 },  // #5 independent
+        { close: 90 },  // #6 independent
+        { close: 87 },  // Recovery R1
+        { close: 84 },  // Recovery R2
+        { close: 100 }, // Global TP: independent legs (reverse order), then parent
+        { close: 101 }, // Completed campaign resets and opens the next #1
+      ],
+      maxEntries: 6,
+      priceDeviationPercent: 2,
+      volumeMultiplier: 1.5,
+      takeProfitPercent: 1.5,
+      independentFromLevel: 5,
+      recoveryEnabled: true,
+      recoveryMaxOrders: 5,
+      recoveryStepPercents: [5, 8, 12, 18, 25],
+      recoveryMultipliers: [1, 1.5, 2, 3, 5],
+      recoveryTakeProfitPercent: 1.5,
+      continuousCycles: true,
+    });
+
+    const trades = result.trades!;
+    const firstExitIndex = trades.findIndex((trade) =>
+      trade.type === 'INDEPENDENT_EXIT' || trade.type === 'PARENT_EXIT',
+    );
+    const firstCampaign = trades.slice(0, firstExitIndex);
+    const firstCampaignEntryExposure = firstCampaign.reduce(
+      (sum, trade) => sum + Number(trade.quoteAmount),
+      0,
+    );
+
+    expect(firstCampaign.map((trade) => [trade.type, trade.level])).toEqual([
+      ['PARENT_ENTRY', 1],
+      ['PARENT_ENTRY', 2],
+      ['PARENT_ENTRY', 3],
+      ['PARENT_ENTRY', 4],
+      ['INDEPENDENT_ENTRY', 5],
+      ['INDEPENDENT_ENTRY', 6],
+      ['RECOVERY_ENTRY', 7],
+      ['RECOVERY_ENTRY', 8],
+    ]);
+    expect(firstCampaignEntryExposure).toBeLessThanOrEqual(riskBudgetQuote);
+
+    expect(trades.slice(firstExitIndex, firstExitIndex + 3).map((trade) => [
+      trade.type,
+      trade.level,
+    ])).toEqual([
+      ['INDEPENDENT_EXIT', 6],
+      ['INDEPENDENT_EXIT', 5],
+      ['PARENT_EXIT', 8],
+    ]);
+
+    expect(trades[firstExitIndex + 3]).toMatchObject({
+      type: 'PARENT_ENTRY',
+      level: 1,
+    });
+    expect(Number(result.endingCapital)).toBeGreaterThan(5000);
+  });
+
   it('rejects an empty candle collection', () => {
     expect(() =>
       service.simulate({
