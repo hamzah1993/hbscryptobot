@@ -10,6 +10,14 @@ export type BinanceTestnetMarketOrderInput = {
   clientOrderId?: string;
 };
 
+type ResolvedQuantityFilter = {
+  filter: BinanceSymbolFilter;
+  filterType: 'MARKET_LOT_SIZE' | 'LOT_SIZE';
+  minQty: number;
+  maxQty: number | null;
+  stepSize: number;
+};
+
 @Injectable()
 export class BinanceTestnetOrderService {
   constructor(
@@ -42,7 +50,8 @@ export class BinanceTestnetOrderService {
     }
 
     const rawQuantity = quoteAmount / marketPrice;
-    const normalizedQuantity = this.normalizeQuantity(rawQuantity, symbolInfo.filters);
+    const resolvedFilter = this.resolveQuantityFilter(symbolInfo.filters);
+    const normalizedQuantity = this.normalizeQuantity(rawQuantity, resolvedFilter);
     const estimatedSpend = Number(normalizedQuantity) * marketPrice;
     this.assertMinimumNotional(normalizedQuantity, marketPrice, symbolInfo.filters);
 
@@ -56,7 +65,6 @@ export class BinanceTestnetOrderService {
       );
     }
 
-    const lotSize = this.getQuantityFilter(symbolInfo.filters);
     const notionalFilter = symbolInfo.filters.find(
       (filter) => filter.filterType === 'NOTIONAL' || filter.filterType === 'MIN_NOTIONAL',
     );
@@ -73,9 +81,10 @@ export class BinanceTestnetOrderService {
       estimatedSpend,
       availableQuote,
       remainingQuote: availableQuote - estimatedSpend,
-      minQuantity: Number(lotSize.minQty ?? 0),
-      maxQuantity: Number(lotSize.maxQty ?? 0),
-      stepSize: lotSize.stepSize,
+      quantityFilterType: resolvedFilter.filterType,
+      minQuantity: resolvedFilter.minQty,
+      maxQuantity: resolvedFilter.maxQty ?? 0,
+      stepSize: resolvedFilter.filter.stepSize,
       minNotional: Number.isFinite(minNotional) ? minNotional : 0,
     };
   }
@@ -93,7 +102,8 @@ export class BinanceTestnetOrderService {
       this.binance.getTickerPrice(symbol, 'testnet') as Promise<{ price?: string }>,
     ]);
 
-    const normalizedQuantity = this.normalizeQuantity(input.quantity, symbolInfo.filters);
+    const resolvedFilter = this.resolveQuantityFilter(symbolInfo.filters);
+    const normalizedQuantity = this.normalizeQuantity(input.quantity, resolvedFilter);
     this.assertMinimumNotional(normalizedQuantity, Number(ticker.price ?? 0), symbolInfo.filters);
 
     return this.binance.placeMarketOrder(
@@ -147,40 +157,80 @@ export class BinanceTestnetOrderService {
     );
   }
 
-  private getQuantityFilter(filters: BinanceSymbolFilter[]): BinanceSymbolFilter {
-    const filter = filters.find((item) => item.filterType === 'MARKET_LOT_SIZE')
-      ?? filters.find((item) => item.filterType === 'LOT_SIZE');
+  private resolveQuantityFilter(filters: BinanceSymbolFilter[]): ResolvedQuantityFilter {
+    const marketLot = filters.find((item) => item.filterType === 'MARKET_LOT_SIZE');
+    const lotSize = filters.find((item) => item.filterType === 'LOT_SIZE');
 
-    if (!filter) {
-      throw new BadRequestException('Binance quantity filter is unavailable');
-    }
+    const marketResolved = this.toResolvedFilter(marketLot, 'MARKET_LOT_SIZE');
+    if (marketResolved) return marketResolved;
 
-    return filter;
+    const lotResolved = this.toResolvedFilter(lotSize, 'LOT_SIZE');
+    if (lotResolved) return lotResolved;
+
+    const marketDetails = marketLot
+      ? `MARKET_LOT_SIZE(minQty=${marketLot.minQty ?? 'missing'}, maxQty=${marketLot.maxQty ?? 'missing'}, stepSize=${marketLot.stepSize ?? 'missing'})`
+      : 'MARKET_LOT_SIZE missing';
+    const lotDetails = lotSize
+      ? `LOT_SIZE(minQty=${lotSize.minQty ?? 'missing'}, maxQty=${lotSize.maxQty ?? 'missing'}, stepSize=${lotSize.stepSize ?? 'missing'})`
+      : 'LOT_SIZE missing';
+
+    throw new BadRequestException(
+      `Binance quantity filters are unusable for this symbol. ${marketDetails}; ${lotDetails}`,
+    );
   }
 
-  private normalizeQuantity(quantity: number, filters: BinanceSymbolFilter[]) {
-    const lotSize = this.getQuantityFilter(filters);
-    if (!lotSize.stepSize || !lotSize.minQty || !lotSize.maxQty) {
-      throw new BadRequestException('Binance quantity filter is unavailable');
+  private toResolvedFilter(
+    filter: BinanceSymbolFilter | undefined,
+    filterType: 'MARKET_LOT_SIZE' | 'LOT_SIZE',
+  ): ResolvedQuantityFilter | null {
+    if (!filter) return null;
+
+    const stepSize = Number(filter.stepSize ?? 0);
+    const minQty = Number(filter.minQty ?? 0);
+    const maxQtyValue = Number(filter.maxQty ?? 0);
+
+    if (!Number.isFinite(stepSize) || stepSize <= 0) return null;
+    if (!Number.isFinite(minQty) || minQty < 0) return null;
+
+    return {
+      filter,
+      filterType,
+      minQty,
+      maxQty: Number.isFinite(maxQtyValue) && maxQtyValue > 0 ? maxQtyValue : null,
+      stepSize,
+    };
+  }
+
+  private normalizeQuantity(quantity: number, resolved: ResolvedQuantityFilter) {
+    const precision = this.decimalPlaces(resolved.filter.stepSize ?? String(resolved.stepSize));
+    const scale = 10 ** precision;
+    const stepUnits = Math.round(resolved.stepSize * scale);
+    const quantityUnits = Math.floor(quantity * scale + Number.EPSILON);
+
+    if (!Number.isSafeInteger(stepUnits) || stepUnits <= 0) {
+      throw new BadRequestException(
+        `Binance ${resolved.filterType} step size ${resolved.filter.stepSize} is unsupported`,
+      );
     }
 
-    const stepSize = Number(lotSize.stepSize);
-    const minQty = Number(lotSize.minQty);
-    const maxQty = Number(lotSize.maxQty);
-    if (![stepSize, minQty, maxQty].every((value) => Number.isFinite(value) && value > 0)) {
-      throw new BadRequestException('Binance quantity filter is invalid');
-    }
-
-    const normalized = Math.floor((quantity + Number.EPSILON) / stepSize) * stepSize;
-    const precision = this.decimalPlaces(lotSize.stepSize);
-    const formatted = normalized.toFixed(precision);
+    const normalizedUnits = Math.floor(quantityUnits / stepUnits) * stepUnits;
+    const formatted = (normalizedUnits / scale).toFixed(precision);
     const numericQuantity = Number(formatted);
 
-    if (numericQuantity < minQty) {
-      throw new BadRequestException(`Order quantity must be at least ${lotSize.minQty}`);
+    if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
+      throw new BadRequestException(
+        `The calculated quantity is below the Binance ${resolved.filterType} step size ${resolved.filter.stepSize}`,
+      );
     }
-    if (numericQuantity > maxQty) {
-      throw new BadRequestException(`Order quantity must not exceed ${lotSize.maxQty}`);
+    if (numericQuantity < resolved.minQty) {
+      throw new BadRequestException(
+        `Order quantity must be at least ${resolved.filter.minQty} using Binance ${resolved.filterType}`,
+      );
+    }
+    if (resolved.maxQty !== null && numericQuantity > resolved.maxQty) {
+      throw new BadRequestException(
+        `Order quantity must not exceed ${resolved.filter.maxQty} using Binance ${resolved.filterType}`,
+      );
     }
     return formatted;
   }
