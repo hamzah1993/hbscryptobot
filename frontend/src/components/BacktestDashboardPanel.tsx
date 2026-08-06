@@ -3,6 +3,7 @@ import {
   api,
   type BacktestReport,
   type BacktestRun,
+  type BacktestStrategyMode,
   type BinanceKlineInterval,
   type TradingStrategy,
 } from '../lib/api';
@@ -12,6 +13,15 @@ type Props = {
 };
 
 const intervals: BinanceKlineInterval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
+const strategyModes: Array<{ value: BacktestStrategyMode; label: string }> = [
+  { value: 'BASELINE', label: 'Baseline (no DCA)' },
+  { value: 'DCA_ONLY', label: 'DCA Only' },
+  { value: 'DCA_SUB_POSITIONS', label: 'DCA + Sub-Positions' },
+];
+
+function strategyModeLabel(mode: BacktestStrategyMode) {
+  return strategyModes.find((item) => item.value === mode)?.label ?? mode;
+}
 
 function formatNumber(value: string | number | null | undefined, digits = 2) {
   if (value === null || value === undefined) return '—';
@@ -55,6 +65,7 @@ export function BacktestDashboardPanel({ token }: Props) {
     startTime: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
     endTime: new Date().toISOString().slice(0, 16),
     initialCapital: '1000',
+    strategyMode: 'DCA_SUB_POSITIONS' as BacktestStrategyMode,
   });
 
   async function refresh() {
@@ -116,6 +127,7 @@ export function BacktestDashboardPanel({ token }: Props) {
         startTime: new Date(form.startTime).toISOString(),
         endTime: new Date(form.endTime).toISOString(),
         initialCapital: Number(form.initialCapital),
+        strategyMode: form.strategyMode,
       });
       const completed = await api.startBacktest(token, run.id);
       setSelectedRunId(completed.id);
@@ -194,7 +206,7 @@ export function BacktestDashboardPanel({ token }: Props) {
           <button type="button" onClick={() => void refresh()} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-300">Refresh</button>
         </div>
 
-        <form onSubmit={submit} className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <form onSubmit={submit} className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-7">
           <select
             value={form.strategyId}
             onChange={(event) => {
@@ -206,6 +218,9 @@ export function BacktestDashboardPanel({ token }: Props) {
           >
             <option value="">Select strategy</option>
             {strategies.map((strategy) => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}
+          </select>
+          <select value={form.strategyMode} onChange={(event) => setForm({ ...form, strategyMode: event.target.value as BacktestStrategyMode })} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm" aria-label="Strategy mode">
+            {strategyModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
           </select>
           <input value={form.symbol} onChange={(event) => setForm({ ...form, symbol: event.target.value.toUpperCase() })} required className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm" placeholder="BTCUSDT" />
           <select value={form.interval} onChange={(event) => setForm({ ...form, interval: event.target.value as BinanceKlineInterval })} className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-3 text-sm">
@@ -252,7 +267,8 @@ export function BacktestDashboardPanel({ token }: Props) {
                       <span className="font-medium">{run.symbol} · {run.interval}</span>
                       <span className={`rounded-full px-2 py-1 text-[11px] ${statusClass(run.status)}`}>{run.status}</span>
                     </div>
-                    <p className="mt-2 text-xs text-slate-500">{new Date(run.createdAt).toLocaleString()}</p>
+                    <p className="mt-2 text-xs text-violet-300">{strategyModeLabel(run.strategyMode)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{new Date(run.createdAt).toLocaleString()}</p>
                     <p className="mt-2 text-sm text-slate-300">Return {formatNumber(run.returnPercent, 3)}%</p>
                   </button>
                 </div>
@@ -270,8 +286,8 @@ export function BacktestDashboardPanel({ token }: Props) {
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-950/30 text-xs text-slate-500"><tr><th className="px-4 py-3">Run</th><th className="px-4 py-3">Return</th><th className="px-4 py-3">Drawdown</th><th className="px-4 py-3">Win rate</th><th className="px-4 py-3">Profit factor</th><th className="px-4 py-3">Ending capital</th></tr></thead>
-                  <tbody>{comparison.map((item) => <tr key={item.run.id} className="border-t border-white/5"><td className="px-4 py-3"><button type="button" onClick={() => setSelectedRunId(item.run.id)} className="font-medium text-cyan-300">{item.run.symbol} · {item.run.interval}</button><p className="mt-1 text-xs text-slate-500">{item.run.strategy.name}</p></td><td className="px-4 py-3">{formatNumber(item.run.returnPercent, 3)}%</td><td className="px-4 py-3">{formatNumber(item.run.maxDrawdownPercent, 3)}%</td><td className="px-4 py-3">{formatNumber(item.analytics.winRatePercent, 3)}%</td><td className="px-4 py-3">{item.analytics.profitFactor ?? '—'}</td><td className="px-4 py-3">${formatNumber(item.run.endingCapital)}</td></tr>)}</tbody>
+                  <thead className="bg-slate-950/30 text-xs text-slate-500"><tr><th className="px-4 py-3">Mode</th><th className="px-4 py-3">Return</th><th className="px-4 py-3">Drawdown</th><th className="px-4 py-3">Max deployed</th><th className="px-4 py-3">Underwater</th><th className="px-4 py-3">Fees</th><th className="px-4 py-3">Win rate</th><th className="px-4 py-3">Profit factor</th><th className="px-4 py-3">Ending capital</th></tr></thead>
+                  <tbody>{comparison.map((item) => <tr key={item.run.id} className="border-t border-white/5"><td className="px-4 py-3"><button type="button" onClick={() => setSelectedRunId(item.run.id)} className="font-medium text-cyan-300">{strategyModeLabel(item.run.strategyMode)}</button><p className="mt-1 text-xs text-slate-500">{item.run.symbol} · {item.run.interval}</p></td><td className="px-4 py-3">{formatNumber(item.run.returnPercent, 3)}%</td><td className="px-4 py-3">{formatNumber(item.run.maxDrawdownPercent, 3)}%</td><td className="px-4 py-3">${formatNumber(item.analytics.maximumCapitalDeployedQuote)}</td><td className="px-4 py-3">{formatNumber(item.analytics.longestUnderwaterMinutes)}m</td><td className="px-4 py-3">${formatNumber(item.analytics.totalFeesQuote)}</td><td className="px-4 py-3">{formatNumber(item.analytics.winRatePercent, 3)}%</td><td className="px-4 py-3">{item.analytics.profitFactor ?? '—'}</td><td className="px-4 py-3">${formatNumber(item.run.endingCapital)}</td></tr>)}</tbody>
                 </table>
               </div>
             </section>
@@ -296,6 +312,10 @@ export function BacktestDashboardPanel({ token }: Props) {
                   ['Profit factor', report.analytics.profitFactor ?? '—'],
                   ['Peak equity', `$${formatNumber(report.analytics.peakEquityQuote)}`],
                   ['Max DCA level', String(report.analytics.maximumDcaLevelUsed)],
+                  ['Max capital deployed', `$${formatNumber(report.analytics.maximumCapitalDeployedQuote)}`],
+                  ['Fees paid', `$${formatNumber(report.analytics.totalFeesQuote)}`],
+                  ['Longest underwater', `${formatNumber(report.analytics.longestUnderwaterMinutes)} min`],
+                  ['Avg recovery', report.analytics.averageRecoveryMinutes === null ? '—' : `${formatNumber(report.analytics.averageRecoveryMinutes)} min`],
                 ].map(([label, value]) => (
                   <article key={label} className="rounded-xl border border-white/10 bg-slate-950/30 p-4">
                     <p className="text-xs text-slate-500">{label}</p>

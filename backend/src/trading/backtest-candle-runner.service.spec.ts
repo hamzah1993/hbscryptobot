@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { BacktestStrategyMode } from '@prisma/client';
 import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
 
 describe('BacktestCandleRunnerService', () => {
@@ -126,6 +127,47 @@ describe('BacktestCandleRunnerService', () => {
     expect(execution.complete).toHaveBeenCalledWith('run-1', result);
     expect(execution.fail).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [BacktestStrategyMode.BASELINE, 1, 2, false],
+    [BacktestStrategyMode.DCA_ONLY, 4, 5, false],
+    [BacktestStrategyMode.DCA_SUB_POSITIONS, 4, 4, true],
+  ])(
+    'isolates %s without changing the candle set or capital assumptions',
+    async (strategyMode, maxEntries, independentFromLevel, recoveryEnabled) => {
+      const { service, runs, execution, candles, simulator } = createService();
+      const run = createRun({ strategyMode });
+      const historicalCandles = [
+        { openTime: run.startTime, close: '100' },
+        { openTime: new Date(run.startTime.getTime() + 60_000), close: '95' },
+      ];
+      const result = {
+        endingCapital: '1000.00000000',
+        realizedPnlQuote: '0.00000000',
+        returnPercent: '0.000000',
+        maxDrawdownPercent: '0.000000',
+        tradeCount: 1,
+      };
+
+      runs.get.mockResolvedValue(run);
+      execution.start.mockResolvedValue({ ...run, status: 'RUNNING' });
+      candles.list.mockResolvedValue(historicalCandles);
+      simulator.simulate.mockReturnValue(result);
+      execution.complete.mockResolvedValue({ ...run, status: 'COMPLETED' });
+
+      await service.run('user-1', run.id);
+
+      expect(simulator.simulate).toHaveBeenCalledWith(expect.objectContaining({
+        initialCapital: run.initialCapital,
+        candles: historicalCandles,
+        maxEntries,
+        independentFromLevel,
+        riskBudgetQuote: run.strategy.riskBudgetQuote,
+        baseOrderQuote: run.strategy.baseOrderQuote,
+        recoveryEnabled,
+      }));
+    },
+  );
 
   it('loads every full candle page without duplicating page boundaries', async () => {
     const { service, runs, execution, candles, simulator } = createService();

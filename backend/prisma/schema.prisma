@@ -106,6 +106,12 @@ enum BacktestRunStatus {
   FAILED
 }
 
+enum BacktestStrategyMode {
+  BASELINE
+  DCA_ONLY
+  DCA_SUB_POSITIONS
+}
+
 enum BacktestTradeType {
   PARENT_ENTRY
   INDEPENDENT_ENTRY
@@ -366,6 +372,7 @@ model BacktestRun {
   startTime          DateTime
   endTime            DateTime
   status             BacktestRunStatus     @default(PENDING)
+  strategyMode       BacktestStrategyMode  @default(DCA_SUB_POSITIONS)
   initialCapital     Decimal               @db.Decimal(28, 8)
   endingCapital      Decimal?              @db.Decimal(28, 8)
   realizedPnlQuote   Decimal?              @db.Decimal(28, 8)

@@ -58,6 +58,7 @@ export type TestnetActionType = 'INITIAL_ENTRY' | 'DCA_ENTRY' | 'INDEPENDENT_ENT
 export type TestnetActionStatus = 'PENDING' | 'SUBMITTED' | 'COMPLETED' | 'FAILED';
 export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type BacktestStrategyMode = 'BASELINE' | 'DCA_ONLY' | 'DCA_SUB_POSITIONS';
 export type BacktestTradeType = 'PARENT_ENTRY' | 'INDEPENDENT_ENTRY' | 'RECOVERY_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 
 export type TestnetRunnerHealth = {
@@ -236,6 +237,7 @@ export type BacktestRun = {
   startTime: string;
   endTime: string;
   status: BacktestRunStatus;
+  strategyMode: BacktestStrategyMode;
   initialCapital: string;
   endingCapital: string | null;
   realizedPnlQuote: string | null;
@@ -272,6 +274,11 @@ export type BacktestReport = {
     maximumDcaLevelUsed: number;
     independentEntries: number;
     independentExits: number;
+    entryCount: number;
+    totalFeesQuote: string;
+    maximumCapitalDeployedQuote: string;
+    longestUnderwaterMinutes: number;
+    averageRecoveryMinutes: number | null;
   };
 };
 
@@ -481,6 +488,7 @@ export type CreateBacktestPayload = {
   startTime: string;
   endTime: string;
   initialCapital: number;
+  strategyMode: BacktestStrategyMode;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

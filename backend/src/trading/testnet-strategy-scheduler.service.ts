@@ -35,11 +35,16 @@ export class TestnetStrategySchedulerService {
     let lock: RedisLock | null = null;
 
     try {
-      lock = await this.redisLock.acquire(
-        TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
-        getLockTtlMilliseconds(),
-      );
-      this.health.markRedisAvailable();
+      try {
+        lock = await this.redisLock.acquire(
+          TESTNET_STRATEGY_SCHEDULER_LOCK_KEY,
+          getLockTtlMilliseconds(),
+        );
+        this.health.markRedisAvailable();
+      } catch (error) {
+        this.health.markRedisUnavailable(error);
+        throw error;
+      }
 
       if (!lock) return;
 
@@ -68,7 +73,6 @@ export class TestnetStrategySchedulerService {
       if (opened > 0) this.logger.log(`Opened ${opened} automatic Binance testnet position(s)`);
       if (errors > 0) this.logger.warn(`${errors} automatic Binance testnet strategy tick(s) failed`);
     } catch (error) {
-      this.health.markRedisUnavailable(error);
       this.health.markError(error);
       this.logger.error(
         'Scheduled automatic Binance testnet strategy execution failed',
@@ -79,6 +83,7 @@ export class TestnetStrategySchedulerService {
         try {
           await this.redisLock.release(lock);
         } catch (error) {
+          this.health.markRedisUnavailable(error);
           this.health.markError(error);
           this.logger.warn(
             `Failed to release the Testnet strategy scheduler lock: ${error instanceof Error ? error.message : String(error)}`,

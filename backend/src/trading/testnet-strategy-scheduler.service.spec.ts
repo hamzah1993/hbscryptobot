@@ -17,7 +17,7 @@ describe('TestnetStrategySchedulerService lock recovery', () => {
     const health = {
       markRedisAvailable: jest.fn(),
       markRedisUnavailable: jest.fn(),
-      markRunnerTick: jest.fn(),
+      markStrategyTick: jest.fn(),
       markError: jest.fn(),
     } as any;
 
@@ -44,6 +44,19 @@ describe('TestnetStrategySchedulerService lock recovery', () => {
     expect(prisma.tradingStrategy.findMany).toHaveBeenCalledTimes(1);
     expect(runner.runUserStrategies).toHaveBeenCalledWith('user-1');
     expect(redisLock.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report Redis unavailable when strategy execution itself fails', async () => {
+    const { service, runner, redisLock, health } = createService();
+    redisLock.acquire.mockResolvedValue({ key: 'scheduler-lock', token: 'token' });
+    redisLock.release.mockResolvedValue(true);
+    runner.runUserStrategies.mockRejectedValue(new Error('Binance unavailable'));
+
+    await service.runAutomaticTestnetStrategies();
+
+    expect(health.markRedisAvailable).toHaveBeenCalledTimes(1);
+    expect(health.markRedisUnavailable).not.toHaveBeenCalled();
+    expect(health.markError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Binance unavailable' }));
   });
 
   it('runs again after Redis lock release fails', async () => {
