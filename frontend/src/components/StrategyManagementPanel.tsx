@@ -14,6 +14,26 @@ type EditForm = {
   independentFromLevel: number;
 };
 
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+
+async function strategyRequest<T>(token: string, path: string, init: RequestInit): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    const message = Array.isArray(body?.message) ? body.message.join(', ') : body?.message;
+    throw new Error(message ?? 'Request failed');
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
 const toForm = (strategy: TradingStrategy): EditForm => ({
   name: strategy.name,
   riskBudgetQuote: Number(strategy.riskBudgetQuote),
@@ -54,7 +74,10 @@ export function StrategyManagementPanel({ token, onChanged }: Props) {
     setBusyId(editing.id);
     setError(null);
     try {
-      await api.updateStrategy(token, editing.id, form);
+      await strategyRequest<TradingStrategy>(token, `/strategies/${editing.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(form),
+      });
       setEditing(null);
       setForm(null);
       await load();
@@ -68,7 +91,7 @@ export function StrategyManagementPanel({ token, onChanged }: Props) {
     setBusyId(strategy.id);
     setError(null);
     try {
-      await api.deleteStrategy(token, strategy.id);
+      await strategyRequest<unknown>(token, `/strategies/${strategy.id}`, { method: 'DELETE' });
       await load();
       onChanged?.();
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to delete bot'); }
