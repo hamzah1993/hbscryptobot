@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationChannelsService, type NotificationChannelSettingsInput } from '../notifications/notification-channels.service';
+import { LiveTradingSafetyService } from './live-trading-safety.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { ProductionReadinessService } from './production-readiness.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
@@ -32,6 +33,7 @@ export class StrategyController {
     private readonly notifications: NotificationsService,
     private readonly notificationChannels: NotificationChannelsService,
     private readonly productionReadiness: ProductionReadinessService,
+    private readonly liveTradingSafety: LiveTradingSafetyService,
   ) {}
 
   @Get()
@@ -76,6 +78,32 @@ export class StrategyController {
   @Get('production-readiness')
   getProductionReadiness(@Req() request: AuthenticatedRequest) {
     return this.productionReadiness.snapshot(request.user.sub);
+  }
+
+  @Get('live-safety')
+  getLiveSafety(@Req() request: AuthenticatedRequest) {
+    return this.liveTradingSafety.getProfile(request.user.sub);
+  }
+
+  @Patch('live-safety')
+  setLiveSafety(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { capitalCeilingQuote: number },
+  ) {
+    return this.liveTradingSafety.setCapitalCeiling(request.user.sub, Number(body.capitalCeilingQuote));
+  }
+
+  @Post('live-safety/confirm')
+  async confirmLiveSafety(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { confirmation: string },
+  ) {
+    const readiness = await this.productionReadiness.snapshot(request.user.sub);
+    return this.liveTradingSafety.recordConfirmation(
+      request.user.sub,
+      body.confirmation ?? '',
+      readiness.liveConfirmationAvailable,
+    );
   }
 
   @Get('testnet-orders')

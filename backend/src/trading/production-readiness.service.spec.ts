@@ -10,6 +10,7 @@ describe('ProductionReadinessService', () => {
         { exchange: 'BYBIT', environment: 'TESTNET', _count: { _all: 1 } },
         { exchange: 'OKX', environment: 'TESTNET', _count: { _all: 1 } },
       ]) },
+      liveTradingSafetyProfile: { findUnique: jest.fn().mockResolvedValue(null) },
     } as any;
     const health = { snapshot: jest.fn().mockReturnValue({
       scheduler: 'HEALTHY', orderSync: 'HEALTHY', retryScheduler: 'HEALTHY', redis: 'AVAILABLE',
@@ -36,6 +37,8 @@ describe('ProductionReadinessService', () => {
     const result = await createService([100, 120, 140, 150, 160, 170, 180, 190, 200, 250], { liveFlag: 'true' }).snapshot('user-1');
     expect(result.liveChecks.liveFeatureFlag).toBe(true);
     expect(result.liveChecks.liveRoutingImplemented).toBe(false);
+    expect(result.liveChecks.explicitLiveConfirmationImplemented).toBe(true);
+    expect(result.liveConfirmationAvailable).toBe(false);
     expect(result.liveMoneyReady).toBe(false);
   });
 
