@@ -299,6 +299,25 @@ export class TestnetStrategyExecutionService {
                 },
               });
           subPositionId = subPosition.id;
+
+          const expectedLevel = Number(position.dcaCount) + 2;
+          if (level === expectedLevel) {
+            const dcaCount = Number(position.dcaCount) + 1;
+            const parentTriggers = this.calculateParentTriggers(
+              strategy,
+              Number(position.totalQuantity),
+              Number(position.totalCostQuote),
+              Number(position.averageEntryPrice),
+              dcaCount,
+            );
+            position = await tx.tradingPosition.update({
+              where: { id: position.id },
+              data: {
+                dcaCount,
+                nextDcaPrice: parentTriggers.nextDcaPrice,
+              },
+            });
+          }
         } else if (independentExit && independentSubPosition && executedQuantity > 0) {
           await this.applyIndependentSellFill(tx, {
             order: { side: 'SELL' },
@@ -554,6 +573,29 @@ export class TestnetStrategyExecutionService {
                   takeProfitPrice,
                 },
               });
+
+          const expectedLevel = Number(updatedPosition.dcaCount) + 2;
+          if (accountedQuantity === 0 && level === expectedLevel) {
+            const dcaCount = Number(updatedPosition.dcaCount) + 1;
+            const parentTriggers = this.calculateParentTriggers(
+              order.position.strategy,
+              Number(updatedPosition.totalQuantity),
+              Number(updatedPosition.totalCostQuote),
+              Number(updatedPosition.averageEntryPrice),
+              dcaCount,
+            );
+            updatedPosition = {
+              ...updatedPosition,
+              ...(await tx.tradingPosition.update({
+                where: { id: order.positionId },
+                data: {
+                  dcaCount,
+                  nextDcaPrice: parentTriggers.nextDcaPrice,
+                },
+              })),
+              strategy: order.position.strategy,
+            };
+          }
         } else if (order.independent && order.side === 'SELL') {
           if (!updatedSubPosition) {
             throw new BadRequestException('Independent sub-position is required for fill reconciliation');
