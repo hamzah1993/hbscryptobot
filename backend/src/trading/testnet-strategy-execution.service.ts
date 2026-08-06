@@ -513,6 +513,11 @@ export class TestnetStrategyExecutionService {
             dcaMultiplier: true,
             takeProfitPercent: true,
             independentFromLevel: true,
+            recoveryEnabled: true,
+            recoveryMaxOrders: true,
+            recoveryStepPercents: true,
+            recoveryMultipliers: true,
+            recoveryTakeProfitPercent: true,
           },
         },
         subPositions: {
