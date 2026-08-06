@@ -27,6 +27,8 @@ type TakeProfitUpdateInput = {
 type BinanceOrderFill = {
   price?: string;
   qty?: string;
+  commission?: string;
+  commissionAsset?: string;
 };
 
 type BinanceOrderResponse = {
@@ -272,6 +274,7 @@ export class TestnetStrategyExecutionService {
       const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
       const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
       const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
+      const feeQuote = this.calculateQuoteFee(exchangeOrder, strategy.symbol);
       const status = this.mapOrderStatus(exchangeOrder.status);
 
       const savedOrder = await this.prisma.$transaction(async (tx) => {
@@ -435,6 +438,7 @@ export class TestnetStrategyExecutionService {
             price: averageFillPrice || null,
             filledQuantity: executedQuantity,
             quoteAmount,
+            feeQuote,
             averageFillPrice: averageFillPrice || null,
             accountedFilledQuantity: executedQuantity,
             accountedQuoteAmount: quoteAmount,
@@ -458,11 +462,17 @@ export class TestnetStrategyExecutionService {
         return order;
       });
 
+      const lifecycle = this.lifecycleNotification(
+        actionType,
+        status,
+        strategy.symbol,
+        savedOrder.level,
+        Boolean(openPosition?.recoveryMode),
+        savedOrder.position?.status === 'CLOSED',
+      );
       this.notifications.publish({
-        event: status === 'FILLED' ? 'TESTNET_ORDER_FILLED' : 'TESTNET_ORDER_SUBMITTED',
-        message: status === 'FILLED'
-          ? `Testnet ${input.side} market order filled for ${strategy.symbol}.`
-          : `Testnet ${input.side} market order submitted for ${strategy.symbol}.`,
+        event: lifecycle.event,
+        message: lifecycle.message,
         severity: 'INFO',
         userId,
         strategyId: strategy.id,
@@ -481,6 +491,7 @@ export class TestnetStrategyExecutionService {
           requestedQuantity: input.quantity,
           filledQuantity: executedQuantity,
           quoteAmount,
+          feeQuote,
           averageFillPrice: averageFillPrice || null,
         },
       });
@@ -623,6 +634,7 @@ export class TestnetStrategyExecutionService {
     const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
     const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
     const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
+    const feeQuote = this.calculateQuoteFee(exchangeOrder, order.position.symbol);
     const status = this.mapOrderStatus(exchangeOrder.status);
     const previousStatus = order.status;
     const accountedQuantity = Number(order.accountedFilledQuantity ?? 0);
@@ -780,6 +792,7 @@ export class TestnetStrategyExecutionService {
           subPositionId: updatedSubPosition?.id ?? order.subPositionId,
           filledQuantity: executedQuantity,
           quoteAmount,
+          feeQuote: feeQuote ?? order.feeQuote,
           averageFillPrice: averageFillPrice || null,
           price: averageFillPrice || order.price,
           accountedFilledQuantity: accountedQuantity + deltaQuantity,
@@ -804,14 +817,28 @@ export class TestnetStrategyExecutionService {
 
     if (status !== previousStatus || deltaQuantity > 0) {
       const terminalFailure = status === 'REJECTED' || status === 'CANCELLED';
+      const syncedPosition = await this.prisma.tradingPosition.findUnique({
+        where: { id: order.positionId },
+        select: { status: true },
+      });
+      const syncedLifecycle = status === 'FILLED'
+        ? this.lifecycleNotification(
+            order.strategyAction?.type as ExecuteTestnetStrategyInput['actionType'],
+            status,
+            order.position.symbol,
+            Number(order.level),
+            Boolean(order.position.recoveryMode),
+            syncedPosition?.status === 'CLOSED',
+          )
+        : null;
       this.notifications.publish({
-        event: status === 'FILLED'
-          ? 'TESTNET_ORDER_SYNC_FILLED'
+        event: syncedLifecycle
+          ? syncedLifecycle.event
           : terminalFailure
             ? 'TESTNET_ORDER_SYNC_TERMINAL'
             : 'TESTNET_ORDER_SYNC_UPDATED',
-        message: status === 'FILLED'
-          ? `Testnet order synchronization confirmed a fill for ${order.position.symbol}.`
+        message: syncedLifecycle
+          ? syncedLifecycle.message
           : terminalFailure
             ? `Testnet order synchronization ended with status ${status} for ${order.position.symbol}.`
             : `Testnet order synchronization updated status to ${status} for ${order.position.symbol}.`,
@@ -849,7 +876,11 @@ export class TestnetStrategyExecutionService {
     const proceeds = deltaQuote > 0 ? deltaQuote : soldQuantity * averageFillPrice;
     const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
     const remainingCost = Math.max(previousCost - allocatedCost, 0);
-    const closed = remainingQuantity <= 1e-12;
+    const openIndependent = await tx.tradingSubPosition.findMany({
+      where: { positionId: position.id, status: 'OPEN' },
+      select: { id: true },
+    });
+    const closed = remainingQuantity <= 1e-12 && openIndependent.length === 0;
     const remainingAverage = closed ? 0 : remainingCost / remainingQuantity;
     const parentTriggers = closed
       ? { nextDcaPrice: null, takeProfitPrice: null }
@@ -891,7 +922,7 @@ export class TestnetStrategyExecutionService {
     const remainingCost = Math.max(previousCost - allocatedCost, 0);
     const closed = remainingQuantity <= 1e-12;
 
-    return tx.tradingSubPosition.update({
+    const updated = await tx.tradingSubPosition.update({
       where: { id: subPosition.id },
       data: {
         status: closed ? 'CLOSED' : 'OPEN',
@@ -902,6 +933,19 @@ export class TestnetStrategyExecutionService {
         closedAt: closed ? new Date() : null,
       },
     });
+    if (closed && Number(context.position.totalQuantity) <= 1e-12) {
+      const remainingIndependent = await tx.tradingSubPosition.findMany({
+        where: { positionId: context.position.id, status: 'OPEN', id: { not: subPosition.id } },
+        select: { id: true },
+      });
+      if (remainingIndependent.length === 0) {
+        await tx.tradingPosition.update({
+          where: { id: context.position.id },
+          data: { status: 'CLOSED', closedAt: new Date() },
+        });
+      }
+    }
+    return updated;
   }
 
   private calculateAverageFillPrice(order: BinanceOrderResponse, executedQuantity: number, quoteAmount: number) {
@@ -914,6 +958,30 @@ export class TestnetStrategyExecutionService {
     );
     if (totalQuantity > 0 && totalQuote > 0) return totalQuote / totalQuantity;
     return Number(order.price ?? 0);
+  }
+
+  private calculateQuoteFee(order: BinanceOrderResponse, symbol: string): number | null {
+    const quoteAssets = ['FDUSD', 'USDT', 'USDC', 'BUSD', 'TUSD', 'BTC', 'ETH', 'BNB'];
+    const quoteAsset = quoteAssets.find((asset) => symbol.endsWith(asset));
+    if (!quoteAsset) return null;
+    const baseAsset = symbol.slice(0, -quoteAsset.length);
+    const fills = order.fills ?? [];
+    if (!fills.length) return null;
+
+    let total = 0;
+    let recognized = false;
+    for (const fill of fills) {
+      const commission = Number(fill.commission ?? 0);
+      if (!Number.isFinite(commission) || commission < 0) continue;
+      if (fill.commissionAsset === quoteAsset) {
+        total += commission;
+        recognized = true;
+      } else if (fill.commissionAsset === baseAsset) {
+        total += commission * Number(fill.price ?? 0);
+        recognized = true;
+      }
+    }
+    return recognized ? total : null;
   }
 
   private mapOrderStatus(status?: string) {
@@ -933,6 +1001,45 @@ export class TestnetStrategyExecutionService {
         return 'REJECTED' as const;
       default:
         return 'FAILED' as const;
+    }
+  }
+
+  private lifecycleNotification(
+    actionType: ExecuteTestnetStrategyInput['actionType'],
+    status: ReturnType<TestnetStrategyExecutionService['mapOrderStatus']>,
+    symbol: string,
+    level: number,
+    recoveryWasActive: boolean,
+    cycleCompleted: boolean,
+  ) {
+    if (status !== 'FILLED') {
+      return {
+        event: 'TESTNET_ORDER_SUBMITTED',
+        message: `Testnet ${actionType ?? 'strategy'} order submitted for ${symbol}.`,
+      };
+    }
+
+    switch (actionType) {
+      case 'INITIAL_ENTRY':
+        return { event: 'ENTRY_FILLED', message: `${symbol} entry #1 filled on Binance Testnet.` };
+      case 'DCA_ENTRY':
+        return { event: 'DCA_FILLED', message: `${symbol} main DCA level #${level} filled on Binance Testnet.` };
+      case 'INDEPENDENT_ENTRY':
+        return { event: 'INDEPENDENT_OPENED', message: `${symbol} independent level #${level} opened on Binance Testnet.` };
+      case 'RECOVERY_DCA_ENTRY':
+        return recoveryWasActive
+          ? { event: 'RECOVERY_DCA_FILLED', message: `${symbol} Recovery order filled on Binance Testnet.` }
+          : { event: 'RECOVERY_ACTIVATED', message: `${symbol} entered Recovery mode and its first Recovery order filled on Binance Testnet.` };
+      case 'INDEPENDENT_EXIT':
+        return cycleCompleted
+          ? { event: 'CYCLE_COMPLETED', message: `${symbol} final independent level #${level} closed; trading cycle completed on Binance Testnet.` }
+          : { event: 'INDEPENDENT_TP_HIT', message: `${symbol} independent level #${level} closed on Binance Testnet.` };
+      case 'PARENT_EXIT':
+        return cycleCompleted
+          ? { event: 'CYCLE_COMPLETED', message: `${symbol} basket TP/exit filled; trading cycle completed on Binance Testnet.` }
+          : { event: 'PARENT_TP_HIT', message: `${symbol} parent TP/exit filled; independent legs remain open on Binance Testnet.` };
+      default:
+        return { event: 'TESTNET_ORDER_FILLED', message: `Testnet order filled for ${symbol}.` };
     }
   }
 

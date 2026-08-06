@@ -132,9 +132,9 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
   }
 
   it('advances the campaign once when an independent entry fills immediately', async () => {
-    const { service, tradingPosition } = createService(
+    const { service, tradingPosition, tradingOrder, notifications } = createService(
       {},
-      { status: 'FILLED', executedQty: '1', cummulativeQuoteQty: '90' },
+      { status: 'FILLED', executedQty: '1', cummulativeQuoteQty: '90', fills: [{ price: '90', qty: '1', commission: '0.001', commissionAsset: 'BTC' }] },
       { dcaCount: 3 },
     );
 
@@ -153,6 +153,14 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         dcaCount: 4,
       }),
     });
+    expect(tradingOrder.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ feeQuote: 0.09 }),
+    }));
+    expect(notifications.publish).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'INDEPENDENT_OPENED',
+      userId,
+      metadata: expect.objectContaining({ level: 5, feeQuote: 0.09 }),
+    }));
   });
 
   it('advances the campaign on the first reconciled independent fill only', async () => {
@@ -521,6 +529,55 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
         realizedPnlQuote: 40,
         closedAt: expect.any(Date),
       }),
+    });
+  });
+
+  it('keeps the campaign open when the parent exits while an independent leg remains open', async () => {
+    const { service, tradingPosition, tradingSubPosition } = createService(
+      {},
+      { status: 'FILLED', executedQty: '2', cummulativeQuoteQty: '240' },
+    );
+    tradingSubPosition.findMany.mockResolvedValue([{ id: 'sub-5' }]);
+
+    await service.executeMarketOrder(userId, {
+      strategyId: strategy.id,
+      side: 'SELL',
+      quantity: 2,
+      actionType: 'PARENT_EXIT',
+      actionKey: 'parent-exit-with-independent-open',
+      level: 1,
+    });
+
+    expect(tradingPosition.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'OPEN', totalQuantity: 0 }),
+    }));
+  });
+
+  it('closes the campaign when the final independent leg exits after the parent is empty', async () => {
+    const subPosition = {
+      id: 'sub-5', positionId: 'position-1', level: 5, status: 'OPEN', quantity: 1,
+      costQuote: 90, entryPrice: 90, takeProfitPrice: 91.35, realizedPnlQuote: 0,
+    };
+    const { service, tradingPosition, tradingSubPosition } = createService(
+      {},
+      { status: 'FILLED', executedQty: '1', cummulativeQuoteQty: '95' },
+      { totalQuantity: 0, totalCostQuote: 0, averageEntryPrice: 0 },
+    );
+    tradingSubPosition.findUnique.mockResolvedValue(subPosition);
+    tradingSubPosition.findMany.mockResolvedValue([]);
+
+    await service.executeMarketOrder(userId, {
+      strategyId: strategy.id,
+      side: 'SELL',
+      quantity: 1,
+      actionType: 'INDEPENDENT_EXIT',
+      actionKey: 'final-independent-exit',
+      level: 5,
+    });
+
+    expect(tradingPosition.update).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: { status: 'CLOSED', closedAt: expect.any(Date) },
     });
   });
 

@@ -47,12 +47,14 @@ describe('PaperTradingService recovery mode', () => {
       },
       $transaction: jest.fn(async (callback: any) => callback(tx)),
     } as any;
+    const notifications = { publish: jest.fn() } as any;
     const service = new PaperTradingService(
       prisma,
       new RiskBudgetService(),
       new RecoveryStrategyService(),
+      notifications,
     );
-    return { service, prisma, tx, updated };
+    return { service, prisma, tx, updated, notifications };
   }
 
   it.each([
@@ -79,7 +81,7 @@ describe('PaperTradingService recovery mode', () => {
         subPositions: [],
         realizedPnlQuote: 0,
       };
-      const { service, tx } = createHarness(position);
+      const { service, tx, notifications } = createHarness(position);
 
       await service.addDca('user-1', { positionId: position.id, marketPrice: 95 });
 
@@ -93,6 +95,11 @@ describe('PaperTradingService recovery mode', () => {
       } else {
         expect(tx.tradingSubPosition.create).not.toHaveBeenCalled();
       }
+      expect(notifications.publish).toHaveBeenCalledWith(expect.objectContaining({
+        event: expectedIndependent ? 'INDEPENDENT_OPENED' : 'DCA_FILLED',
+        userId: 'user-1',
+        metadata: expect.objectContaining({ level: 3 }),
+      }));
     },
   );
 

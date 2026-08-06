@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
@@ -34,6 +35,7 @@ export class PaperTradingService {
     private readonly prisma: PrismaService,
     private readonly riskBudget: RiskBudgetService,
     private readonly recoveryStrategy: RecoveryStrategyService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async openPosition(userId: string, input: OpenPaperPositionInput) {
@@ -57,7 +59,7 @@ export class PaperTradingService {
       : null;
     const takeProfitPrice = input.marketPrice * (1 + Number(strategy.takeProfitPercent) / 100);
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const position = await tx.tradingPosition.create({
         data: {
           userId,
@@ -99,6 +101,10 @@ export class PaperTradingService {
         },
       });
     });
+    this.publishLifecycle(userId, strategy.id, result?.id, 'ENTRY_FILLED', `${strategy.symbol} Paper entry #1 filled.`, {
+      symbol: strategy.symbol, level: 1, price: input.marketPrice, quoteAmount: base.quoteAmount,
+    });
+    return result;
   }
 
   async addDca(userId: string, input: AddPaperDcaInput) {
@@ -289,7 +295,7 @@ export class PaperTradingService {
     const subPositionTakeProfitPrice =
       marketPrice * (1 + Number(position.strategy.takeProfitPercent) / 100);
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
         data: {
           userId: position.userId,
@@ -344,6 +350,17 @@ export class PaperTradingService {
         },
       });
     });
+    this.publishLifecycle(
+      position.userId,
+      position.strategyId,
+      position.id,
+      allocation.independent ? 'INDEPENDENT_OPENED' : 'DCA_FILLED',
+      allocation.independent
+        ? `${position.symbol} Paper independent level #${nextLevel} opened.`
+        : `${position.symbol} Paper main DCA level #${nextLevel} filled.`,
+      { symbol: position.symbol, level: nextLevel, price: marketPrice, quoteAmount: allocation.quoteAmount },
+    );
+    return result;
   }
 
   private getRecoveryAnchor(position: any): number | null {
@@ -433,7 +450,8 @@ export class PaperTradingService {
       remainingRiskBudget: Math.max(Number(position.strategy.riskBudgetQuote) - basketAfter.costQuote, 0),
     });
 
-    return this.prisma.$transaction(async (tx) => {
+    const recoveryWasActive = Boolean(position.recoveryMode);
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
         data: {
           userId: position.userId,
@@ -476,6 +494,17 @@ export class PaperTradingService {
         },
       });
     });
+    this.publishLifecycle(
+      position.userId,
+      position.strategyId,
+      position.id,
+      recoveryWasActive ? 'RECOVERY_DCA_FILLED' : 'RECOVERY_ACTIVATED',
+      recoveryWasActive
+        ? `${position.symbol} Paper Recovery order #${Number(position.recoveryDcaCount) + 1} filled.`
+        : `${position.symbol} entered Recovery mode and Recovery order #1 filled.`,
+      { symbol: position.symbol, recoveryOrder: Number(position.recoveryDcaCount) + 1, price: marketPrice, quoteAmount: leg.quoteAmount },
+    );
+    return result;
   }
 
   private async executeRecoveryClose(position: any, marketPrice: number) {
@@ -484,7 +513,7 @@ export class PaperTradingService {
     const proceeds = basket.quantity * marketPrice;
     const realizedPnlQuote = Number(position.realizedPnlQuote) + proceeds - basket.costQuote;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
         data: {
           userId: position.userId,
@@ -542,6 +571,15 @@ export class PaperTradingService {
         },
       });
     });
+    this.publishLifecycle(
+      position.userId,
+      position.strategyId,
+      position.id,
+      'CYCLE_COMPLETED',
+      `${position.symbol} Paper Recovery global TP hit; trading cycle completed.`,
+      { symbol: position.symbol, price: marketPrice, realizedPnlQuote },
+    );
+    return result;
   }
 
   private async closeEligibleSubPositions(position: any, marketPrice: number) {
@@ -552,7 +590,7 @@ export class PaperTradingService {
     );
     if (!eligible.length) return position;
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       let realizedPnlQuote = Number(position.realizedPnlQuote);
 
       for (const subPosition of eligible) {
@@ -624,6 +662,17 @@ export class PaperTradingService {
         },
       });
     });
+    for (const subPosition of eligible) {
+      this.publishLifecycle(
+        position.userId,
+        position.strategyId,
+        position.id,
+        'INDEPENDENT_TP_HIT',
+        `${position.symbol} Paper independent level #${subPosition.level} hit TP and closed.`,
+        { symbol: position.symbol, level: subPosition.level, price: marketPrice },
+      );
+    }
+    return result;
   }
 
   private async executeClose(position: any, marketPrice: number) {
@@ -634,7 +683,7 @@ export class PaperTradingService {
       Number(position.realizedPnlQuote) + proceeds - Number(position.totalCostQuote);
     const hasOpenIndependent = position.subPositions.some((subPosition: any) => subPosition.status === 'OPEN');
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.tradingOrder.create({
         data: {
           userId: position.userId,
@@ -675,6 +724,36 @@ export class PaperTradingService {
           strategy: true,
         },
       });
+    });
+    this.publishLifecycle(
+      position.userId,
+      position.strategyId,
+      position.id,
+      hasOpenIndependent ? 'PARENT_TP_HIT' : 'CYCLE_COMPLETED',
+      hasOpenIndependent
+        ? `${position.symbol} Paper parent TP/exit filled; independent legs remain open.`
+        : `${position.symbol} Paper TP/exit filled; trading cycle completed.`,
+      { symbol: position.symbol, price: marketPrice, realizedPnlQuote },
+    );
+    return result;
+  }
+
+  private publishLifecycle(
+    userId: string,
+    strategyId: string,
+    positionId: string | undefined,
+    event: string,
+    message: string,
+    metadata: Record<string, unknown>,
+  ) {
+    this.notifications.publish({
+      event,
+      message,
+      severity: 'INFO',
+      userId,
+      strategyId,
+      positionId,
+      metadata: { environment: 'PAPER', ...metadata },
     });
   }
 }
