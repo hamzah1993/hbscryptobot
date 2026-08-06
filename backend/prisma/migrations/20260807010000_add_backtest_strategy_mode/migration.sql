@@ -1,0 +1,4 @@
+CREATE TYPE "BacktestStrategyMode" AS ENUM ('BASELINE', 'DCA_ONLY', 'DCA_SUB_POSITIONS');
+
+ALTER TABLE "BacktestRun"
+ADD COLUMN "strategyMode" "BacktestStrategyMode" NOT NULL DEFAULT 'DCA_SUB_POSITIONS';

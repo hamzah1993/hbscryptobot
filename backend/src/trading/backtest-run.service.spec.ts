@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   BacktestRunStatus,
+  BacktestStrategyMode,
   BacktestTradeType,
   ExchangeName,
   Prisma,
@@ -135,6 +136,7 @@ describe('BacktestRunService', () => {
         startTime,
         endTime,
         initialCapital: new Prisma.Decimal('1000.50'),
+        strategyMode: BacktestStrategyMode.DCA_SUB_POSITIONS,
         status: BacktestRunStatus.PENDING,
       },
     });
@@ -293,7 +295,29 @@ describe('BacktestRunService', () => {
       maximumDcaLevelUsed: 3,
       independentEntries: 0,
       independentExits: 1,
+      entryCount: 1,
+      totalFeesQuote: '2.28000000',
+      maximumCapitalDeployedQuote: '500.00000000',
+      longestUnderwaterMinutes: 0,
+      averageRecoveryMinutes: null,
     });
+  });
+
+  it('rejects an unknown strategy comparison mode before persistence', async () => {
+    const { service, tradingStrategy, backtestRun } = createService();
+
+    await expect(service.create('user-1', {
+      strategyId: 'strategy-1',
+      symbol: 'BTCUSDT',
+      interval: '5m',
+      startTime: new Date('2026-08-01T00:00:00.000Z'),
+      endTime: new Date('2026-08-02T00:00:00.000Z'),
+      initialCapital: 1000,
+      strategyMode: 'UNKNOWN' as BacktestStrategyMode,
+    })).rejects.toThrow('Invalid backtest strategy mode');
+
+    expect(tradingStrategy.findFirst).not.toHaveBeenCalled();
+    expect(backtestRun.create).not.toHaveBeenCalled();
   });
 
   it('compares user-owned runs in requested order and rejects missing runs', async () => {

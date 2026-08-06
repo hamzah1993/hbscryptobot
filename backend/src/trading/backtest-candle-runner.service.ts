@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { ExchangeName } from '@prisma/client';
+import { BacktestStrategyMode, ExchangeName } from '@prisma/client';
 import type { BinanceKlineInterval } from '../exchange/binance/binance.service';
 import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
 import { BacktestExecutionService } from './backtest-execution.service';
@@ -46,20 +46,29 @@ export class BacktestCandleRunnerService {
         );
       }
 
+      const strategyMode = run.strategyMode ?? BacktestStrategyMode.DCA_SUB_POSITIONS;
+      const maxEntries = strategyMode === BacktestStrategyMode.BASELINE
+        ? 1
+        : run.strategy.maxDcaOrders + 1;
+      const independentFromLevel = strategyMode === BacktestStrategyMode.DCA_SUB_POSITIONS
+        ? run.strategy.independentFromLevel
+        : maxEntries + 1;
       const result = this.simulator.simulate({
         initialCapital: run.initialCapital,
         candles,
-        maxEntries: run.strategy.maxDcaOrders + 1,
+        maxEntries,
         priceDeviationPercent: run.strategy.dcaStepPercent,
         volumeMultiplier: run.strategy.dcaMultiplier,
         volumeMultipliers: run.strategy.dcaMultipliers as number[],
         takeProfitPercent: run.strategy.takeProfitPercent,
         subPositionTriggerPercent: run.strategy.subPositionTriggerPercent,
         subPositionTakeProfitPercent: run.strategy.subPositionTakeProfitPercent,
-        independentFromLevel: run.strategy.independentFromLevel,
+        independentFromLevel,
         riskBudgetQuote: run.strategy.riskBudgetQuote,
         baseOrderQuote: run.strategy.baseOrderQuote,
-        recoveryEnabled: run.strategy.recoveryEnabled,
+        recoveryEnabled: strategyMode === BacktestStrategyMode.DCA_SUB_POSITIONS
+          ? run.strategy.recoveryEnabled
+          : false,
         recoveryMaxOrders: run.strategy.recoveryMaxOrders,
         recoveryStepPercents: run.strategy.recoveryStepPercents as number[],
         recoveryMultipliers: run.strategy.recoveryMultipliers as number[],

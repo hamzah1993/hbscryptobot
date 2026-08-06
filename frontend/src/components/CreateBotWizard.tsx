@@ -9,9 +9,17 @@ type Props = {
 };
 
 type BotMode = 'PAPER' | 'TESTNET';
+type EntryOrderType = 'LIMIT' | 'MARKET';
 type Balance = { asset: string; free: number; locked: number };
 
-const initialForm: CreateStrategyPayload & { marketPrice: number; mode: BotMode } = {
+type WizardForm = CreateStrategyPayload & {
+  marketPrice: number;
+  mode: BotMode;
+  entryOrderType: EntryOrderType;
+  entryLimitPrice: number;
+};
+
+const initialForm: WizardForm = {
   name: 'Testnet DCA Bot', symbol: '', environment: 'TESTNET', paperTrading: false,
   riskBudgetQuote: 1000, baseOrderQuote: 100, maxDcaOrders: 5, dcaStepPercent: 5,
   dcaMultiplier: 1.5, dcaMultipliers: [1, 1.5, 2, 3, 5], takeProfitPercent: 1.5,
@@ -19,7 +27,7 @@ const initialForm: CreateStrategyPayload & { marketPrice: number; mode: BotMode 
   basePositionPercent: 1, maxTotalRiskPercent: 3, maxOpenPairs: 5, cooldownMinutes: 60,
   recoveryEnabled: true, recoveryMaxOrders: 5, recoveryStepPercents: [5, 8, 12, 18, 25],
   recoveryMultipliers: [1, 1.5, 2, 3, 5], recoveryTakeProfitPercent: 1.5,
-  marketPrice: 0, mode: 'TESTNET',
+  marketPrice: 0, mode: 'TESTNET', entryOrderType: 'MARKET', entryLimitPrice: 0,
 };
 
 const quoteAssets = ['USDT', 'USDC', 'BUSD', 'FDUSD'];
@@ -42,7 +50,8 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
   const [existingNames, setExistingNames] = useState<string[]>([]);
 
   const estimatedLevels = form.maxDcaOrders + 1;
-  const estimatedInitialQuantity = form.marketPrice > 0 ? form.baseOrderQuote / form.marketPrice : 0;
+  const selectedEntryPrice = form.entryOrderType === 'LIMIT' ? form.entryLimitPrice : form.marketPrice;
+  const estimatedInitialQuantity = selectedEntryPrice > 0 ? form.baseOrderQuote / selectedEntryPrice : 0;
   const duplicateName = useMemo(() => {
     const normalized = form.name.trim().toLowerCase();
     return normalized.length > 0 && existingNames.some((name) => name.trim().toLowerCase() === normalized);
@@ -110,7 +119,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     return () => { cancelled = true; };
   }, [token, form.symbol]);
 
-  useEffect(() => { setPreview(null); }, [form.mode, form.symbol, form.baseOrderQuote]);
+  useEffect(() => { setPreview(null); }, [form.mode, form.symbol, form.baseOrderQuote, form.entryOrderType, form.entryLimitPrice]);
 
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((current) => {
@@ -142,6 +151,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (!form.name.trim()) return setError('Bot name is required.');
     if (duplicateName) return setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
+    if (form.mode === 'TESTNET' && form.entryOrderType === 'LIMIT' && (!Number.isFinite(form.entryLimitPrice) || form.entryLimitPrice <= 0)) return setError('Enter a positive Limit Buy price.');
     if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
     if (step === 2 && form.mode === 'TESTNET') {
       setPreviewing(true);
@@ -159,6 +169,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (!form.name.trim()) return setError('Bot name is required.');
     if (duplicateName) return setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
     if (!form.symbol || !form.marketPrice) return setError('A symbol and current market price are required.');
+    if (form.mode === 'TESTNET' && form.entryOrderType === 'LIMIT' && (!Number.isFinite(form.entryLimitPrice) || form.entryLimitPrice <= 0)) return setError('Enter a positive Limit Buy price.');
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
     if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
     if (form.mode === 'TESTNET' && !preview) return setError('Refresh and confirm the Binance Testnet order preview before creating the bot.');
@@ -171,13 +182,17 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
         const latestPreview = await api.previewTestnetOrder(token, { symbol: form.symbol, quoteAmount: form.baseOrderQuote });
         setPreview(latestPreview);
       }
-      const { marketPrice, mode, ...payload } = form;
+      const { marketPrice, mode, entryOrderType, entryLimitPrice, ...payload } = form;
       strategy = await api.createStrategy(token, { ...payload, name: payload.name.trim(), environment: 'TESTNET', paperTrading: mode === 'PAPER' });
       if (mode === 'PAPER') await api.openPaperPosition(token, strategy.id, marketPrice);
       else {
         await api.setStrategyStatus(token, strategy.id, 'PAUSED');
         const confirmed = await api.previewTestnetOrder(token, { symbol: form.symbol, quoteAmount: form.baseOrderQuote });
-        await api.executeTestnetOrder(token, strategy.id, { side: 'BUY', quantity: Number(confirmed.normalizedQuantity), type: 'LIMIT', price: confirmed.marketPrice });
+        const executionPrice = entryOrderType === 'LIMIT' ? entryLimitPrice : confirmed.marketPrice;
+        const quantity = entryOrderType === 'LIMIT'
+          ? form.baseOrderQuote / executionPrice
+          : Number(confirmed.normalizedQuantity);
+        await api.executeTestnetOrder(token, strategy.id, { side: 'BUY', quantity, type: entryOrderType, price: executionPrice });
       }
       onCreated(strategy);
     } catch (reason) {
@@ -197,7 +212,12 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
       {step === 1 && <div className="grid gap-4 sm:grid-cols-2">
         <label className="text-sm text-slate-300">Bot name<input value={form.name} onChange={(event) => update('name', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" />{duplicateName && <span className="mt-1 block text-xs text-rose-300">A bot with this name already exists.</span>}</label>
         <label className="text-sm text-slate-300">Symbol pair<select disabled={loadingBalances} value={form.symbol} onChange={(event) => update('symbol', event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-[#101f32] px-4 py-3">{availableSymbols.map((symbol) => <option key={symbol}>{symbol}</option>)}</select></label>
-        <label className="text-sm text-slate-300 sm:col-span-2">Entry price<input type="number" min="0" step="any" value={form.marketPrice || ''} placeholder={loadingPrice ? 'Loading…' : 'Current market price'} onChange={(event) => update('marketPrice', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+        {form.mode === 'TESTNET' && <div className="sm:col-span-2"><p className="text-sm text-slate-300">Initial buy type</p><div className="mt-2 grid grid-cols-2 gap-3"><button type="button" onClick={() => update('entryOrderType', 'MARKET')} className={`rounded-xl border px-4 py-3 text-left ${form.entryOrderType === 'MARKET' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-white/10 bg-white/[0.04] text-slate-300'}`}><span className="block font-medium">Market Buy</span><span className="mt-1 block text-xs opacity-70">Buy at the current market price</span></button><button type="button" onClick={() => update('entryOrderType', 'LIMIT')} className={`rounded-xl border px-4 py-3 text-left ${form.entryOrderType === 'LIMIT' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-100' : 'border-white/10 bg-white/[0.04] text-slate-300'}`}><span className="block font-medium">Limit Buy</span><span className="mt-1 block text-xs opacity-70">You choose the buy price</span></button></div></div>}
+        {form.mode === 'PAPER'
+          ? <label className="text-sm text-slate-300 sm:col-span-2">Entry price<input type="number" min="0" step="any" value={form.marketPrice || ''} placeholder={loadingPrice ? 'Loading…' : 'Current market price'} onChange={(event) => update('marketPrice', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
+          : form.entryOrderType === 'LIMIT'
+            ? <label className="text-sm text-slate-300 sm:col-span-2">Limit Buy price<input type="number" min="0" step="any" value={form.entryLimitPrice || ''} placeholder="Enter your limit price" onChange={(event) => update('entryLimitPrice', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">Current market: {loadingPrice ? 'Loading…' : form.marketPrice > 0 ? `$${form.marketPrice.toLocaleString()}` : 'Unavailable'}</span></label>
+            : <div className="sm:col-span-2">{metric('Market Buy price', loadingPrice ? 'Loading…' : form.marketPrice > 0 ? `$${form.marketPrice.toLocaleString()}` : 'Unavailable')}</div>}
         {form.mode === 'TESTNET' && <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}{metric(`Available ${pair.quoteAsset}`, quoteBalance.toLocaleString(undefined, { maximumFractionDigits: 8 }))}<button type="button" onClick={() => void refreshBalances()} className="sm:col-span-2 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-200">Refresh balances</button></div>}
       </div>}
       {step === 2 && <div className="grid gap-4 sm:grid-cols-2">{[
@@ -218,7 +238,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
         <div className="sm:col-span-2 grid gap-3 sm:grid-cols-4">{metric('Planned maximum exposure', `$${plannedDcaExposure.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Recovery reserve', `$${recoveryReserve.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Remaining risk after entry', `$${remainingRiskBudget.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Configured levels', String(estimatedLevels))}</div>
         {form.recoveryEnabled && recoveryReserve <= 0 && <p className="sm:col-span-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs leading-5 text-amber-200">Your normal DCA plan can consume the full risk budget. Recovery orders will still respect the hard cap, but they can only buy if earlier independent exposure has been closed or you increase the risk budget.</p>}
       </div>}
-      {step === 3 && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2">{metric('Mode', form.mode === 'PAPER' ? 'Paper' : 'Binance Testnet')}{metric('Strategy', form.name)}{metric('Symbol', form.symbol)}{metric('Market price', `$${(preview?.marketPrice ?? form.marketPrice).toLocaleString()}`)}{metric('Risk budget', `$${form.riskBudgetQuote} · ${form.maxTotalRiskPercent}% capital`)}{metric('Base position', `$${form.baseOrderQuote} · ${form.basePositionPercent}% capital`)}{metric('DCA multipliers', form.dcaMultipliers.slice(0, form.maxDcaOrders).map((value) => `${value}×`).join(' / '))}{metric('Order execution', 'Limit entries · Market exits')}{metric('Planned exposure', `$${plannedDcaExposure.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Independent from', `Level #${form.independentFromLevel}`)}{metric('Recovery', form.recoveryEnabled ? `${form.recoveryMaxOrders} orders · ${form.recoveryTakeProfitPercent}% global TP` : 'Disabled')}{metric('Initial quantity', form.mode === 'TESTNET' ? preview?.normalizedQuantity ?? 'Preview required' : estimatedInitialQuantity.toPrecision(8))}{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Available ${pair.quoteAsset}`, (preview?.availableQuote ?? quoteBalance).toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Remaining ${pair.quoteAsset}`, (preview?.remainingQuote ?? quoteBalance - form.baseOrderQuote).toLocaleString(undefined,{maximumFractionDigits:8}))}</div>
+      {step === 3 && <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2">{metric('Mode', form.mode === 'PAPER' ? 'Paper' : 'Binance Testnet')}{metric('Strategy', form.name)}{metric('Symbol', form.symbol)}{metric('Market price', `$${(preview?.marketPrice ?? form.marketPrice).toLocaleString()}`)}{metric('Risk budget', `$${form.riskBudgetQuote} · ${form.maxTotalRiskPercent}% capital`)}{metric('Base position', `$${form.baseOrderQuote} · ${form.basePositionPercent}% capital`)}{metric('DCA multipliers', form.dcaMultipliers.slice(0, form.maxDcaOrders).map((value) => `${value}×`).join(' / '))}{metric('Initial entry', form.mode === 'TESTNET' ? form.entryOrderType === 'LIMIT' ? `Limit Buy @ $${form.entryLimitPrice.toLocaleString()}` : 'Market Buy @ current price' : 'Paper entry')}{metric('DCA / Recovery entries', 'GTC Limit Buy')}{metric('Planned exposure', `$${plannedDcaExposure.toLocaleString(undefined,{maximumFractionDigits:2})}`)}{metric('Independent from', `Level #${form.independentFromLevel}`)}{metric('Recovery', form.recoveryEnabled ? `${form.recoveryMaxOrders} orders · ${form.recoveryTakeProfitPercent}% global TP` : 'Disabled')}{metric('Initial quantity', form.mode === 'TESTNET' ? form.entryOrderType === 'LIMIT' ? estimatedInitialQuantity.toPrecision(8) : preview?.normalizedQuantity ?? 'Preview required' : estimatedInitialQuantity.toPrecision(8))}{metric(`Available ${pair.baseAsset}`, baseBalance.toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Available ${pair.quoteAsset}`, (preview?.availableQuote ?? quoteBalance).toLocaleString(undefined,{maximumFractionDigits:8}))}{metric(`Remaining ${pair.quoteAsset}`, (preview?.remainingQuote ?? quoteBalance - form.baseOrderQuote).toLocaleString(undefined,{maximumFractionDigits:8}))}</div>
         {form.mode === 'TESTNET' && <button type="button" onClick={() => void loadPreview()} disabled={previewing} className="w-full rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-sm font-semibold text-cyan-200">{previewing ? 'Validating…' : 'Refresh balances and order preview'}</button>}
       </div>}
     </div>

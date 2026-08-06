@@ -6,6 +6,7 @@ import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
 import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
 import { BacktestExecutionService } from './backtest-execution.service';
 import { BacktestRunController } from './backtest-run.controller';
+import { BacktestRunRecoveryScheduler } from './backtest-run-recovery.scheduler';
 import { BacktestRunService } from './backtest-run.service';
 import { BinanceHistoricalCandleImporterService } from './binance-historical-candle-importer.service';
 import { HistoricalCandleController } from './historical-candle.controller';
@@ -53,6 +54,7 @@ import { TradingEngineService } from './trading-engine.service';
     HistoricalCandleQueryService,
     BinanceHistoricalCandleImporterService,
     BacktestRunService,
+    BacktestRunRecoveryScheduler,
     BacktestExecutionService,
     BacktestCandleRunnerService,
     BacktestBuyHoldSimulatorService,
