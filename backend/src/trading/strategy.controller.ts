@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
@@ -20,6 +21,7 @@ export class StrategyController {
     private readonly strategies: StrategyService,
     private readonly runner: PaperStrategyRunnerService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
+    private readonly testnetOrders: BinanceTestnetOrderService,
     private readonly testnetTimeline: TestnetActionTimelineService,
     private readonly testnetActions: TestnetStrategyActionService,
     private readonly testnetEmergencyStop: TestnetEmergencyStopService,
@@ -74,6 +76,18 @@ export class StrategyController {
     @Query('limit') limit?: string,
   ) {
     return this.testnetActions.listUserRecoverable(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Post('testnet-order-preview')
+  previewTestnetOrder(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: { symbol: string; quoteAmount: number },
+  ) {
+    return this.testnetOrders.previewMarketBuy(
+      request.user.sub,
+      body.symbol,
+      Number(body.quoteAmount),
+    );
   }
 
   @Post('testnet-actions/:actionId/retry')

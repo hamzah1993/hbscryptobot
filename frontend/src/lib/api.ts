@@ -106,6 +106,23 @@ export type BinanceTestnetBalancesResponse = {
   balances: Array<{ asset: string; free: number; locked: number }>;
 };
 
+export type TestnetOrderPreview = {
+  symbol: string;
+  baseAsset: string;
+  quoteAsset: string;
+  marketPrice: number;
+  requestedQuoteAmount: number;
+  rawQuantity: number;
+  normalizedQuantity: string;
+  estimatedSpend: number;
+  availableQuote: number;
+  remainingQuote: number;
+  minQuantity: number;
+  maxQuantity: number;
+  stepSize: string;
+  minNotional: number;
+};
+
 export type TradingStrategy = {
   id: string;
   name: string;
@@ -444,6 +461,8 @@ export const api = {
     request<{ deleted: boolean }>(`/strategies/${strategyId}`, { method: 'DELETE', headers: authHeaders(token) }),
   setStrategyStatus: (token: string, strategyId: string, status: StrategyStatus) =>
     request<TradingStrategy>(`/strategies/${strategyId}/status`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ status }) }),
+  previewTestnetOrder: (token: string, payload: { symbol: string; quoteAmount: number }) =>
+    request<TestnetOrderPreview>('/strategies/testnet-order-preview', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   executeTestnetOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number }) =>
     request<unknown>(`/strategies/${strategyId}/testnet-order`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   listBacktests: (token: string, limit = 100) =>

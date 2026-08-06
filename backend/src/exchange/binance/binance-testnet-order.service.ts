@@ -17,6 +17,69 @@ export class BinanceTestnetOrderService {
     private readonly credentials: ExchangeCredentialsService,
   ) {}
 
+  async previewMarketBuy(userId: string, symbolInput: string, quoteAmountInput: number) {
+    const symbol = symbolInput.trim().toUpperCase();
+    const quoteAmount = Number(quoteAmountInput);
+    if (!symbol) throw new BadRequestException('Symbol is required');
+    if (!Number.isFinite(quoteAmount) || quoteAmount <= 0) {
+      throw new BadRequestException('Base order must be a positive quote amount');
+    }
+
+    const [credential, symbolInfo, ticker] = await Promise.all([
+      this.credentials.getBinance(userId, ExchangeEnvironment.TESTNET),
+      this.binance.getSymbolInfo(symbol, 'testnet'),
+      this.binance.getTickerPrice(symbol, 'testnet') as Promise<{ price?: string }>,
+    ]);
+
+    const account = (await this.binance.getAccount(
+      credential.apiKey,
+      credential.apiSecret,
+      'testnet',
+    )) as any;
+    const marketPrice = Number(ticker.price ?? 0);
+    if (!Number.isFinite(marketPrice) || marketPrice <= 0) {
+      throw new BadRequestException('Unable to load the current Binance Testnet price');
+    }
+
+    const rawQuantity = quoteAmount / marketPrice;
+    const normalizedQuantity = this.normalizeQuantity(rawQuantity, symbolInfo.filters);
+    const estimatedSpend = Number(normalizedQuantity) * marketPrice;
+    this.assertMinimumNotional(normalizedQuantity, marketPrice, symbolInfo.filters);
+
+    const quoteBalance = Array.isArray(account?.balances)
+      ? account.balances.find((balance: any) => String(balance.asset ?? '') === symbolInfo.quoteAsset)
+      : null;
+    const availableQuote = Number(quoteBalance?.free ?? 0);
+    if (!Number.isFinite(availableQuote) || availableQuote < estimatedSpend) {
+      throw new BadRequestException(
+        `Insufficient ${symbolInfo.quoteAsset} balance. Required about ${estimatedSpend}, available ${availableQuote}`,
+      );
+    }
+
+    const lotSize = this.getQuantityFilter(symbolInfo.filters);
+    const notionalFilter = symbolInfo.filters.find(
+      (filter) => filter.filterType === 'NOTIONAL' || filter.filterType === 'MIN_NOTIONAL',
+    );
+    const minNotional = Number(notionalFilter?.minNotional ?? notionalFilter?.notional ?? 0);
+
+    return {
+      symbol,
+      baseAsset: symbolInfo.baseAsset,
+      quoteAsset: symbolInfo.quoteAsset,
+      marketPrice,
+      requestedQuoteAmount: quoteAmount,
+      rawQuantity,
+      normalizedQuantity,
+      estimatedSpend,
+      availableQuote,
+      remainingQuote: availableQuote - estimatedSpend,
+      minQuantity: Number(lotSize.minQty ?? 0),
+      maxQuantity: Number(lotSize.maxQty ?? 0),
+      stepSize: lotSize.stepSize,
+      minNotional: Number.isFinite(minNotional) ? minNotional : 0,
+    };
+  }
+
   async placeMarketOrder(userId: string, input: BinanceTestnetMarketOrderInput) {
     const symbol = input.symbol.trim().toUpperCase();
     if (!symbol) throw new BadRequestException('Symbol is required');
@@ -84,17 +147,28 @@ export class BinanceTestnetOrderService {
     );
   }
 
+  private getQuantityFilter(filters: BinanceSymbolFilter[]): BinanceSymbolFilter {
+    const filter = filters.find((item) => item.filterType === 'MARKET_LOT_SIZE')
+      ?? filters.find((item) => item.filterType === 'LOT_SIZE');
+
+    if (!filter) {
+      throw new BadRequestException('Binance quantity filter is unavailable');
+    }
+
+    return filter;
+  }
+
   private normalizeQuantity(quantity: number, filters: BinanceSymbolFilter[]) {
-    const lotSize = filters.find((filter) => filter.filterType === 'LOT_SIZE');
-    if (!lotSize?.stepSize || !lotSize.minQty || !lotSize.maxQty) {
-      throw new BadRequestException('Binance LOT_SIZE filter is unavailable');
+    const lotSize = this.getQuantityFilter(filters);
+    if (!lotSize.stepSize || !lotSize.minQty || !lotSize.maxQty) {
+      throw new BadRequestException('Binance quantity filter is unavailable');
     }
 
     const stepSize = Number(lotSize.stepSize);
     const minQty = Number(lotSize.minQty);
     const maxQty = Number(lotSize.maxQty);
     if (![stepSize, minQty, maxQty].every((value) => Number.isFinite(value) && value > 0)) {
-      throw new BadRequestException('Binance LOT_SIZE filter is invalid');
+      throw new BadRequestException('Binance quantity filter is invalid');
     }
 
     const normalized = Math.floor((quantity + Number.EPSILON) / stepSize) * stepSize;
