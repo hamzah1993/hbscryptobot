@@ -7,6 +7,7 @@ import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
 import { TestnetActionTimelineService } from './testnet-action-timeline.service';
 import { TestnetEmergencyStopService } from './testnet-emergency-stop.service';
+import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
 
@@ -25,6 +26,7 @@ export class StrategyController {
     private readonly testnetTimeline: TestnetActionTimelineService,
     private readonly testnetActions: TestnetStrategyActionService,
     private readonly testnetEmergencyStop: TestnetEmergencyStopService,
+    private readonly testnetHealth: TestnetRunnerHealthService,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -34,10 +36,7 @@ export class StrategyController {
   }
 
   @Get('notifications')
-  listNotifications(
-    @Req() request: AuthenticatedRequest,
-    @Query('limit') limit?: string,
-  ) {
+  listNotifications(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
     return this.notifications.listRecent(request.user.sub, Number(limit ?? 100));
   }
 
@@ -46,48 +45,34 @@ export class StrategyController {
     return this.notifications.getWebhookMetrics();
   }
 
+  @Get('testnet-runner-health')
+  getTestnetRunnerHealth() {
+    return this.testnetHealth.snapshot();
+  }
+
   @Get('testnet-orders')
-  listTestnetOrders(
-    @Req() request: AuthenticatedRequest,
-    @Query('limit') limit?: string,
-  ) {
+  listTestnetOrders(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
     return this.testnetExecution.listOrders(request.user.sub, Number(limit ?? 100));
   }
 
   @Get('testnet-positions')
-  listTestnetPositions(
-    @Req() request: AuthenticatedRequest,
-    @Query('limit') limit?: string,
-  ) {
+  listTestnetPositions(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
     return this.testnetExecution.listPositions(request.user.sub, Number(limit ?? 100));
   }
 
   @Get('testnet-actions')
-  listTestnetActions(
-    @Req() request: AuthenticatedRequest,
-    @Query('limit') limit?: string,
-  ) {
+  listTestnetActions(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
     return this.testnetTimeline.list(request.user.sub, Number(limit ?? 100));
   }
 
   @Get('testnet-recovery')
-  listTestnetRecovery(
-    @Req() request: AuthenticatedRequest,
-    @Query('limit') limit?: string,
-  ) {
+  listTestnetRecovery(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
     return this.testnetActions.listUserRecoverable(request.user.sub, Number(limit ?? 100));
   }
 
   @Post('testnet-order-preview')
-  previewTestnetOrder(
-    @Req() request: AuthenticatedRequest,
-    @Body() body: { symbol: string; quoteAmount: number },
-  ) {
-    return this.testnetOrders.previewMarketBuy(
-      request.user.sub,
-      body.symbol,
-      Number(body.quoteAmount),
-    );
+  previewTestnetOrder(@Req() request: AuthenticatedRequest, @Body() body: { symbol: string; quoteAmount: number }) {
+    return this.testnetOrders.previewMarketBuy(request.user.sub, body.symbol, Number(body.quoteAmount));
   }
 
   @Post('testnet-positions/:positionId/close')
@@ -96,34 +81,21 @@ export class StrategyController {
     @Param('positionId') positionId: string,
     @Body() body: { subPositionId?: string },
   ) {
-    return this.testnetExecution.closePosition(
-      request.user.sub,
-      positionId,
-      body.subPositionId,
-    );
+    return this.testnetExecution.closePosition(request.user.sub, positionId, body.subPositionId);
   }
 
   @Post('testnet-actions/:actionId/retry')
-  retryTestnetAction(
-    @Req() request: AuthenticatedRequest,
-    @Param('actionId') actionId: string,
-  ) {
+  retryTestnetAction(@Req() request: AuthenticatedRequest, @Param('actionId') actionId: string) {
     return this.testnetActions.manualRetry(request.user.sub, actionId);
   }
 
   @Post('testnet-actions/:actionId/cancel-retry')
-  cancelTestnetActionRetry(
-    @Req() request: AuthenticatedRequest,
-    @Param('actionId') actionId: string,
-  ) {
+  cancelTestnetActionRetry(@Req() request: AuthenticatedRequest, @Param('actionId') actionId: string) {
     return this.testnetActions.cancelRetry(request.user.sub, actionId);
   }
 
   @Post('testnet-actions/:actionId/acknowledge')
-  acknowledgeTestnetFailure(
-    @Req() request: AuthenticatedRequest,
-    @Param('actionId') actionId: string,
-  ) {
+  acknowledgeTestnetFailure(@Req() request: AuthenticatedRequest, @Param('actionId') actionId: string) {
     return this.testnetActions.acknowledgePermanentFailure(request.user.sub, actionId);
   }
 
@@ -156,19 +128,12 @@ export class StrategyController {
   }
 
   @Post('testnet-orders/:tradingOrderId/sync')
-  syncTestnetOrder(
-    @Req() request: AuthenticatedRequest,
-    @Param('tradingOrderId') tradingOrderId: string,
-  ) {
+  syncTestnetOrder(@Req() request: AuthenticatedRequest, @Param('tradingOrderId') tradingOrderId: string) {
     return this.testnetExecution.syncOrder(request.user.sub, tradingOrderId);
   }
 
   @Patch(':strategyId')
-  update(
-    @Req() request: AuthenticatedRequest,
-    @Param('strategyId') strategyId: string,
-    @Body() body: Partial<StrategyInput>,
-  ) {
+  update(@Req() request: AuthenticatedRequest, @Param('strategyId') strategyId: string, @Body() body: Partial<StrategyInput>) {
     return this.strategies.update(request.user.sub, strategyId, body);
   }
 
