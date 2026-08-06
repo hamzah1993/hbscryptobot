@@ -56,6 +56,17 @@ export type NotificationSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 export type BacktestRunStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
 export type BacktestTradeType = 'PARENT_ENTRY' | 'INDEPENDENT_ENTRY' | 'PARENT_EXIT' | 'INDEPENDENT_EXIT';
 
+export type TestnetRunnerHealth = {
+  scheduler: 'HEALTHY' | 'DELAYED' | 'ERROR' | 'IDLE';
+  orderSync: 'HEALTHY' | 'DELAYED' | 'ERROR' | 'IDLE';
+  retryScheduler: 'HEALTHY' | 'DELAYED' | 'ERROR' | 'IDLE';
+  redis: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN';
+  lastStrategyTickAt: string | null;
+  lastOrderSyncAt: string | null;
+  lastRetryTickAt: string | null;
+  lastError: string | null;
+};
+
 export type OperationalNotification = {
   id: string;
   event: string;
@@ -472,6 +483,8 @@ export const api = {
       headers: authHeaders(token),
       body: JSON.stringify(subPositionId ? { subPositionId } : {}),
     }),
+  getTestnetRunnerHealth: (token: string) =>
+    request<TestnetRunnerHealth>('/strategies/testnet-runner-health', { headers: authHeaders(token) }),
   listBacktests: (token: string, limit = 100) =>
     request<BacktestRun[]>(`/backtests?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   createBacktest: (token: string, payload: CreateBacktestPayload) =>
