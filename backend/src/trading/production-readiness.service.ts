@@ -18,8 +18,21 @@ export class ProductionReadinessService {
 
   async snapshot(userId: string) {
     const [orders, unresolvedActions, permanentFailures, credentialGroups, notifications, liveSafetyProfile] = await Promise.all([
+      // Execution latency is deployment evidence, not live-account evidence.
+      // A dedicated Testnet account may certify the same production deployment,
+      // so collect recent Binance TESTNET samples across users while excluding
+      // paper/LIVE activity from the readiness calculation.
       this.prisma.tradingOrder.findMany({
-        where: { userId, executionLatencyMs: { not: null } },
+        where: {
+          executionLatencyMs: { not: null },
+          position: {
+            strategy: {
+              exchange: 'BINANCE',
+              environment: 'TESTNET',
+              paperTrading: false,
+            },
+          },
+        },
         select: { executionLatencyMs: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
         take: this.latencySampleLimit,
