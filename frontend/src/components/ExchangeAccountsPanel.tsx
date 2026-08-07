@@ -323,7 +323,7 @@ export function ExchangeAccountsPanel({ token }: Props) {
         </section>
       )}
 
-      <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-5 text-sm text-amber-100"><span className="font-semibold">LIVE execution remains locked.</span> Saving a Binance LIVE key does not place orders or activate bots. Capital ceiling, readiness checks, explicit acknowledgement, and the server-side execution gate must pass first.</div>
+      <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.06] p-5 text-sm text-amber-100"><span className="font-semibold">Binance LIVE uses real funds.</span> Saving a LIVE key does not place an order by itself. New exposure remains constrained by the configured LIVE capital ceiling and bot risk limits.</div>
     </section>
   );
 }

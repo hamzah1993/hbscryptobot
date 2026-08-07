@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
-import { ProductionReadinessService } from './production-readiness.service';
 import { RiskAwareLiveStrategyExecutionService } from './risk-aware-live-strategy-execution.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
 
@@ -17,7 +16,6 @@ export class LiveActionRetrySchedulerService {
     private readonly prisma: PrismaService,
     private readonly actions: TestnetStrategyActionService,
     private readonly execution: RiskAwareLiveStrategyExecutionService,
-    private readonly readiness: ProductionReadinessService,
     private readonly redisLock: RedisLockService,
   ) {}
 
@@ -40,20 +38,6 @@ export class LiveActionRetrySchedulerService {
 
       for (const action of dueActions) {
         if (action.order?.status === 'PENDING' || action.order?.status === 'PARTIALLY_FILLED') continue;
-        const snapshot = await this.readiness.snapshot(action.userId);
-        const safeToRetry = snapshot.hardeningChecks.executionLatencyEvidence
-          && snapshot.hardeningChecks.schedulersHealthy
-          && snapshot.hardeningChecks.redisAvailable
-          && snapshot.hardeningChecks.noPermanentActionFailures
-          && snapshot.liveChecks.operationalNotificationProvider
-          && snapshot.liveChecks.liveFeatureFlag
-          && snapshot.liveChecks.liveRoutingImplemented
-          && snapshot.liveChecks.binanceLiveCredentialsConfigured
-          && snapshot.liveChecks.liveCapitalCeilingConfigured
-          && snapshot.liveChecks.explicitLiveConfirmationRecorded
-          && snapshot.liveChecks.liveEmergencyExitAdapterVerified;
-        if (!safeToRetry) continue;
-
         const claimed = await this.actions.claimRetry(action.id);
         if (!claimed) continue;
         try {
