@@ -629,6 +629,10 @@ async function requestText(path: string, token: string): Promise<string> {
 }
 
 const authHeaders = (token: string) => ({ Authorization: `Bearer ${token}` });
+const adminHeaders = (token: string, adminSessionToken: string) => ({
+  ...authHeaders(token),
+  'X-Admin-Session': adminSessionToken,
+});
 const toBinanceEnvironment = (environment: ExchangeEnvironment): BinanceStreamEnvironment =>
   environment === 'LIVE' ? 'live' : 'testnet';
 
@@ -644,13 +648,14 @@ export const api = {
   changePassword: (token: string, currentPassword: string, newPassword: string) =>
     request<{ changed: true; sessionsInvalidated: true }>('/auth/change-password', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ currentPassword, newPassword }) }),
   me: (token: string) => request<AuthUser>('/users/me', { headers: authHeaders(token) }),
-  getAdminHealth: (token: string) => request<AdminHealth>('/admin/health', { headers: authHeaders(token) }),
-  listAdminBackups: (token: string) => request<AdminBackup[]>('/admin/backups', { headers: authHeaders(token) }),
-  createAdminBackup: (token: string) => request<AdminBackup>('/admin/backups', { method: 'POST', headers: authHeaders(token) }),
-  listAdminAudit: (token: string) => request<AdminAuditEvent[]>('/admin/audit?limit=100', { headers: authHeaders(token) }),
-  restoreAdminBackup: (token: string, filename: string, confirmation: string) => request<{ restored: true; filename: string; safetyBackup: string; tradingResumed: false }>('/admin/restore', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ filename, confirmation }) }),
-  async downloadAdminBackup(token: string, filename: string) {
-    const response = await fetch(`${API_URL}/admin/backups/${encodeURIComponent(filename)}/download`, { headers: authHeaders(token) });
+  createAdminSession: (token: string, password: string) => request<{ adminSessionToken: string; expiresInSeconds: number }>('/super/admin/control/session', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ password }) }),
+  getAdminHealth: (token: string, adminSessionToken: string) => request<AdminHealth>('/super/admin/control/health', { headers: adminHeaders(token, adminSessionToken) }),
+  listAdminBackups: (token: string, adminSessionToken: string) => request<AdminBackup[]>('/super/admin/control/backups', { headers: adminHeaders(token, adminSessionToken) }),
+  createAdminBackup: (token: string, adminSessionToken: string) => request<AdminBackup>('/super/admin/control/backups', { method: 'POST', headers: adminHeaders(token, adminSessionToken) }),
+  listAdminAudit: (token: string, adminSessionToken: string) => request<AdminAuditEvent[]>('/super/admin/control/audit?limit=100', { headers: adminHeaders(token, adminSessionToken) }),
+  restoreAdminBackup: (token: string, adminSessionToken: string, filename: string, confirmation: string) => request<{ restored: true; filename: string; safetyBackup: string; tradingResumed: false }>('/super/admin/control/restore', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify({ filename, confirmation }) }),
+  async downloadAdminBackup(token: string, adminSessionToken: string, filename: string) {
+    const response = await fetch(`${API_URL}/super/admin/control/backups/${encodeURIComponent(filename)}/download`, { headers: adminHeaders(token, adminSessionToken) });
     if (!response.ok) throw new Error((await response.text()) || `Request failed (${response.status})`);
     return response.blob();
   },

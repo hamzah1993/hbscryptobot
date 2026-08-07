@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { api, type AdminAuditEvent, type AdminBackup, type AdminHealth } from '../lib/api';
 
+const ADMIN_SESSION_KEY = 'hbs_admin_step_up_session';
+
 function bytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
@@ -11,6 +13,10 @@ function bytes(value: number) {
 
 export function AdminPage() {
   const { token, user } = useAuth();
+  const [adminSessionToken, setAdminSessionToken] = useState<string | null>(() => sessionStorage.getItem(ADMIN_SESSION_KEY));
+  const [adminPassword, setAdminPassword] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [health, setHealth] = useState<AdminHealth | null>(null);
   const [backups, setBackups] = useState<AdminBackup[]>([]);
   const [audit, setAudit] = useState<AdminAuditEvent[]>([]);
@@ -20,45 +26,83 @@ export function AdminPage() {
   const [confirmation, setConfirmation] = useState('');
 
   const refresh = useCallback(async () => {
-    if (!token) return;
+    if (!token || !adminSessionToken) return;
     try {
-      const [nextHealth, nextBackups, nextAudit] = await Promise.all([api.getAdminHealth(token), api.listAdminBackups(token), api.listAdminAudit(token)]);
+      const [nextHealth, nextBackups, nextAudit] = await Promise.all([api.getAdminHealth(token, adminSessionToken), api.listAdminBackups(token, adminSessionToken), api.listAdminAudit(token, adminSessionToken)]);
       setHealth(nextHealth); setBackups(nextBackups); setAudit(nextAudit); setError(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load admin operations'); }
-  }, [token]);
+    } catch {
+      sessionStorage.removeItem(ADMIN_SESSION_KEY);
+      setAdminSessionToken(null);
+      setLoginError('Administrator session expired or is no longer valid. Please enter the admin password again.');
+    }
+  }, [token, adminSessionToken]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  async function createBackup() {
+  async function adminLogin(event: React.FormEvent) {
+    event.preventDefault();
     if (!token) return;
+    setLoginBusy(true); setLoginError(null);
+    try {
+      const result = await api.createAdminSession(token, adminPassword);
+      sessionStorage.setItem(ADMIN_SESSION_KEY, result.adminSessionToken);
+      setAdminSessionToken(result.adminSessionToken);
+      setAdminPassword('');
+    } catch (reason) { setLoginError(reason instanceof Error ? reason.message : 'Administrator login failed'); }
+    finally { setLoginBusy(false); }
+  }
+
+  function adminLogout() {
+    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    setAdminSessionToken(null);
+    setHealth(null); setBackups([]); setAudit([]);
+  }
+
+  async function createBackup() {
+    if (!token || !adminSessionToken) return;
     setBusy(true); setError(null);
-    try { await api.createAdminBackup(token); await refresh(); }
+    try { await api.createAdminBackup(token, adminSessionToken); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Backup failed'); }
     finally { setBusy(false); }
   }
 
   async function download(filename: string) {
-    if (!token) return;
+    if (!token || !adminSessionToken) return;
     try {
-      const blob = await api.downloadAdminBackup(token, filename);
+      const blob = await api.downloadAdminBackup(token, adminSessionToken, filename);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Download failed'); }
   }
 
   async function restore() {
-    if (!token || !restoreFile) return;
+    if (!token || !adminSessionToken || !restoreFile) return;
     setBusy(true); setError(null);
-    try { await api.restoreAdminBackup(token, restoreFile, confirmation); setRestoreFile(null); setConfirmation(''); await refresh(); }
+    try { await api.restoreAdminBackup(token, adminSessionToken, restoreFile, confirmation); setRestoreFile(null); setConfirmation(''); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Restore failed'); }
     finally { setBusy(false); }
   }
+
+  if (!adminSessionToken) return <main className="grid min-h-screen place-items-center bg-[#07111f] px-4 py-8 text-slate-100">
+    <section className="w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.035] p-6 shadow-2xl shadow-black/20 sm:p-8">
+      <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">Restricted operations</p>
+      <h1 className="mt-3 text-2xl font-semibold">Administrator login</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-400">Enter the separate administrator password to continue as {user?.email}.</p>
+      {loginError && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{loginError}</div>}
+      <form className="mt-6" onSubmit={(event) => void adminLogin(event)}>
+        <label htmlFor="admin-password" className="text-sm font-medium text-slate-300">Admin password</label>
+        <input id="admin-password" type="password" autoComplete="current-password" minLength={12} required value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 outline-none focus:ring-2 focus:ring-cyan-400/40" />
+        <button disabled={loginBusy} type="submit" className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{loginBusy ? 'Checking…' : 'Unlock Admin Center'}</button>
+      </form>
+      <Link to="/" className="mt-5 block text-center text-sm text-slate-400 hover:text-slate-200">Back to trading</Link>
+    </section>
+  </main>;
 
   return <main className="min-h-screen bg-[#07111f] px-4 py-6 text-slate-100 sm:px-8">
     <div className="mx-auto max-w-7xl">
       <header className="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
         <div><p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">Admin & Operations Center</p><h1 className="mt-2 text-3xl font-semibold">Production operations</h1><p className="mt-2 text-sm text-slate-400">Signed in as {user?.email}</p></div>
-        <Link to="/" className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-300">Back to trading</Link>
+        <div className="flex gap-2"><button type="button" onClick={adminLogout} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-300">Lock Admin</button><Link to="/" className="rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-300">Back to trading</Link></div>
       </header>
       {error && <div className="mt-5 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{error}</div>}
 

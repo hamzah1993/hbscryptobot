@@ -3,12 +3,13 @@ import { createReadStream } from 'fs';
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from './admin.guard';
+import { AdminSessionGuard } from './admin-session.guard';
 import { AdminService } from './admin.service';
 
 type AdminRequest = Request & { user: { sub: string } };
 
-@Controller('admin')
-@UseGuards(JwtAuthGuard, AdminGuard)
+@Controller('super/admin/control')
+@UseGuards(JwtAuthGuard, AdminGuard, AdminSessionGuard)
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
 

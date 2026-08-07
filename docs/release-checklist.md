@@ -16,6 +16,7 @@ Use this checklist for production releases. A successful bounded LIVE test does 
 ## Environment and security
 
 - [ ] `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, and `EXCHANGE_CREDENTIALS_KEY` present
+- [ ] `ADMIN_EMAIL` points to the intended existing administrator account and `ADMIN_PASSWORD` is a unique backend-only secret of at least 12 characters
 - [ ] Binance LIVE key has no withdrawal permission
 - [ ] Telegram bot token, username, webhook URL, and webhook secret present
 - [ ] Frontend/backend production URLs are correct
