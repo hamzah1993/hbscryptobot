@@ -1,8 +1,17 @@
 # Admin & Operations Center
 
-The administrator UI is available at `/admin` to users whose database role is `ADMIN`. Backend authorization is enforced independently of the UI.
+The administrator UI is available at `/super/admin/control` to users whose database role is `ADMIN`. Opening it shows a separate administrator password screen before operations are available. Backend authorization is enforced independently of the UI route.
 
 ## First administrator
+
+For Render deployments without Shell access, configure both of these backend-only environment variables:
+
+- `ADMIN_EMAIL` — the email of an existing registered HBS Trading account. On startup that account is promoted to `ADMIN` if necessary and its old sessions are invalidated.
+- `ADMIN_PASSWORD` — a strong, unique password of at least 12 characters used only by the administrator step-up login screen. Do not reuse the user's normal account password.
+
+After the deployment, sign in to HBS Trading again, open `/super/admin/control`, and enter `ADMIN_PASSWORD`. The resulting administrator session lasts 15 minutes and is stored only for the current browser tab/session.
+
+If Shell access is available, the CLI promotion command remains supported:
 
 Promote an existing trusted account from the backend service shell:
 

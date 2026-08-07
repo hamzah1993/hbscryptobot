@@ -24,6 +24,8 @@ At minimum, verify:
 - `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`
 - `REDIS_URL`
 - `JWT_SECRET`
+- `ADMIN_EMAIL` — existing registered account to promote to the `ADMIN` role on startup if needed.
+- `ADMIN_PASSWORD` — backend-only administrator step-up password (minimum 12 characters); never expose it through a `VITE_` variable or frontend configuration.
 - `FRONTEND_URL` (public frontend origin used to build password-reset links)
 - `EXCHANGE_CREDENTIALS_KEY`
 - `VITE_API_URL`

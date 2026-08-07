@@ -427,7 +427,7 @@ export function DashboardPage() {
           <header className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:pb-6 md:flex-row md:items-center md:justify-between">
             <div><p className="text-xs text-slate-400 sm:text-sm">Welcome back, {user?.fullName}</p><h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{pageTitle}</h2></div>
             <div className="flex flex-wrap items-center gap-3">
-              {user?.role === 'ADMIN' && <Link to="/admin" className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200">Admin</Link>}
+              {user?.role === 'ADMIN' && <Link to="/super/admin/control" className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200">Admin</Link>}
               <div className="grid w-full grid-cols-3 rounded-xl border border-white/10 bg-white/[0.04] p-1 sm:flex sm:w-auto">
                 <button type="button" onClick={() => setMode('PAPER')} className={`rounded-lg px-2 py-2 text-xs sm:px-3 sm:text-sm ${mode === 'PAPER' ? 'bg-violet-400 text-slate-950' : 'text-violet-300'}`}>Paper</button>
                 <button type="button" onClick={() => setMode('TESTNET')} className={`rounded-lg px-2 py-2 text-xs sm:px-3 sm:text-sm ${mode === 'TESTNET' ? 'bg-cyan-400 text-slate-950' : 'text-cyan-300'}`}>Testnet</button>
