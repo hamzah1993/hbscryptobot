@@ -21,7 +21,7 @@ export class ExchangeCredentialsController {
   }
 
   @Post('binance')
-  upsertBinance(
+  async upsertBinance(
     @Req() request: AuthenticatedRequest,
     @Body()
     body: {
@@ -30,18 +30,26 @@ export class ExchangeCredentialsController {
       environment?: ExchangeEnvironment;
     },
   ) {
-    this.accounts.assertTestnetOnly(body.environment);
+    const environment = body.environment ?? ExchangeEnvironment.TESTNET;
+    if (environment === ExchangeEnvironment.LIVE) {
+      await this.accounts.validateBinanceLiveCredentials(body.apiKey, body.apiSecret);
+    }
     return this.credentials.upsertBinance(
       request.user.sub,
       body.apiKey,
       body.apiSecret,
-      ExchangeEnvironment.TESTNET,
+      environment,
     );
   }
 
   @Post('binance/testnet/test-connection')
   testBinanceTestnetConnection(@Req() request: AuthenticatedRequest) {
     return this.accounts.testBinanceTestnetConnection(request.user.sub);
+  }
+
+  @Post('binance/live/test-connection')
+  testBinanceLiveConnection(@Req() request: AuthenticatedRequest) {
+    return this.accounts.testBinanceLiveConnection(request.user.sub);
   }
 
   @Post('bybit')
@@ -81,10 +89,9 @@ export class ExchangeCredentialsController {
     @Req() request: AuthenticatedRequest,
     @Param('environment') environment: ExchangeEnvironment,
   ) {
-    this.accounts.assertTestnetOnly(environment);
     return this.credentials.removeBinance(
       request.user.sub,
-      ExchangeEnvironment.TESTNET,
+      environment,
     );
   }
 

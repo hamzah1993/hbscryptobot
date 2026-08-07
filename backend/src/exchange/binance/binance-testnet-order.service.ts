@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ExchangeEnvironment } from '@prisma/client';
 import { ExchangeCredentialsService } from '../credentials/exchange-credentials.service';
-import { BinanceService, type BinanceSymbolFilter } from './binance.service';
+import { BinanceService, type BinanceEnvironment, type BinanceSymbolFilter } from './binance.service';
 
 export type BinanceTestnetMarketOrderInput = {
   symbol: string;
@@ -27,6 +27,9 @@ export class BinanceTestnetOrderService {
     private readonly credentials: ExchangeCredentialsService,
   ) {}
 
+  protected readonly credentialEnvironment: ExchangeEnvironment = ExchangeEnvironment.TESTNET;
+  protected readonly binanceEnvironment: BinanceEnvironment = 'testnet';
+
   async previewMarketBuy(userId: string, symbolInput: string, quoteAmountInput: number) {
     const symbol = symbolInput.trim().toUpperCase();
     const quoteAmount = Number(quoteAmountInput);
@@ -36,15 +39,15 @@ export class BinanceTestnetOrderService {
     }
 
     const [credential, symbolInfo, ticker] = await Promise.all([
-      this.credentials.getBinance(userId, ExchangeEnvironment.TESTNET),
-      this.binance.getSymbolInfo(symbol, 'testnet'),
-      this.binance.getTickerPrice(symbol, 'testnet') as Promise<{ price?: string }>,
+      this.credentials.getBinance(userId, this.credentialEnvironment),
+      this.binance.getSymbolInfo(symbol, this.binanceEnvironment),
+      this.binance.getTickerPrice(symbol, this.binanceEnvironment) as Promise<{ price?: string }>,
     ]);
 
     const account = (await this.binance.getAccount(
       credential.apiKey,
       credential.apiSecret,
-      'testnet',
+      this.binanceEnvironment,
     )) as any;
     const marketPrice = Number(ticker.price ?? 0);
     if (!Number.isFinite(marketPrice) || marketPrice <= 0) {
@@ -99,9 +102,9 @@ export class BinanceTestnetOrderService {
     }
 
     const [credential, symbolInfo, ticker] = await Promise.all([
-      this.credentials.getBinance(userId, ExchangeEnvironment.TESTNET),
-      this.binance.getSymbolInfo(symbol, 'testnet'),
-      this.binance.getTickerPrice(symbol, 'testnet') as Promise<{ price?: string }>,
+      this.credentials.getBinance(userId, this.credentialEnvironment),
+      this.binance.getSymbolInfo(symbol, this.binanceEnvironment),
+      this.binance.getTickerPrice(symbol, this.binanceEnvironment) as Promise<{ price?: string }>,
     ]);
 
     const resolvedFilter = this.resolveQuantityFilter(symbolInfo.filters);
@@ -117,7 +120,7 @@ export class BinanceTestnetOrderService {
       },
       credential.apiKey,
       credential.apiSecret,
-      'testnet',
+      this.binanceEnvironment,
     );
   }
 
@@ -128,8 +131,8 @@ export class BinanceTestnetOrderService {
     if (!Number.isFinite(input.price) || input.price <= 0) throw new BadRequestException('Limit price must be a positive number');
 
     const [credential, symbolInfo] = await Promise.all([
-      this.credentials.getBinance(userId, ExchangeEnvironment.TESTNET),
-      this.binance.getSymbolInfo(symbol, 'testnet'),
+      this.credentials.getBinance(userId, this.credentialEnvironment),
+      this.binance.getSymbolInfo(symbol, this.binanceEnvironment),
     ]);
     const resolvedFilter = this.resolveLimitQuantityFilter(symbolInfo.filters);
     const normalizedQuantity = this.normalizeQuantity(input.quantity, resolvedFilter);
@@ -139,7 +142,7 @@ export class BinanceTestnetOrderService {
     return this.binance.placeLimitOrder({
       symbol, side: input.side, quantity: normalizedQuantity, price: normalizedPrice,
       clientOrderId: this.normalizeClientOrderId(input.clientOrderId),
-    }, credential.apiKey, credential.apiSecret, 'testnet');
+    }, credential.apiKey, credential.apiSecret, this.binanceEnvironment);
   }
 
   async getOrder(userId: string, symbol: string, exchangeOrderId: string) {
@@ -149,7 +152,7 @@ export class BinanceTestnetOrderService {
 
     const credential = await this.credentials.getBinance(
       userId,
-      ExchangeEnvironment.TESTNET,
+      this.credentialEnvironment,
     );
 
     return this.binance.getOrder(
@@ -157,7 +160,7 @@ export class BinanceTestnetOrderService {
       exchangeOrderId.trim(),
       credential.apiKey,
       credential.apiSecret,
-      'testnet',
+      this.binanceEnvironment,
     );
   }
 
@@ -168,7 +171,7 @@ export class BinanceTestnetOrderService {
 
     const credential = await this.credentials.getBinance(
       userId,
-      ExchangeEnvironment.TESTNET,
+      this.credentialEnvironment,
     );
 
     try {
@@ -177,7 +180,7 @@ export class BinanceTestnetOrderService {
         clientOrderId.trim(),
         credential.apiKey,
         credential.apiSecret,
-        'testnet',
+        this.binanceEnvironment,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -193,7 +196,7 @@ export class BinanceTestnetOrderService {
 
     const credential = await this.credentials.getBinance(
       userId,
-      ExchangeEnvironment.TESTNET,
+      this.credentialEnvironment,
     );
 
     return this.binance.cancelOrder(
@@ -201,7 +204,7 @@ export class BinanceTestnetOrderService {
       exchangeOrderId.trim(),
       credential.apiKey,
       credential.apiSecret,
-      'testnet',
+      this.binanceEnvironment,
     );
   }
 

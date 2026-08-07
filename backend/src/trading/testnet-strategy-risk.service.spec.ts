@@ -4,6 +4,7 @@ import { TestnetStrategyRiskService } from './testnet-strategy-risk.service';
 describe('TestnetStrategyRiskService fixed budget', () => {
   const strategy = {
     id: 'strategy-1',
+    exchange: 'BINANCE',
     mode: 'BINANCE_TESTNET',
     environment: 'TESTNET',
     paperTrading: false,

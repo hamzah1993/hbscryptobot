@@ -298,12 +298,14 @@ export function DashboardPage() {
     setEmergencyStopError(null);
     setEmergencyExitResult(null);
     try {
-      const result = await api.emergencyExitTestnet(token);
+      const result = mode === 'LIVE'
+        ? await api.emergencyExitLive(token)
+        : await api.emergencyExitTestnet(token);
       setEmergencyExitResult(result);
       setShowEmergencyExitConfirm(false);
       await loadPositions(true);
     } catch (reason: unknown) {
-      setEmergencyStopError(reason instanceof Error ? reason.message : 'Unable to emergency-exit Testnet positions');
+      setEmergencyStopError(reason instanceof Error ? reason.message : `Unable to emergency-exit ${mode === 'LIVE' ? 'Binance LIVE' : 'Testnet'} positions`);
     } finally {
       setEmergencyExitBusy(false);
     }
@@ -371,7 +373,7 @@ export function DashboardPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-sm">
           <section className="w-full max-w-lg rounded-2xl border border-rose-500/40 bg-[#0a1728] p-6 shadow-2xl shadow-rose-950/50">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-rose-300">Emergency market exit</p>
-            <h3 className="mt-3 text-2xl font-semibold">Close all Binance Testnet exposure now?</h3>
+            <h3 className="mt-3 text-2xl font-semibold">Close all Binance {mode === 'LIVE' ? 'LIVE' : 'Testnet'} exposure now?</h3>
             <p className="mt-3 text-sm leading-6 text-slate-300">This pauses automation, cancels pending execution where possible, submits MARKET sells for open parent and independent positions, then leaves every affected bot STOPPED so it cannot reopen.</p>
             <p className="mt-3 text-xs font-semibold text-rose-200">This is an exit action, not the normal Emergency Stop.</p>
             {emergencyStopError && <p className="mt-4 rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">{emergencyStopError}</p>}
@@ -433,7 +435,7 @@ export function DashboardPage() {
               <button type="button" onClick={toggleNotificationSounds} className="hidden rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] sm:block">{notificationSoundsEnabled ? 'Disable sounds' : 'Enable sounds'}</button>
               {'Notification' in window && (browserNotificationsEnabled ? <button type="button" onClick={disableBrowserNotifications} className="hidden rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/[0.08] md:block">Disable browser alerts</button> : <button type="button" onClick={() => void enableBrowserNotifications()} className="hidden rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 hover:bg-cyan-400/20 md:block">Enable browser alerts</button>)}
               {mode === 'TESTNET' && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyStopConfirm(true); }} className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-4 py-2.5 text-sm font-semibold text-amber-200 hover:bg-amber-400/20">Emergency stop</button>}
-              {mode === 'TESTNET' && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyExitConfirm(true); }} className="rounded-xl border border-rose-500/50 bg-rose-500/15 px-4 py-2.5 text-sm font-semibold text-rose-100 hover:bg-rose-500/25">Emergency exit</button>}
+              {(mode === 'TESTNET' || mode === 'LIVE') && <button type="button" onClick={() => { setEmergencyStopError(null); setShowEmergencyExitConfirm(true); }} className="rounded-xl border border-rose-500/50 bg-rose-500/15 px-4 py-2.5 text-sm font-semibold text-rose-100 hover:bg-rose-500/25">Emergency exit</button>}
               {mode !== 'LIVE' && <button onClick={() => setShowCreateBot(true)} className="flex-1 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 sm:flex-none">Create bot</button>}
               <button type="button" onClick={() => selectNavigation('Profile')} aria-label="Open profile" className="hidden h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-sm font-semibold lg:flex">{initials}</button>
             </div>

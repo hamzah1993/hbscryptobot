@@ -76,7 +76,14 @@ export class ProductionReadinessService {
       && hardeningChecks.noPermanentActionFailures;
 
     const liveFeatureFlag = this.config.get<string>('ENABLE_LIVE_TRADING') === 'true';
-    const liveRoutingImplemented = false;
+    // Binance is now the independent first LIVE rollout. Bybit/OKX remain
+    // separately gated and do not block Binance activation.
+    const binanceTestnetW2wCertified = true;
+    const liveRoutingImplemented = true;
+    // Operator evidence gate: code/tests alone do not prove that a production
+    // emergency exit has successfully reached Binance LIVE. This remains false
+    // until the controlled verification step is explicitly recorded in config.
+    const liveEmergencyExitAdapterVerified = this.config.get<string>('BINANCE_LIVE_EMERGENCY_EXIT_VERIFIED') === 'true';
     const liveCapitalCeilingConfigured = liveSafetyProfile?.capitalCeilingQuote != null
       && Number(liveSafetyProfile.capitalCeilingQuote) > 0;
     const explicitLiveConfirmationRecorded = liveSafetyProfile?.confirmationVersion === '2026-08-v1'
@@ -89,16 +96,18 @@ export class ProductionReadinessService {
       dailyLossGateImplemented: true,
       emergencyExitWorkflowImplemented: true,
       emergencyReentryBlockImplemented: true,
+      binanceTestnetW2wCertified,
       binanceStrategyRoutingVerified: true,
       bybitStrategyRoutingVerified: false,
       okxStrategyRoutingVerified: false,
       liveFeatureFlag,
       liveRoutingImplemented,
-      liveCredentialsConfigured: credentialGroups.some((group) => group.environment === 'LIVE' && group._count._all > 0),
+      binanceLiveCredentialsConfigured: configured('BINANCE', 'LIVE'),
+      liveCredentialsConfigured: configured('BINANCE', 'LIVE'),
       liveCapitalCeilingConfigured,
       explicitLiveConfirmationImplemented: true,
       explicitLiveConfirmationRecorded,
-      liveEmergencyExitAdapterVerified: false,
+      liveEmergencyExitAdapterVerified,
     };
     const liveConfirmationAvailable = liveChecks.productionHardeningReady
       && liveChecks.operationalNotificationProvider
@@ -107,9 +116,8 @@ export class ProductionReadinessService {
       && liveChecks.dailyLossGateImplemented
       && liveChecks.emergencyExitWorkflowImplemented
       && liveChecks.emergencyReentryBlockImplemented
+      && liveChecks.binanceTestnetW2wCertified
       && liveChecks.binanceStrategyRoutingVerified
-      && liveChecks.bybitStrategyRoutingVerified
-      && liveChecks.okxStrategyRoutingVerified
       && liveChecks.liveFeatureFlag
       && liveChecks.liveRoutingImplemented
       && liveChecks.liveCredentialsConfigured
@@ -135,8 +143,7 @@ export class ProductionReadinessService {
         confirmationVersion: liveSafetyProfile?.confirmationVersion ?? null,
       },
       liveConfirmationAvailable,
-      // LIVE order routing is intentionally not implemented yet; this gate must stay closed.
-      liveMoneyReady: false,
+      liveMoneyReady: liveConfirmationAvailable && explicitLiveConfirmationRecorded,
     };
   }
 }

@@ -65,6 +65,15 @@ export class TestnetStrategyExecutionService {
     private readonly recoveryStrategy: RecoveryStrategyService,
   ) {}
 
+  /** Environment boundary overridden only by the guarded Binance LIVE service. */
+  protected get executionEnvironment(): 'TESTNET' | 'LIVE' {
+    return 'TESTNET';
+  }
+
+  protected get executionLabel(): string {
+    return this.executionEnvironment === 'LIVE' ? 'Binance LIVE' : 'Binance Testnet';
+  }
+
   async updateTakeProfit(userId: string, positionId: string, input: TakeProfitUpdateInput) {
     if (!['PARENT', 'RECOVERY', 'INDEPENDENT'].includes(input.target)) {
       throw new BadRequestException('Take-profit target is invalid');
@@ -81,8 +90,8 @@ export class TestnetStrategyExecutionService {
       },
     });
     if (!position) throw new NotFoundException('Testnet position not found');
-    if (position.strategy.paperTrading || position.strategy.environment !== 'TESTNET') {
-      throw new BadRequestException('Only Binance Testnet positions can be edited here');
+    if (position.strategy.paperTrading || position.strategy.environment !== this.executionEnvironment) {
+      throw new BadRequestException(`Only ${this.executionLabel} positions can be edited here`);
     }
     if (position.status !== 'OPEN') throw new BadRequestException('Only open Testnet positions can be edited');
     if (position.strategy.status !== 'PAUSED') throw new BadRequestException('Pause the bot before editing Testnet take profit');
@@ -135,8 +144,8 @@ export class TestnetStrategyExecutionService {
     });
 
     if (!position) throw new NotFoundException('Testnet position not found');
-    if (position.strategy.paperTrading || position.strategy.environment !== 'TESTNET') {
-      throw new BadRequestException('Only Binance Testnet positions can be closed here');
+    if (position.strategy.paperTrading || position.strategy.environment !== this.executionEnvironment) {
+      throw new BadRequestException(`Only ${this.executionLabel} positions can be closed here`);
     }
     if (position.status !== 'OPEN') {
       throw new BadRequestException('Only open Testnet positions can be closed');
@@ -191,10 +200,10 @@ export class TestnetStrategyExecutionService {
     });
     if (!strategy) throw new NotFoundException('Strategy not found');
     if (strategy.paperTrading) {
-      throw new BadRequestException('Paper strategies cannot place Binance testnet orders');
+      throw new BadRequestException(`Paper strategies cannot place ${this.executionLabel} orders`);
     }
-    if (strategy.environment !== 'TESTNET') {
-      throw new BadRequestException('Only Binance testnet strategy execution is allowed');
+    if (strategy.environment !== this.executionEnvironment || strategy.exchange !== 'BINANCE') {
+      throw new BadRequestException(`Only ${this.executionLabel} strategy execution is allowed`);
     }
     const orderType = input.orderType ?? 'MARKET';
     if (orderType === 'LIMIT' && (!Number.isFinite(Number(input.limitPrice)) || Number(input.limitPrice) <= 0)) {
@@ -281,7 +290,7 @@ export class TestnetStrategyExecutionService {
 
     const clientOrderId = actionKey
       ? `hbs-${createHash('sha256').update(actionKey).digest('hex').slice(0, 32)}`
-      : `hbs-testnet-${randomUUID()}`;
+      : `hbs-${this.executionEnvironment.toLowerCase()}-${randomUUID()}`;
 
     try {
       let exchangeOrder: BinanceOrderResponse | null = null;
@@ -556,7 +565,7 @@ export class TestnetStrategyExecutionService {
         userId,
         position: {
           strategy: {
-            environment: 'TESTNET',
+            environment: this.executionEnvironment,
             paperTrading: false,
           },
         },
@@ -607,7 +616,7 @@ export class TestnetStrategyExecutionService {
       where: {
         userId,
         strategy: {
-          environment: 'TESTNET',
+          environment: this.executionEnvironment,
           paperTrading: false,
         },
       },
@@ -661,8 +670,8 @@ export class TestnetStrategyExecutionService {
     });
 
     if (!order) throw new NotFoundException('Trading order not found');
-    if (order.position.strategy.paperTrading || order.position.strategy.environment !== 'TESTNET') {
-      throw new BadRequestException('Only Binance testnet orders can be synchronized');
+    if (order.position.strategy.paperTrading || order.position.strategy.environment !== this.executionEnvironment) {
+      throw new BadRequestException(`Only ${this.executionLabel} orders can be synchronized`);
     }
     if (!order.exchangeOrderId) {
       throw new BadRequestException('Trading order does not have an exchange order identifier');
@@ -887,8 +896,8 @@ export class TestnetStrategyExecutionService {
         message: syncedLifecycle
           ? syncedLifecycle.message
           : terminalFailure
-            ? `Testnet order synchronization ended with status ${status} for ${order.position.symbol}.`
-            : `Testnet order synchronization updated status to ${status} for ${order.position.symbol}.`,
+            ? `${this.executionLabel} order synchronization ended with status ${status} for ${order.position.symbol}.`
+            : `${this.executionLabel} order synchronization updated status to ${status} for ${order.position.symbol}.`,
         severity: terminalFailure ? 'WARNING' : 'INFO',
         userId,
         strategyId: order.position.strategyId,
@@ -1062,31 +1071,31 @@ export class TestnetStrategyExecutionService {
     if (status !== 'FILLED') {
       return {
         event: 'TESTNET_ORDER_SUBMITTED',
-        message: `Testnet ${actionType ?? 'strategy'} order submitted for ${symbol}.`,
+        message: `${this.executionLabel} ${actionType ?? 'strategy'} order submitted for ${symbol}.`,
       };
     }
 
     switch (actionType) {
       case 'INITIAL_ENTRY':
-        return { event: 'ENTRY_FILLED', message: `${symbol} entry #1 filled on Binance Testnet.` };
+        return { event: 'ENTRY_FILLED', message: `${symbol} entry #1 filled on ${this.executionLabel}.` };
       case 'DCA_ENTRY':
-        return { event: 'DCA_FILLED', message: `${symbol} main DCA level #${level} filled on Binance Testnet.` };
+        return { event: 'DCA_FILLED', message: `${symbol} main DCA level #${level} filled on ${this.executionLabel}.` };
       case 'INDEPENDENT_ENTRY':
-        return { event: 'INDEPENDENT_OPENED', message: `${symbol} independent level #${level} opened on Binance Testnet.` };
+        return { event: 'INDEPENDENT_OPENED', message: `${symbol} independent level #${level} opened on ${this.executionLabel}.` };
       case 'RECOVERY_DCA_ENTRY':
         return recoveryWasActive
-          ? { event: 'RECOVERY_DCA_FILLED', message: `${symbol} Recovery order filled on Binance Testnet.` }
-          : { event: 'RECOVERY_ACTIVATED', message: `${symbol} entered Recovery mode and its first Recovery order filled on Binance Testnet.` };
+          ? { event: 'RECOVERY_DCA_FILLED', message: `${symbol} Recovery order filled on ${this.executionLabel}.` }
+          : { event: 'RECOVERY_ACTIVATED', message: `${symbol} entered Recovery mode and its first Recovery order filled on ${this.executionLabel}.` };
       case 'INDEPENDENT_EXIT':
         return cycleCompleted
-          ? { event: 'CYCLE_COMPLETED', message: `${symbol} final independent level #${level} closed; trading cycle completed on Binance Testnet.` }
-          : { event: 'INDEPENDENT_TP_HIT', message: `${symbol} independent level #${level} closed on Binance Testnet.` };
+          ? { event: 'CYCLE_COMPLETED', message: `${symbol} final independent level #${level} closed; trading cycle completed on ${this.executionLabel}.` }
+          : { event: 'INDEPENDENT_TP_HIT', message: `${symbol} independent level #${level} closed on ${this.executionLabel}.` };
       case 'PARENT_EXIT':
         return cycleCompleted
-          ? { event: 'CYCLE_COMPLETED', message: `${symbol} basket TP/exit filled; trading cycle completed on Binance Testnet.` }
-          : { event: 'PARENT_TP_HIT', message: `${symbol} parent TP/exit filled; independent legs remain open on Binance Testnet.` };
+          ? { event: 'CYCLE_COMPLETED', message: `${symbol} basket TP/exit filled; trading cycle completed on ${this.executionLabel}.` }
+          : { event: 'PARENT_TP_HIT', message: `${symbol} parent TP/exit filled; independent legs remain open on ${this.executionLabel}.` };
       default:
-        return { event: 'TESTNET_ORDER_FILLED', message: `Testnet order filled for ${symbol}.` };
+        return { event: 'TESTNET_ORDER_FILLED', message: `${this.executionLabel} order filled for ${symbol}.` };
     }
   }
 

@@ -191,6 +191,17 @@ export type BinanceTestnetConnectionResponse = {
   accountType: string | null;
 };
 
+export type BinanceLiveConnectionResponse = {
+  connected: boolean;
+  exchange: 'BINANCE';
+  environment: 'LIVE';
+  canTrade: boolean;
+  canWithdraw: boolean;
+  spotEnabled: boolean;
+  accountType: string | null;
+  permissions: string[];
+};
+
 export type BinanceTestnetBalancesResponse = {
   exchange: 'BINANCE';
   environment: 'TESTNET';
@@ -478,7 +489,7 @@ export type TestnetEmergencyStopResponse = {
 };
 
 export type TestnetEmergencyExitResponse = {
-  environment: 'TESTNET';
+  environment: 'TESTNET' | 'LIVE';
   exchange: 'BINANCE';
   startedAt: string;
   positionsFound: number;
@@ -689,6 +700,8 @@ export const api = {
     request<TestnetEmergencyStopResponse>('/strategies/testnet-emergency-stop', { method: 'POST', headers: authHeaders(token) }),
   emergencyExitTestnet: (token: string) =>
     request<TestnetEmergencyExitResponse>('/strategies/testnet-emergency-exit', { method: 'POST', headers: authHeaders(token) }),
+  emergencyExitLive: (token: string) =>
+    request<TestnetEmergencyExitResponse>('/strategies/live-emergency-exit', { method: 'POST', headers: authHeaders(token) }),
   listExchangeCredentials: (token: string) =>
     request<ExchangeCredentialSummary[]>('/exchange/credentials', { headers: authHeaders(token) }),
   saveBinanceCredentials: (token: string, payload: { apiKey: string; apiSecret: string; environment: ExchangeEnvironment }) =>
@@ -715,6 +728,8 @@ export const api = {
     request<BinanceAccountTestResponse>('/exchange/binance/account/test', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ environment: toBinanceEnvironment(environment) }) }),
   testBinanceTestnetConnection: (token: string) =>
     request<BinanceTestnetConnectionResponse>('/exchange/credentials/binance/testnet/test-connection', { method: 'POST', headers: authHeaders(token) }),
+  testBinanceLiveConnection: (token: string) =>
+    request<BinanceLiveConnectionResponse>('/exchange/credentials/binance/live/test-connection', { method: 'POST', headers: authHeaders(token) }),
   getBinanceTestnetBalances: (token: string) =>
     request<BinanceTestnetBalancesResponse>('/exchange/credentials/binance/testnet/balances', { headers: authHeaders(token) }),
   getMarketCandles: (token: string, symbol: string, interval: BinanceKlineInterval = '5m', limit = 200, environment: BinanceStreamEnvironment = 'live') =>

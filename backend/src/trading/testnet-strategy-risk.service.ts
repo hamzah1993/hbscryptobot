@@ -12,7 +12,15 @@ export type TestnetRiskActionType =
 
 @Injectable()
 export class TestnetStrategyRiskService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(protected readonly prisma: PrismaService) {}
+
+  protected get expectedMode(): 'BINANCE_TESTNET' | 'BINANCE_LIVE' {
+    return 'BINANCE_TESTNET';
+  }
+
+  protected get expectedEnvironment(): 'TESTNET' | 'LIVE' {
+    return 'TESTNET';
+  }
 
   async assertCanExecute(
     userId: string,
@@ -21,14 +29,17 @@ export class TestnetStrategyRiskService {
     actionType: TestnetRiskActionType,
     estimatedOrderQuote: number,
   ) {
-    if (strategy.mode !== 'BINANCE_TESTNET') {
-      throw new BadRequestException('Only BINANCE_TESTNET strategies can place Binance testnet orders');
+    if (strategy.mode !== this.expectedMode) {
+      throw new BadRequestException(`Only ${this.expectedMode} strategies can use this execution boundary`);
     }
-    if (strategy.paperTrading || strategy.environment !== 'TESTNET') {
-      throw new BadRequestException('Strategy mode is inconsistent with Binance testnet execution');
+    if (strategy.paperTrading || strategy.environment !== this.expectedEnvironment || strategy.exchange !== 'BINANCE') {
+      throw new BadRequestException(`Strategy mode is inconsistent with Binance ${this.expectedEnvironment} execution`);
     }
 
+    const isEntry = !actionType || ['INITIAL_ENTRY', 'DCA_ENTRY', 'INDEPENDENT_ENTRY', 'RECOVERY_DCA_ENTRY'].includes(actionType);
+
     if (
+      isEntry &&
       estimatedOrderQuote > 0 &&
       strategy.maxOrderQuote !== null &&
       estimatedOrderQuote > Number(strategy.maxOrderQuote)
@@ -38,7 +49,7 @@ export class TestnetStrategyRiskService {
 
     if (actionType === 'INITIAL_ENTRY' && !openPosition) {
       const openPairPositions = await this.prisma.tradingPosition.findMany({
-        where: { userId, status: 'OPEN' },
+        where: { userId, status: 'OPEN', strategy: { environment: this.expectedEnvironment, paperTrading: false } },
         select: { symbol: true },
       });
       const distinctOpenPairs = new Set(openPairPositions.map((position) => String(position.symbol).toUpperCase()));
@@ -82,12 +93,13 @@ export class TestnetStrategyRiskService {
 
     if (
       estimatedOrderQuote > 0 &&
-      (!actionType || ['INITIAL_ENTRY', 'DCA_ENTRY', 'INDEPENDENT_ENTRY', 'RECOVERY_DCA_ENTRY'].includes(actionType)) &&
+      isEntry &&
       totalExposure + estimatedOrderQuote > Number(strategy.riskBudgetQuote) + Number.EPSILON
     ) {
       throw new BadRequestException('Order would exceed the configured fixed risk budget');
     }
     if (
+      isEntry &&
       estimatedOrderQuote > 0 &&
       strategy.maxStrategyExposureQuote !== null &&
       totalExposure + estimatedOrderQuote > Number(strategy.maxStrategyExposureQuote)
@@ -108,7 +120,7 @@ export class TestnetStrategyRiskService {
       }
     }
 
-    if (strategy.maxDailyRealizedLossQuote !== null) {
+    if (isEntry && strategy.maxDailyRealizedLossQuote !== null) {
       const startOfDay = new Date();
       startOfDay.setUTCHours(0, 0, 0, 0);
       const positions = await this.prisma.tradingPosition.findMany({

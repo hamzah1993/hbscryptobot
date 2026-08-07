@@ -186,10 +186,6 @@ export class BinanceService {
     apiSecret: string,
     environment: BinanceEnvironment = 'testnet',
   ) {
-    if (environment !== 'testnet') {
-      throw new BadRequestException('Live Binance order lookup is disabled');
-    }
-
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
     if (!orderId.trim()) throw new BadRequestException('Exchange order ID is required');
@@ -211,10 +207,6 @@ export class BinanceService {
     apiSecret: string,
     environment: BinanceEnvironment = 'testnet',
   ) {
-    if (environment !== 'testnet') {
-      throw new BadRequestException('Live Binance order lookup is disabled');
-    }
-
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
     if (!clientOrderId.trim()) throw new BadRequestException('Client order ID is required');
@@ -236,10 +228,6 @@ export class BinanceService {
     apiSecret: string,
     environment: BinanceEnvironment = 'testnet',
   ) {
-    if (environment !== 'testnet') {
-      throw new BadRequestException('Live Binance order cancellation is disabled');
-    }
-
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
     if (!orderId.trim()) throw new BadRequestException('Exchange order ID is required');
@@ -279,10 +267,6 @@ export class BinanceService {
     apiSecret: string,
     environment: BinanceEnvironment = 'testnet',
   ) {
-    if (environment !== 'testnet') {
-      throw new BadRequestException('Live Binance order execution is disabled');
-    }
-
     const quantity = Number(params.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
       throw new BadRequestException('Order quantity must be positive');
@@ -309,7 +293,6 @@ export class BinanceService {
     apiSecret: string,
     environment: BinanceEnvironment = 'testnet',
   ) {
-    if (environment !== 'testnet') throw new BadRequestException('Live Binance order execution is disabled');
     if (!Number.isFinite(Number(params.quantity)) || Number(params.quantity) <= 0) throw new BadRequestException('Order quantity must be positive');
     if (!Number.isFinite(Number(params.price)) || Number(params.price) <= 0) throw new BadRequestException('Limit price must be positive');
 

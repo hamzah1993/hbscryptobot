@@ -8,6 +8,7 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     id: 'strategy-1',
     userId,
     symbol: 'BTCUSDT',
+    exchange: 'BINANCE',
     paperTrading: false,
     environment: 'TESTNET',
     status: 'PAUSED',
