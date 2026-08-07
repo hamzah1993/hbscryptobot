@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
+import { MaintenanceService } from '../admin/maintenance.service';
 
 const LIVE_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:binance-live-strategy-scheduler';
 
@@ -15,11 +16,13 @@ export class LiveStrategySchedulerService {
     private readonly prisma: PrismaService,
     private readonly runner: TestnetStrategyRunnerService,
     private readonly redisLock: RedisLockService,
+    private readonly maintenance?: MaintenanceService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
   async runAutomaticLiveStrategies() {
     if (this.running) return;
+    if (await this.maintenance?.isActive()) return;
     this.running = true;
     let lock: RedisLock | null = null;
     try {

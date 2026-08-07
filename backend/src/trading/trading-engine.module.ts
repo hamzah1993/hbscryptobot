@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BinanceModule } from '../exchange/binance/binance.module';
+import { AdminModule } from '../admin/admin.module';
 import { MarketDataModule } from '../market/market-data.module';
 import { BacktestBuyHoldSimulatorService } from './backtest-buy-hold-simulator.service';
 import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
@@ -45,7 +46,7 @@ import { TradingEngineController } from './trading-engine.controller';
 import { TradingEngineService } from './trading-engine.service';
 
 @Module({
-  imports: [MarketDataModule, BinanceModule],
+  imports: [MarketDataModule, BinanceModule, AdminModule],
   controllers: [
     TradingEngineController,
     PaperTradingController,

@@ -17,6 +17,7 @@ import { getGlobalRateLimitConfiguration } from './rate-limit.config';
 import { RedisLockModule } from './redis/redis-lock.module';
 import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
+import { AdminModule } from './admin/admin.module';
 
 const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expiresIn'];
 const globalRateLimit = getGlobalRateLimitConfiguration();
@@ -39,6 +40,7 @@ const globalRateLimit = getGlobalRateLimitConfiguration();
     PrismaModule,
     RedisLockModule,
     NotificationsModule,
+    AdminModule,
     AuthModule,
     UsersModule,
     ExchangeCredentialsModule,

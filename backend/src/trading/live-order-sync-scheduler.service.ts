@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { RiskAwareLiveStrategyExecutionService } from './risk-aware-live-strategy-execution.service';
+import { MaintenanceService } from '../admin/maintenance.service';
 
 const LIVE_ORDER_SYNC_LOCK_KEY = 'hbs:lock:binance-live-order-sync';
 
@@ -16,11 +17,13 @@ export class LiveOrderSyncSchedulerService {
     private readonly prisma: PrismaService,
     private readonly execution: RiskAwareLiveStrategyExecutionService,
     private readonly redisLock: RedisLockService,
+    private readonly maintenance?: MaintenanceService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
   async syncOpenLiveOrders() {
     if (this.running) return;
+    if (await this.maintenance?.isActive()) return;
     this.running = true;
     let lock: RedisLock | null = null;
     try {

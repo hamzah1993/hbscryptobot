@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { MaintenanceService } from '../admin/maintenance.service';
 import { BinanceLiveOrderService } from '../exchange/binance/binance-live-order.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,12 +21,14 @@ export class RiskAwareLiveStrategyExecutionService extends TestnetStrategyExecut
     notifications: NotificationsService,
     private readonly liveRisk: LiveStrategyRiskService,
     recoveryStrategy: RecoveryStrategyService,
+    private readonly maintenance?: MaintenanceService,
   ) {
     // The environment-aware order adapters expose the same normalized surface.
     super(livePrisma, liveOrders, strategyActions, notifications, recoveryStrategy);
   }
 
   override async executeMarketOrder(userId: string, input: ExecuteTestnetStrategyInput) {
+    if (await this.maintenance?.isActive()) throw new ServiceUnavailableException('Trading is paused for system maintenance');
     const strategy = await this.livePrisma.tradingStrategy.findFirst({ where: { id: input.strategyId, userId } });
     if (!strategy) throw new NotFoundException('Strategy not found');
     const openPosition = await this.livePrisma.tradingPosition.findFirst({

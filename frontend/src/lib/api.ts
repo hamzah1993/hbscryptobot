@@ -8,6 +8,14 @@ export type AuthUser = {
   createdAt?: string;
 };
 
+export type AdminBackup = { filename: string; sizeBytes: number; createdAt: string; checksum?: string; verified?: boolean };
+export type AdminHealth = {
+  backend: 'HEALTHY' | 'ERROR'; database: 'HEALTHY' | 'ERROR'; redis: 'HEALTHY' | 'ERROR'; scheduler: string;
+  runningStrategies: number; backupTools: 'AVAILABLE' | 'MISSING'; backupDirectory: string; persistentBackupDirectoryConfigured: boolean; automaticBackupsEnabled: boolean;
+  maintenance: { active: boolean; reason?: string | null; startedAt?: string | null }; timestamp: string;
+};
+export type AdminAuditEvent = { id: string; action: string; target: string | null; metadata?: Record<string, unknown> | null; createdAt: string; admin: { id: string; email: string; fullName: string } };
+
 export type TradingOrder = {
   id: string;
   side: 'BUY' | 'SELL';
@@ -636,6 +644,16 @@ export const api = {
   changePassword: (token: string, currentPassword: string, newPassword: string) =>
     request<{ changed: true; sessionsInvalidated: true }>('/auth/change-password', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ currentPassword, newPassword }) }),
   me: (token: string) => request<AuthUser>('/users/me', { headers: authHeaders(token) }),
+  getAdminHealth: (token: string) => request<AdminHealth>('/admin/health', { headers: authHeaders(token) }),
+  listAdminBackups: (token: string) => request<AdminBackup[]>('/admin/backups', { headers: authHeaders(token) }),
+  createAdminBackup: (token: string) => request<AdminBackup>('/admin/backups', { method: 'POST', headers: authHeaders(token) }),
+  listAdminAudit: (token: string) => request<AdminAuditEvent[]>('/admin/audit?limit=100', { headers: authHeaders(token) }),
+  restoreAdminBackup: (token: string, filename: string, confirmation: string) => request<{ restored: true; filename: string; safetyBackup: string; tradingResumed: false }>('/admin/restore', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ filename, confirmation }) }),
+  async downloadAdminBackup(token: string, filename: string) {
+    const response = await fetch(`${API_URL}/admin/backups/${encodeURIComponent(filename)}/download`, { headers: authHeaders(token) });
+    if (!response.ok) throw new Error((await response.text()) || `Request failed (${response.status})`);
+    return response.blob();
+  },
   listStrategies: (token: string) => request<TradingStrategy[]>('/strategies', { headers: authHeaders(token) }),
   createStrategy: (token: string, payload: CreateStrategyPayload) =>
     request<TradingStrategy>('/strategies', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),

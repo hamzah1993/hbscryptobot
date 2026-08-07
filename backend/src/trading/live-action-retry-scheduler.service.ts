@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { RiskAwareLiveStrategyExecutionService } from './risk-aware-live-strategy-execution.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
+import { MaintenanceService } from '../admin/maintenance.service';
 
 const LIVE_RETRY_LOCK_KEY = 'hbs:lock:binance-live-action-retry';
 
@@ -17,11 +18,13 @@ export class LiveActionRetrySchedulerService {
     private readonly actions: TestnetStrategyActionService,
     private readonly execution: RiskAwareLiveStrategyExecutionService,
     private readonly redisLock: RedisLockService,
+    private readonly maintenance?: MaintenanceService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
   async runDueLiveRetries() {
     if (this.running) return;
+    if (await this.maintenance?.isActive()) return;
     this.running = true;
     let lock: RedisLock | null = null;
     try {

@@ -46,6 +46,11 @@ export class RedisLockService implements OnModuleDestroy {
     return result === 1;
   }
 
+  async ping(): Promise<boolean> {
+    await this.ensureConnected();
+    return (await this.client.ping()) === 'PONG';
+  }
+
   async onModuleDestroy(): Promise<void> {
     if (this.client.isOpen) await this.client.quit();
   }
