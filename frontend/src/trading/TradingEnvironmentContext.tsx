@@ -7,7 +7,6 @@ const storageKey = 'hbs-global-trading-environment';
 type TradingEnvironmentContextValue = {
   mode: TradingEnvironmentMode;
   setMode: (mode: TradingEnvironmentMode) => void;
-  liveExecutionEnabled: false;
 };
 
 const TradingEnvironmentContext = createContext<TradingEnvironmentContextValue | null>(null);
@@ -25,7 +24,6 @@ export function TradingEnvironmentProvider({ children }: { children: React.React
   const value = useMemo<TradingEnvironmentContextValue>(() => ({
     mode,
     setMode,
-    liveExecutionEnabled: false,
   }), [mode]);
 
   return <TradingEnvironmentContext.Provider value={value}>{children}</TradingEnvironmentContext.Provider>;

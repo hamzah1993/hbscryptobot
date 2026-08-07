@@ -45,17 +45,19 @@ describe('NotificationChannelsService', () => {
     const settings = await service().getSettings('user-1');
     expect(settings).toEqual({
       email: { enabled: false, address: 'owner@example.com', minimumSeverity: 'WARNING', providerConfigured: false },
-      telegram: { enabled: false, chatId: '', minimumSeverity: 'WARNING', providerConfigured: false },
+      telegram: { enabled: false, chatId: '', connected: false, minimumSeverity: 'WARNING', providerConfigured: false, connectionConfigured: false },
     });
   });
 
   it('persists per-user destinations and severity thresholds', async () => {
     process.env.TELEGRAM_BOT_TOKEN = 'telegram-token';
+    process.env.TELEGRAM_BOT_USERNAME = 'HBS_Trading_Alerts_Bot';
+    process.env.TELEGRAM_WEBHOOK_SECRET = 'webhook-secret';
+    process.env.TELEGRAM_WEBHOOK_URL = 'https://example.com/api/notifications/telegram/webhook';
     process.env.SMTP_HOST = 'smtp.example.com';
     process.env.SMTP_FROM = 'alerts@example.com';
     prisma.notificationPreference.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         emailEnabled: true,
         emailAddress: 'alerts-to@example.com',
         emailMinimumSeverity: 'CRITICAL',
@@ -66,7 +68,7 @@ describe('NotificationChannelsService', () => {
 
     const result = await service().updateSettings('user-1', {
       email: { enabled: true, address: 'alerts-to@example.com', minimumSeverity: 'CRITICAL' },
-      telegram: { enabled: true, chatId: '123456', minimumSeverity: 'INFO' },
+      telegram: { enabled: true, minimumSeverity: 'INFO' },
     });
 
     expect(prisma.notificationPreference.upsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -75,6 +77,7 @@ describe('NotificationChannelsService', () => {
     }));
     expect(result.email.providerConfigured).toBe(true);
     expect(result.telegram.providerConfigured).toBe(true);
+    expect(result.telegram.connectionConfigured).toBe(true);
   });
 
   it('sends Telegram lifecycle context and respects the configured severity threshold', async () => {

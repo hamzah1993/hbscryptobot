@@ -2,10 +2,13 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-order.service';
+import { BinanceLiveOrderService } from '../exchange/binance/binance-live-order.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationChannelsService, type NotificationChannelSettingsInput } from '../notifications/notification-channels.service';
+import { TelegramConnectionService } from '../notifications/telegram-connection.service';
 import { LiveTradingSafetyService } from './live-trading-safety.service';
 import { LiveEmergencyExitService } from './live-emergency-exit.service';
+import { RiskAwareLiveStrategyExecutionService } from './risk-aware-live-strategy-execution.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { ProductionReadinessService } from './production-readiness.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
@@ -27,12 +30,15 @@ export class StrategyController {
     private readonly runner: PaperStrategyRunnerService,
     private readonly testnetExecution: TestnetStrategyExecutionService,
     private readonly testnetOrders: BinanceTestnetOrderService,
+    private readonly liveOrders: BinanceLiveOrderService,
+    private readonly liveExecution: RiskAwareLiveStrategyExecutionService,
     private readonly testnetTimeline: TestnetActionTimelineService,
     private readonly testnetActions: TestnetStrategyActionService,
     private readonly testnetEmergencyStop: TestnetEmergencyStopService,
     private readonly testnetHealth: TestnetRunnerHealthService,
     private readonly notifications: NotificationsService,
     private readonly notificationChannels: NotificationChannelsService,
+    private readonly telegramConnection: TelegramConnectionService,
     private readonly productionReadiness: ProductionReadinessService,
     private readonly liveTradingSafety: LiveTradingSafetyService,
     private readonly liveEmergencyExit: LiveEmergencyExitService,
@@ -70,6 +76,16 @@ export class StrategyController {
       throw new BadRequestException('Unsupported notification channel');
     }
     return this.notificationChannels.sendTest(request.user.sub, normalized);
+  }
+
+  @Post('notifications/telegram/connect')
+  connectTelegram(@Req() request: AuthenticatedRequest) {
+    return this.telegramConnection.createConnectionLink(request.user.sub);
+  }
+
+  @Delete('notifications/telegram')
+  disconnectTelegram(@Req() request: AuthenticatedRequest) {
+    return this.telegramConnection.disconnect(request.user.sub);
   }
 
   @Get('testnet-runner-health')
@@ -121,6 +137,44 @@ export class StrategyController {
   @Get('testnet-actions')
   listTestnetActions(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
     return this.testnetTimeline.list(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Get('live-orders')
+  listLiveOrders(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
+    return this.liveExecution.listOrders(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Get('live-positions')
+  listLivePositions(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
+    return this.liveExecution.listPositions(request.user.sub, Number(limit ?? 100));
+  }
+
+  @Get('live-actions')
+  listLiveActions(@Req() request: AuthenticatedRequest, @Query('limit') limit?: string) {
+    return this.testnetTimeline.list(request.user.sub, Number(limit ?? 100), 'LIVE');
+  }
+
+  @Post('live-order-preview')
+  previewLiveOrder(@Req() request: AuthenticatedRequest, @Body() body: { symbol: string; quoteAmount: number }) {
+    return this.liveOrders.previewMarketBuy(request.user.sub, body.symbol, Number(body.quoteAmount));
+  }
+
+  @Post('live-positions/:positionId/close')
+  closeLivePosition(
+    @Req() request: AuthenticatedRequest,
+    @Param('positionId') positionId: string,
+    @Body() body: { subPositionId?: string },
+  ) {
+    return this.liveExecution.closePosition(request.user.sub, positionId, body.subPositionId);
+  }
+
+  @Patch('live-positions/:positionId/take-profit')
+  updateLiveTakeProfit(
+    @Req() request: AuthenticatedRequest,
+    @Param('positionId') positionId: string,
+    @Body() body: { target: 'PARENT' | 'RECOVERY' | 'INDEPENDENT'; takeProfitPrice: number; subPositionId?: string },
+  ) {
+    return this.liveExecution.updateTakeProfit(request.user.sub, positionId, body);
   }
 
   @Get('testnet-recovery')
@@ -208,9 +262,31 @@ export class StrategyController {
     });
   }
 
+  @Post(':strategyId/live-order')
+  executeLiveOrder(
+    @Req() request: AuthenticatedRequest,
+    @Param('strategyId') strategyId: string,
+    @Body() body: { side: 'BUY' | 'SELL'; quantity: number; type?: 'MARKET' | 'LIMIT'; price?: number },
+  ) {
+    return this.liveExecution.executeMarketOrder(request.user.sub, {
+      strategyId,
+      side: body.side,
+      quantity: body.quantity,
+      orderType: body.type ?? 'MARKET',
+      limitPrice: body.type === 'LIMIT' ? Number(body.price) : null,
+      triggerPrice: body.price ? Number(body.price) : null,
+      plannedQuoteAmount: body.side === 'BUY' && body.price ? body.quantity * Number(body.price) : null,
+    });
+  }
+
   @Post('testnet-orders/:tradingOrderId/sync')
   syncTestnetOrder(@Req() request: AuthenticatedRequest, @Param('tradingOrderId') tradingOrderId: string) {
     return this.testnetExecution.syncOrder(request.user.sub, tradingOrderId);
+  }
+
+  @Post('live-orders/:tradingOrderId/sync')
+  syncLiveOrder(@Req() request: AuthenticatedRequest, @Param('tradingOrderId') tradingOrderId: string) {
+    return this.liveExecution.syncOrder(request.user.sub, tradingOrderId);
   }
 
   @Patch(':strategyId')

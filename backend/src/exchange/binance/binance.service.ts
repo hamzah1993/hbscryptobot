@@ -179,6 +179,10 @@ export class BinanceService {
     return this.signedRequest('/api/v3/account', 'GET', {}, apiKey, apiSecret, environment);
   }
 
+  async getApiKeyPermissions(apiKey: string, apiSecret: string) {
+    return this.signedRequest('/sapi/v1/account/apiRestrictions', 'GET', {}, apiKey, apiSecret, 'live');
+  }
+
   async getOrder(
     symbol: string,
     orderId: string,
@@ -324,7 +328,10 @@ export class BinanceService {
     const body = await response.json();
     if (!response.ok) {
       const message = typeof body?.msg === 'string' ? body.msg : `Binance request failed: ${response.status}`;
-      throw new Error(message);
+      // A rejected signed request is normally a user-actionable credential,
+      // permission, IP-whitelist, timestamp, or order validation error.  Do
+      // not turn Binance's 4xx response into an opaque NestJS 500.
+      throw new BadRequestException(`Binance: ${message}`);
     }
     return body;
   }

@@ -11,7 +11,7 @@ import {
 
 type Props = {
   token: string;
-  mode: 'PAPER' | 'TESTNET';
+  mode: 'PAPER' | 'TESTNET' | 'LIVE';
   onViewPaperPosition: (positionId: string) => void;
   onViewTestnetPosition: (positionId: string) => void;
 };
@@ -76,7 +76,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
       const [strategyResult, paperResult, testnetResult, healthResult] = await Promise.all([
         api.listStrategies(token),
         api.listPaperPositions(token),
-        api.listTestnetPositions(token, 250),
+        mode === 'LIVE' ? api.listLivePositions(token, 250) : api.listTestnetPositions(token, 250),
         mode === 'TESTNET' ? api.getTestnetRunnerHealth(token) : Promise.resolve(null),
       ]);
       setStrategies(strategyResult);
@@ -116,7 +116,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
   }, [paperPositions, testnetPositions]);
 
   const visibleStrategies = useMemo(
-    () => strategies.filter((strategy) => mode === 'PAPER' ? strategy.paperTrading : !strategy.paperTrading && strategy.environment === 'TESTNET'),
+    () => strategies.filter((strategy) => mode === 'PAPER' ? strategy.paperTrading : !strategy.paperTrading && strategy.environment === mode),
     [strategies, mode],
   );
 
@@ -147,7 +147,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
       const payload: Partial<CreateStrategyPayload> = {
         ...draft,
         symbol: strategy.symbol,
-        environment: strategy.environment ?? 'TESTNET',
+        environment: strategy.environment ?? (mode === 'LIVE' ? 'LIVE' : 'TESTNET'),
         paperTrading: strategy.paperTrading,
       };
       const updated = await api.updateStrategy(token, strategy.id, payload);
@@ -181,7 +181,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Bot operations</p>
-            <h3 className="mt-2 text-2xl font-semibold">{mode === 'PAPER' ? 'Paper bots' : 'Testnet / Demo bots'}</h3>
+            <h3 className="mt-2 text-2xl font-semibold">{mode === 'PAPER' ? 'Paper bots' : mode === 'LIVE' ? 'Binance LIVE bots' : 'Testnet / Demo bots'}</h3>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Only the globally selected environment is shown here.</p>
           </div>
           <button onClick={() => void load()} disabled={loading} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh bots'}</button>
@@ -202,12 +202,12 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
       {loading ? (
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-10 text-center text-sm text-slate-500">Loading bots…</div>
       ) : visibleStrategies.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-10 text-center text-sm text-slate-500">No {mode === 'PAPER' ? 'Paper' : 'Testnet'} bots have been created yet.</div>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-10 text-center text-sm text-slate-500">No {mode === 'PAPER' ? 'Paper' : mode === 'LIVE' ? 'LIVE' : 'Testnet'} bots have been created yet.</div>
       ) : (
         <div className="space-y-4">
           {visibleStrategies.map((strategy) => {
             const paper = mode === 'PAPER' ? positionsByStrategy.paper.get(strategy.id) ?? [] : [];
-            const testnet = mode === 'TESTNET' ? positionsByStrategy.testnet.get(strategy.id) ?? [] : [];
+            const testnet = mode !== 'PAPER' ? positionsByStrategy.testnet.get(strategy.id) ?? [] : [];
             const linkedPositionCount = paper.length + testnet.length;
             const pendingOrders = testnet.flatMap((position) => position.orders).filter((order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED').length;
             const status = strategy.status ?? 'STOPPED';
@@ -221,7 +221,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                     <div className="flex flex-wrap items-center gap-2">
                       <h4 className="text-lg font-semibold">{strategy.name}</h4>
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status === 'RUNNING' ? 'bg-emerald-400/15 text-emerald-300' : status === 'PAUSED' ? 'bg-amber-400/15 text-amber-300' : 'bg-slate-400/10 text-slate-300'}`}>{status}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${mode === 'PAPER' ? 'bg-violet-400/15 text-violet-300' : 'bg-cyan-400/15 text-cyan-300'}`}>{mode === 'PAPER' ? 'Paper' : strategy.exchange === 'OKX' ? 'OKX Demo' : `${strategy.exchange ?? 'BINANCE'} Testnet`}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${mode === 'PAPER' ? 'bg-violet-400/15 text-violet-300' : mode === 'LIVE' ? 'bg-amber-300/15 text-amber-200' : 'bg-cyan-400/15 text-cyan-300'}`}>{mode === 'PAPER' ? 'Paper' : mode === 'LIVE' ? 'Binance LIVE' : strategy.exchange === 'OKX' ? 'OKX Demo' : `${strategy.exchange ?? 'BINANCE'} Testnet`}</span>
                       {pendingOrders > 0 && <span className="rounded-full bg-amber-400/15 px-2.5 py-1 text-xs text-amber-300">{pendingOrders} pending order{pendingOrders === 1 ? '' : 's'}</span>}
                     </div>
                     <p className="mt-2 text-sm text-slate-400">{strategy.symbol}</p>
@@ -244,7 +244,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Linked positions</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {paper.map((position) => <button key={position.id} onClick={() => onViewPaperPosition(position.id)} className="rounded-xl border border-violet-400/30 bg-violet-400/10 px-3 py-2 text-sm text-violet-200">Paper · {position.status} · View</button>)}
-                      {testnet.map((position) => <button key={position.id} onClick={() => onViewTestnetPosition(position.id)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-200">Testnet · {position.status} · View</button>)}
+                      {testnet.map((position) => <button key={position.id} onClick={() => onViewTestnetPosition(position.id)} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-3 py-2 text-sm text-cyan-200">{mode === 'LIVE' ? 'LIVE' : 'Testnet'} · {position.status} · View</button>)}
                     </div>
                   </div>
                 )}

@@ -72,7 +72,6 @@ export function NotificationsPanel({ token }: Props) {
         },
         telegram: {
           enabled: channels.telegram.enabled,
-          chatId: channels.telegram.chatId,
           minimumSeverity: channels.telegram.minimumSeverity,
         },
       });
@@ -80,6 +79,40 @@ export function NotificationsPanel({ token }: Props) {
       setChannelMessage('Notification channel settings saved.');
     } catch (reason: unknown) {
       setChannelError(reason instanceof Error ? reason.message : 'Unable to save notification channels');
+    } finally {
+      setChannelBusy(false);
+    }
+  }
+
+  async function connectTelegram() {
+    setChannelBusy(true);
+    setChannelMessage(null);
+    setChannelError(null);
+    try {
+      const connection = await api.connectTelegram(token);
+      const telegramWindow = window.open(connection.url, '_blank', 'noopener,noreferrer');
+      setChannelMessage(
+        telegramWindow
+          ? 'Telegram opened. Press START there, then return here; connection status will refresh automatically.'
+          : 'Connection link created. Allow pop-ups and click Connect Telegram again.',
+      );
+    } catch (reason: unknown) {
+      setChannelError(reason instanceof Error ? reason.message : 'Unable to start Telegram connection');
+    } finally {
+      setChannelBusy(false);
+    }
+  }
+
+  async function disconnectTelegram() {
+    setChannelBusy(true);
+    setChannelMessage(null);
+    setChannelError(null);
+    try {
+      await api.disconnectTelegram(token);
+      await loadChannels();
+      setChannelMessage('Telegram disconnected from this HBS account.');
+    } catch (reason: unknown) {
+      setChannelError(reason instanceof Error ? reason.message : 'Unable to disconnect Telegram');
     } finally {
       setChannelBusy(false);
     }
@@ -109,6 +142,12 @@ export function NotificationsPanel({ token }: Props) {
     return () => window.clearInterval(timer);
   }, [token]);
 
+  useEffect(() => {
+    if (!channels?.telegram.connectionConfigured || channels.telegram.connected) return;
+    const timer = window.setInterval(() => void loadChannels(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [token, channels?.telegram.connectionConfigured, channels?.telegram.connected]);
+
   const filtered = useMemo(
     () => notifications.filter((notification) => severity === 'ALL' || notification.severity === severity),
     [notifications, severity],
@@ -136,23 +175,33 @@ export function NotificationsPanel({ token }: Props) {
           <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">
             <div className="flex items-start justify-between gap-4">
               <div><h4 className="font-semibold">Telegram</h4><p className="mt-1 text-xs text-slate-500">Bot message to your Telegram chat.</p></div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${channels.telegram.providerConfigured ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-400/15 text-amber-300'}`}>
-                {channels.telegram.providerConfigured ? 'Provider ready' : 'Server setup needed'}
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${channels.telegram.connected ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-400/15 text-amber-300'}`}>
+                {channels.telegram.connected ? 'Connected' : channels.telegram.connectionConfigured ? 'Ready to connect' : 'Server setup needed'}
               </span>
             </div>
-            <label className="mt-5 flex items-center gap-3 text-sm text-slate-300">
-              <input type="checkbox" checked={channels.telegram.enabled} onChange={(event) => updateChannel('telegram', { enabled: event.target.checked })} className="h-4 w-4 accent-cyan-400" />
-              Enable Telegram notifications
-            </label>
-            <label className="mt-4 block text-xs font-medium uppercase tracking-wider text-slate-500">Telegram chat ID
-              <input value={channels.telegram.chatId} onChange={(event) => updateChannel('telegram', { chatId: event.target.value })} placeholder="e.g. 123456789" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm normal-case tracking-normal text-slate-200 outline-none ring-cyan-400/40 focus:ring" />
-            </label>
+            {channels.telegram.connected ? (
+              <label className="mt-5 flex items-center gap-3 text-sm text-slate-300">
+                <input type="checkbox" checked={channels.telegram.enabled} onChange={(event) => updateChannel('telegram', { enabled: event.target.checked })} className="h-4 w-4 accent-cyan-400" />
+                Enable Telegram notifications
+              </label>
+            ) : (
+              <p className="mt-5 text-sm leading-6 text-slate-400">Connect your Telegram account automatically. You never need to find or paste a Chat ID.</p>
+            )}
             <label className="mt-4 block text-xs font-medium uppercase tracking-wider text-slate-500">Minimum severity
               <select value={channels.telegram.minimumSeverity} onChange={(event) => updateChannel('telegram', { minimumSeverity: event.target.value as NotificationSeverity })} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2.5 text-sm normal-case tracking-normal text-slate-200 outline-none">
                 <option value="INFO">Info — all alerts</option><option value="WARNING">Warning &amp; critical</option><option value="CRITICAL">Critical only</option>
               </select>
             </label>
-            <button type="button" disabled={channelBusy || !channels.telegram.enabled || !channels.telegram.providerConfigured} onClick={() => void testChannel('telegram')} className="mt-4 rounded-xl border border-cyan-400/30 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">Send Telegram test</button>
+            <div className="mt-4 flex flex-wrap gap-3">
+              {channels.telegram.connected ? (
+                <>
+                  <button type="button" disabled={channelBusy || !channels.telegram.enabled || !channels.telegram.providerConfigured} onClick={() => void testChannel('telegram')} className="rounded-xl border border-cyan-400/30 px-3 py-2 text-sm font-semibold text-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">Send Telegram test</button>
+                  <button type="button" disabled={channelBusy} onClick={() => void disconnectTelegram()} className="rounded-xl border border-rose-400/30 px-3 py-2 text-sm font-semibold text-rose-300 disabled:opacity-40">Disconnect</button>
+                </>
+              ) : (
+                <button type="button" disabled={channelBusy || !channels.telegram.connectionConfigured} onClick={() => void connectTelegram()} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">Connect Telegram</button>
+              )}
+            </div>
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-slate-950/30 p-5">

@@ -32,14 +32,19 @@ export class ExchangeAccountManagementService {
   }
 
   async validateBinanceLiveCredentials(apiKey: string, apiSecret: string) {
-    const account = await this.binance.getAccount(apiKey.trim(), apiSecret.trim(), 'live') as any;
+    const normalizedKey = apiKey.trim();
+    const normalizedSecret = apiSecret.trim();
+    const [account, apiPermissions] = await Promise.all([
+      this.binance.getAccount(normalizedKey, normalizedSecret, 'live') as Promise<any>,
+      this.binance.getApiKeyPermissions(normalizedKey, normalizedSecret) as Promise<any>,
+    ]);
     const permissions = Array.isArray(account?.permissions)
       ? account.permissions.map((permission: unknown) => String(permission).toUpperCase())
       : [];
     const accountType = String(account?.accountType ?? '').toUpperCase();
     const spotEnabled = accountType === 'SPOT' || permissions.includes('SPOT');
-    const canTrade = account?.canTrade === true;
-    const canWithdraw = account?.canWithdraw === true;
+    const canTrade = account?.canTrade === true && apiPermissions?.enableSpotAndMarginTrading === true;
+    const canWithdraw = apiPermissions?.enableWithdrawals === true;
 
     if (!canTrade || !spotEnabled) {
       throw new BadRequestException('Binance LIVE API key must have Spot trading permission');
@@ -66,15 +71,23 @@ export class ExchangeAccountManagementService {
   }
 
   async getBinanceTestnetBalances(userId: string) {
+    return this.getBinanceBalances(userId, ExchangeEnvironment.TESTNET);
+  }
+
+  async getBinanceLiveBalances(userId: string) {
+    return this.getBinanceBalances(userId, ExchangeEnvironment.LIVE);
+  }
+
+  private async getBinanceBalances(userId: string, environment: ExchangeEnvironment) {
     const credential = await this.credentials.getBinance(
       userId,
-      ExchangeEnvironment.TESTNET,
+      environment,
     );
 
     const account = (await this.binance.getAccount(
       credential.apiKey,
       credential.apiSecret,
-      'testnet',
+      environment === ExchangeEnvironment.LIVE ? 'live' : 'testnet',
     )) as any;
 
     const balances = Array.isArray(account?.balances)
@@ -91,7 +104,7 @@ export class ExchangeAccountManagementService {
 
     return {
       exchange: 'BINANCE',
-      environment: 'TESTNET',
+      environment,
       canTrade: Boolean(account?.canTrade),
       balances,
     };

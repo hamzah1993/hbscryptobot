@@ -8,6 +8,7 @@ import {
 
 type Props = {
   token: string;
+  environment?: 'TESTNET' | 'LIVE';
 };
 
 const actionTypes: Array<'ALL' | TestnetActionType> = [
@@ -70,7 +71,7 @@ function duration(action: TestnetAction) {
   return `${(milliseconds / 60_000).toFixed(1)} min`;
 }
 
-export function TestnetActionTimelinePanel({ token }: Props) {
+export function TestnetActionTimelinePanel({ token, environment = 'TESTNET' }: Props) {
   const [actions, setActions] = useState<TestnetAction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -82,9 +83,9 @@ export function TestnetActionTimelinePanel({ token }: Props) {
     setLoading(true);
     setError(null);
     try {
-      setActions(await api.listTestnetActions(token, 250));
+      setActions(environment === 'LIVE' ? await api.listLiveActions(token, 250) : await api.listTestnetActions(token, 250));
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'Unable to load Testnet actions');
+      setError(reason instanceof Error ? reason.message : `Unable to load ${environment === 'LIVE' ? 'LIVE' : 'Testnet'} actions`);
     } finally {
       setLoading(false);
     }
@@ -92,12 +93,12 @@ export function TestnetActionTimelinePanel({ token }: Props) {
 
   useEffect(() => {
     void loadActions();
-  }, [token]);
+  }, [token, environment]);
 
   useEffect(() => {
     const interval = window.setInterval(() => void loadActions(), 15_000);
     return () => window.clearInterval(interval);
-  }, [token]);
+  }, [token, environment]);
 
   const filteredActions = useMemo(() => {
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -121,7 +122,7 @@ export function TestnetActionTimelinePanel({ token }: Props) {
       <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-400/[0.08] via-white/[0.03] to-violet-400/[0.06] p-5 sm:p-6">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Binance Spot Testnet</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Binance Spot {environment === 'LIVE' ? 'LIVE' : 'Testnet'}</p>
             <h3 className="mt-2 text-2xl font-semibold">Strategy action timeline</h3>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
               Trace every automated initial entry, DCA, independent leg and take-profit action from trigger to exchange fill.

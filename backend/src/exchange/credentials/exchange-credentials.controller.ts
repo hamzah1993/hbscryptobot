@@ -84,6 +84,11 @@ export class ExchangeCredentialsController {
     return this.accounts.getBinanceTestnetBalances(request.user.sub);
   }
 
+  @Get('binance/live/balances')
+  getBinanceLiveBalances(@Req() request: AuthenticatedRequest) {
+    return this.accounts.getBinanceLiveBalances(request.user.sub);
+  }
+
   @Delete('binance/:environment')
   removeBinance(
     @Req() request: AuthenticatedRequest,
