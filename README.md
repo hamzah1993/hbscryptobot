@@ -1,16 +1,15 @@
 # HBS Trading Platform
 
-A full-stack cryptocurrency trading platform focused on safe paper trading, Binance Spot Testnet execution, configurable DCA strategies, Royal Q-style independent sub-positions, operational reliability, and historical backtesting.
+A full-stack cryptocurrency trading platform focused on paper trading, Binance Spot Testnet and bounded Binance LIVE execution, configurable DCA strategies, Royal Q-style independent sub-positions, operational reliability, notifications, and historical backtesting.
 
-> **Safety status:** Live-money order execution is disabled. The platform supports paper trading, public Binance market data, historical backtesting, and controlled Binance Spot Testnet execution only.
+> **Safety status:** Binance LIVE execution is enabled for controlled validation with real funds. Fixed risk budgets, per-strategy limits, the configured LIVE capital ceiling, exchange filters, and emergency-exit controls remain enforced. Start with the smallest exchange-valid order size and do not treat LIVE enablement as approval for unattended trading.
 
 ## Current project status
 
-**Latest completed numbered roadmap commit:** 173  
-**Current milestone:** Core v1 release readiness  
-**Estimated overall completion:** approximately 94–96% for paper trading, Binance Spot Testnet, historical data, and backtesting.
+**Current milestone:** Binance v1 production validation and operational hardening
+**Production status:** Deployed on Render; Prisma production migrations baselined; Binance LIVE credentials and bounded execution verified; Telegram connection and test delivery verified.
 
-Core paper-trading, Binance Spot Testnet, historical candle ingestion, Royal Q-style DCA simulation, backtest analytics, persisted trades/equity curves, CSV exports, and dashboard comparison are implemented. Remaining work is primarily operational hardening, deployment guidance, durable background delivery, and broader integration testing.
+Core paper trading, Binance Spot Testnet, bounded Binance LIVE execution, historical candle ingestion, Royal Q-style DCA simulation, backtest analytics, persisted trades/equity curves, CSV exports, dashboard comparison, and Telegram notifications are implemented. Small-amount Binance LIVE execution has been verified. The remaining v1 work is operational hardening, including monitoring, automated backups/restore drills, durable notification delivery, and final emergency-exit certification before unattended use.
 
 ### Milestone progress
 
@@ -26,8 +25,9 @@ Core paper-trading, Binance Spot Testnet, historical candle ingestion, Royal Q-s
 | API rate limiting | Complete | 100% |
 | Distributed locking and scheduler recovery | Complete | 95–100% |
 | Historical data and backtesting | Complete | 95–100% |
+| Telegram connection and test delivery | Complete | 100% |
+| Binance LIVE connection and bounded execution | Complete | Small-amount execution verified |
 | Deployment, monitoring, backups, and runbooks | In progress | 35–45% |
-| Live-execution safeguards | Future | Not started |
 | Bybit and OKX integration | Future | Not started |
 
 ## Completed capabilities
@@ -40,8 +40,11 @@ Core paper-trading, Binance Spot Testnet, historical candle ingestion, Royal Q-s
 - Royal Q-style parent positions and independent entries/exits
 - Fixed quote-currency risk budgets instead of whole-account balance sizing
 - Redis-backed scheduler and per-strategy distributed locks
+- NestJS scheduled jobs via `@nestjs/schedule` for strategy ticks, order reconciliation, action retries, backtest recovery, and notification retention
 - Binance WebSocket market-price streaming
-- Trading dashboard, charts, Testnet orders, positions, notifications, and emergency controls
+- Binance LIVE credential validation, balances, orders, positions, reconciliation, retries, and emergency exit
+- One-click Telegram bot connection with webhook verification and test notifications
+- Trading dashboard, charts, Testnet/LIVE orders, positions, notifications, and emergency controls
 - Historical candle storage, date-range imports, pagination, and chronological queries
 - Backtest run lifecycle with atomic start and terminal transitions
 - Candle-by-candle DCA simulation with parent and independent take-profit exits
@@ -72,9 +75,25 @@ React + Vite + Tailwind frontend
 | Frontend | React, Vite, Tailwind CSS |
 | Database | PostgreSQL, Prisma ORM |
 | Cache and coordination | Redis |
+| Scheduler | NestJS `@nestjs/schedule` (`ScheduleModule`, `@Cron`) |
 | Authentication | JWT, Argon2 |
 | Exchange | Binance Spot REST and WebSocket APIs |
+| Notifications | Telegram Bot API, email, webhooks |
 | CI | GitHub Actions |
+
+## Scheduler
+
+The backend does **not** use `node-cron` directly. Scheduling is implemented with NestJS `@nestjs/schedule`, registered through `ScheduleModule.forRoot()` and `@Cron(...)` decorators.
+
+Current recurring jobs include:
+
+- Paper, Binance Testnet, and Binance LIVE strategy execution every 10 seconds
+- Testnet and LIVE order reconciliation every 10 seconds
+- Testnet and LIVE failed-action retry processing every 10 seconds
+- Backtest recovery every 5 minutes
+- Notification-retention cleanup daily at 03:00
+
+Redis distributed locks prevent multiple application instances from executing the same trading scheduler concurrently.
 
 ## Trading modes
 
@@ -88,7 +107,9 @@ Testnet strategies can place controlled Binance Spot Testnet market orders using
 
 ### Live trading
 
-Live Binance public market data and historical candles may be read, but live order placement and cancellation remain explicitly disabled.
+Binance LIVE supports encrypted credentials, balance reads, controlled order execution, persisted positions/orders/actions, reconciliation, retries, take-profit controls, and emergency exit. The former operational "Live-money readiness" panel is not an execution blocker for small-amount validation; backend risk budgets, strategy limits, the LIVE capital ceiling, credential validation, and Binance symbol/order filters still apply.
+
+The Binance LIVE connection, bounded small-amount execution, and Telegram notification path have been verified in production. LIVE emergency-exit certification remains an operational validation item before unattended use.
 
 ## Backtesting
 
@@ -133,8 +154,8 @@ GET  /api/backtests/:runId/export/equity.csv
 - Docker Desktop, or Docker Engine with Docker Compose
 
 ```bash
-git clone https://github.com/hamzah1993/hbstrading.git
-cd hbstrading
+git clone https://github.com/hamzah1993/hbscryptobot.git
+cd hbscryptobot
 cp .env.example .env
 openssl rand -base64 32
 ```
@@ -153,10 +174,10 @@ Default services:
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
-Apply the Prisma schema:
+Apply committed Prisma migrations:
 
 ```bash
-docker compose exec backend npx prisma db push
+docker compose exec backend npx prisma migrate deploy
 docker compose exec backend npx prisma generate
 docker compose restart backend
 ```
@@ -180,19 +201,27 @@ npm run build
 Before using the platform outside local development:
 
 1. Replace all example secrets and generate a strong `EXCHANGE_CREDENTIALS_KEY`.
-2. Keep live execution disabled.
-3. Use Binance Spot Testnet credentials without withdrawal permission.
+2. Use Binance Spot Testnet first; for LIVE validation, use the smallest exchange-valid size and keep withdrawal permission disabled.
+3. Configure a conservative LIVE capital ceiling and fixed risk budget before any real-money order.
 4. Apply the Prisma schema and verify PostgreSQL and Redis health.
 5. Run backend tests, backend build, frontend build, and Docker validation.
 6. Test backtest creation, report loading, comparison, and CSV exports.
-7. Test Testnet emergency-stop behavior and unresolved-order reconciliation.
+7. Test Testnet emergency-stop behavior and unresolved-order reconciliation before proving the LIVE emergency-exit path with minimal exposure.
 8. Configure backups, log retention, external monitoring, and restart policies.
 9. Review lock TTLs for the deployed workload.
 10. Do not treat simulated or Testnet results as proof of profitable live performance.
 
+Detailed operator documentation:
+
+- [User manual](docs/user-manual.md)
+- [Binance v1 release checklist](docs/release-checklist.md)
+- [Production operations runbook](docs/operations.md)
+- [PostgreSQL backup and restore runbook](docs/backup-and-restore.md)
+- [Binance LIVE validation checklist](docs/final-live-readiness-checklist.md)
+
 ## Known limitations
 
-- Live-money order placement and cancellation are disabled.
+- Binance LIVE bounded execution has been verified with a small amount; unattended production operation is not yet certified.
 - Bybit and OKX are not integrated.
 - Backtests use candle close prices rather than intrabar high/low execution.
 - Gap-through DCA levels execute at the candle close, not each theoretical trigger price.
@@ -202,7 +231,7 @@ Before using the platform outside local development:
 - Fixed Redis lock TTLs do not currently renew during long-running operations.
 - Emergency stop does not liquidate already-open positions.
 - Production monitoring, automated backups, restore drills, and administrator runbooks still need completion.
-- The platform is not approved for unattended live production trading.
+- The platform is not yet approved for unattended live production trading.
 
 ## Security guidance
 
@@ -211,7 +240,7 @@ Before using the platform outside local development:
 - Use separate Testnet and Live credential records.
 - Back up `EXCHANGE_CREDENTIALS_KEY` securely.
 - Restrict database and Redis access to trusted networks.
-- Keep live execution disabled until dedicated safeguards are implemented and reviewed.
+- Keep LIVE capital/risk limits conservative and retain exchange withdrawal restrictions while LIVE validation is in progress.
 
 ## Numbered roadmap status
 
@@ -230,17 +259,14 @@ The accelerated core roadmap reached **Commit 173**:
 ### Remaining core-v1 work
 
 - Operational integration and reliability test suite
-- Deployment and production operations package
-- Backup and restore documentation
-- Administrator runbook and troubleshooting guide
 - Durable notification delivery architecture
-- Final user manual and release checklist
+- Automated production backups, restore drill, and external monitoring/alerts
+- LIVE emergency-exit certification for unattended operation
 
 ### Version 2 candidates
 
-- Explicitly gated live-execution safeguards
-- Daily loss and exposure controls
-- Preflight balance and permission checks
+- Additional LIVE execution hardening and unattended-operation safeguards
+- Expanded exchange-aware preflight validation and portfolio exposure controls
 - Bybit adapter and integration
 - OKX adapter and integration
 - Cross-exchange normalization
