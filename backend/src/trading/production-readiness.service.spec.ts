@@ -21,11 +21,18 @@ describe('ProductionReadinessService', () => {
       email: { enabled: false, address: 'owner@example.com', minimumSeverity: 'WARNING', providerConfigured: true },
       telegram: { enabled: false, chatId: '', minimumSeverity: 'WARNING', providerConfigured: false },
     }) } as any;
-    return new ProductionReadinessService(prisma, health, config, notifications);
+    return { service: new ProductionReadinessService(prisma, health, config, notifications), prisma };
   }
 
-  it('reports p95 execution evidence and the exact 1 + 3 retry policy', async () => {
-    const result = await createService([100, 120, 140, 150, 160, 170, 180, 190, 200, 250]).snapshot('user-1');
+  it('reports p95 deployment execution evidence and the exact 1 + 3 retry policy', async () => {
+    const { service, prisma } = createService([100, 120, 140, 150, 160, 170, 180, 190, 200, 250]);
+    const result = await service.snapshot('live-user');
+    expect(prisma.tradingOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        executionLatencyMs: { not: null },
+        position: { strategy: { exchange: 'BINANCE', environment: 'TESTNET', paperTrading: false } },
+      },
+    }));
     expect(result.executionEvidence).toEqual(expect.objectContaining({
       sampleCount: 10, p95Ms: 250, maxMs: 250, targetMs: 500, overTargetCount: 0, meetsTarget: true,
       retryPolicy: { initialAttempt: 1, retries: 3, totalAttempts: 4, backoff: 'exponential' },
@@ -34,7 +41,8 @@ describe('ProductionReadinessService', () => {
   });
 
   it('keeps live money blocked even if the feature flag is set', async () => {
-    const result = await createService([100, 120, 140, 150, 160, 170, 180, 190, 200, 250], { liveFlag: 'true' }).snapshot('user-1');
+    const { service } = createService([100, 120, 140, 150, 160, 170, 180, 190, 200, 250], { liveFlag: 'true' });
+    const result = await service.snapshot('user-1');
     expect(result.liveChecks.liveFeatureFlag).toBe(true);
     expect(result.liveChecks.liveRoutingImplemented).toBe(true);
     expect(result.liveChecks.explicitLiveConfirmationImplemented).toBe(true);
@@ -43,7 +51,8 @@ describe('ProductionReadinessService', () => {
   });
 
   it('fails hardening when p95 latency breaches 500 ms or actions are unresolved', async () => {
-    const result = await createService([100, 200, 600], { unresolved: 1 }).snapshot('user-1');
+    const { service } = createService([100, 200, 600], { unresolved: 1 });
+    const result = await service.snapshot('user-1');
     expect(result.executionEvidence.meetsTarget).toBe(false);
     expect(result.hardeningChecks.noUnresolvedExchangeActions).toBe(false);
     expect(result.productionHardeningReady).toBe(false);
