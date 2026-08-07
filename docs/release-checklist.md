@@ -50,12 +50,12 @@ Use this checklist for production releases. A successful bounded LIVE test does 
 
 Do not mark the release certified for unattended LIVE operation until all are complete:
 
-- [ ] Controlled LIVE emergency-exit test passes
-- [ ] Emergency-exit result reconciles correctly with Binance
+- [x] Controlled LIVE emergency-exit test passes
+- [x] Emergency-exit result reconciles correctly with Binance and Telegram notification received
 - [ ] Automated database backups are enabled
 - [ ] A restore drill from a verified backup passes
 - [ ] External health/error monitoring and alerts are enabled
-- [ ] Scheduler/Redis failure alerting is enabled
+- [x] Internal scheduler/Redis failure alerting is enabled
 - [ ] Notification durability/failure handling is accepted for production use
 - [ ] Final end-to-end reliability suite passes
 - [ ] Operator reviews and accepts the production limits

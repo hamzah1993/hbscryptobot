@@ -15,6 +15,8 @@ export type AdminHealth = {
   maintenance: { active: boolean; reason?: string | null; startedAt?: string | null }; timestamp: string;
 };
 export type AdminAuditEvent = { id: string; action: string; target: string | null; metadata?: Record<string, unknown> | null; createdAt: string; admin: { id: string; email: string; fullName: string } };
+export type SystemHealthIncident = { id: string; component: string; active: boolean; severity: NotificationSeverity; message: string; consecutiveFailures: number; openedAt: string; resolvedAt: string | null; lastCheckedAt: string; lastAlertedAt: string | null; updatedAt: string };
+export type AdminMonitoringStatus = { enabled: boolean; intervalSeconds: number; lastCheckedAt: string | null; activeIncidents: number; incidents: SystemHealthIncident[]; heartbeats: { startedAt: string; liveStrategyScheduler: string | null; liveOrderSync: string | null; liveRetryScheduler: string | null } };
 
 export type TradingOrder = {
   id: string;
@@ -650,6 +652,8 @@ export const api = {
   me: (token: string) => request<AuthUser>('/users/me', { headers: authHeaders(token) }),
   createAdminSession: (token: string, password: string) => request<{ adminSessionToken: string; expiresInSeconds: number }>('/super/admin/control/session', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ password }) }),
   getAdminHealth: (token: string, adminSessionToken: string) => request<AdminHealth>('/super/admin/control/health', { headers: adminHeaders(token, adminSessionToken) }),
+  getAdminMonitoring: (token: string, adminSessionToken: string) => request<AdminMonitoringStatus>('/super/admin/control/monitoring', { headers: adminHeaders(token, adminSessionToken) }),
+  runAdminMonitoringCheck: (token: string, adminSessionToken: string) => request<{ status: 'HEALTHY' | 'DEGRADED'; checkedAt: string }>('/super/admin/control/monitoring/check', { method: 'POST', headers: adminHeaders(token, adminSessionToken) }),
   listAdminBackups: (token: string, adminSessionToken: string) => request<AdminBackup[]>('/super/admin/control/backups', { headers: adminHeaders(token, adminSessionToken) }),
   createAdminBackup: (token: string, adminSessionToken: string) => request<AdminBackup>('/super/admin/control/backups', { method: 'POST', headers: adminHeaders(token, adminSessionToken) }),
   listAdminAudit: (token: string, adminSessionToken: string) => request<AdminAuditEvent[]>('/super/admin/control/audit?limit=100', { headers: adminHeaders(token, adminSessionToken) }),

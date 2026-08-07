@@ -8,10 +8,14 @@ import { AdminGuard } from './admin.guard';
 import { AdminSessionGuard } from './admin-session.guard';
 import { AdminService } from './admin.service';
 import { MaintenanceService } from './maintenance.service';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { SystemHeartbeatService } from './system-heartbeat.service';
+import { SystemMonitoringService } from './system-monitoring.service';
 
 @Module({
+  imports: [NotificationsModule],
   controllers: [AdminAccessController, AdminController],
-  providers: [AdminAccessService, AdminBootstrapService, AdminGuard, AdminSessionGuard, AdminService, AdminBackupScheduler, MaintenanceService],
-  exports: [MaintenanceService],
+  providers: [AdminAccessService, AdminBootstrapService, AdminGuard, AdminSessionGuard, AdminService, AdminBackupScheduler, MaintenanceService, SystemHeartbeatService, SystemMonitoringService],
+  exports: [MaintenanceService, SystemHeartbeatService],
 })
 export class AdminModule {}
