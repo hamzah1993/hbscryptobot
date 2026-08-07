@@ -7,9 +7,9 @@ A full-stack cryptocurrency trading platform focused on paper trading, Binance S
 ## Current project status
 
 **Current milestone:** Binance v1 production validation and operational hardening
-**Production status:** Deployed on Render; Prisma production migrations baselined; Binance LIVE credentials and bounded execution verified; Telegram connection and test delivery verified.
+**Production status:** Deployed on Render; Prisma production migrations baselined; Binance LIVE credentials, bounded execution, emergency exit, and Telegram delivery verified.
 
-Core paper trading, Binance Spot Testnet, bounded Binance LIVE execution, historical candle ingestion, Royal Q-style DCA simulation, backtest analytics, persisted trades/equity curves, CSV exports, dashboard comparison, and Telegram notifications are implemented. Small-amount Binance LIVE execution has been verified. The remaining v1 work is operational hardening, including monitoring, automated backups/restore drills, durable notification delivery, and final emergency-exit certification before unattended use.
+Core paper trading, Binance Spot Testnet, bounded Binance LIVE execution, historical candle ingestion, Royal Q-style DCA simulation, backtest analytics, persisted trades/equity curves, CSV exports, dashboard comparison, Telegram notifications, and internal production health monitoring are implemented. Small-amount Binance LIVE execution and emergency exit have been verified. The remaining v1 work is operational hardening, including external uptime monitoring, automated backups/restore drills, and durable notification delivery before unattended use.
 
 ### Milestone progress
 
@@ -27,7 +27,7 @@ Core paper trading, Binance Spot Testnet, bounded Binance LIVE execution, histor
 | Historical data and backtesting | Complete | 95–100% |
 | Telegram connection and test delivery | Complete | 100% |
 | Binance LIVE connection and bounded execution | Complete | Small-amount execution verified |
-| Deployment, monitoring, backups, and runbooks | In progress | 35–45% |
+| Deployment, monitoring, backups, and runbooks | In progress | Internal monitoring implemented; external uptime/backups pending |
 | Bybit and OKX integration | Future | Not started |
 
 ## Completed capabilities

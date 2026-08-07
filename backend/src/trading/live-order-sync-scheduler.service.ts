@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { RiskAwareLiveStrategyExecutionService } from './risk-aware-live-strategy-execution.service';
 import { MaintenanceService } from '../admin/maintenance.service';
+import { SystemHeartbeatService } from '../admin/system-heartbeat.service';
 
 const LIVE_ORDER_SYNC_LOCK_KEY = 'hbs:lock:binance-live-order-sync';
 
@@ -18,10 +19,12 @@ export class LiveOrderSyncSchedulerService {
     private readonly execution: RiskAwareLiveStrategyExecutionService,
     private readonly redisLock: RedisLockService,
     private readonly maintenance?: MaintenanceService,
+    private readonly heartbeat?: SystemHeartbeatService,
   ) {}
 
   @Cron(CronExpression.EVERY_10_SECONDS)
   async syncOpenLiveOrders() {
+    this.heartbeat?.mark('liveOrderSync');
     if (this.running) return;
     if (await this.maintenance?.isActive()) return;
     this.running = true;

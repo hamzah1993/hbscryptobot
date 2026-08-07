@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { api, type AdminAuditEvent, type AdminBackup, type AdminHealth } from '../lib/api';
+import { api, type AdminAuditEvent, type AdminBackup, type AdminHealth, type AdminMonitoringStatus } from '../lib/api';
 
 const ADMIN_SESSION_KEY = 'hbs_admin_step_up_session';
 
@@ -20,6 +20,7 @@ export function AdminPage() {
   const [health, setHealth] = useState<AdminHealth | null>(null);
   const [backups, setBackups] = useState<AdminBackup[]>([]);
   const [audit, setAudit] = useState<AdminAuditEvent[]>([]);
+  const [monitoring, setMonitoring] = useState<AdminMonitoringStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoreFile, setRestoreFile] = useState<string | null>(null);
@@ -28,8 +29,8 @@ export function AdminPage() {
   const refresh = useCallback(async () => {
     if (!token || !adminSessionToken) return;
     try {
-      const [nextHealth, nextBackups, nextAudit] = await Promise.all([api.getAdminHealth(token, adminSessionToken), api.listAdminBackups(token, adminSessionToken), api.listAdminAudit(token, adminSessionToken)]);
-      setHealth(nextHealth); setBackups(nextBackups); setAudit(nextAudit); setError(null);
+      const [nextHealth, nextBackups, nextAudit, nextMonitoring] = await Promise.all([api.getAdminHealth(token, adminSessionToken), api.listAdminBackups(token, adminSessionToken), api.listAdminAudit(token, adminSessionToken), api.getAdminMonitoring(token, adminSessionToken)]);
+      setHealth(nextHealth); setBackups(nextBackups); setAudit(nextAudit); setMonitoring(nextMonitoring); setError(null);
     } catch {
       sessionStorage.removeItem(ADMIN_SESSION_KEY);
       setAdminSessionToken(null);
@@ -55,7 +56,7 @@ export function AdminPage() {
   function adminLogout() {
     sessionStorage.removeItem(ADMIN_SESSION_KEY);
     setAdminSessionToken(null);
-    setHealth(null); setBackups([]); setAudit([]);
+    setHealth(null); setBackups([]); setAudit([]); setMonitoring(null);
   }
 
   async function createBackup() {
@@ -63,6 +64,14 @@ export function AdminPage() {
     setBusy(true); setError(null);
     try { await api.createAdminBackup(token, adminSessionToken); await refresh(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Backup failed'); }
+    finally { setBusy(false); }
+  }
+
+  async function runHealthCheck() {
+    if (!token || !adminSessionToken) return;
+    setBusy(true); setError(null);
+    try { await api.runAdminMonitoringCheck(token, adminSessionToken); await refresh(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Health check failed'); }
     finally { setBusy(false); }
   }
 
@@ -111,6 +120,12 @@ export function AdminPage() {
         <article className="rounded-2xl border border-white/10 bg-white/[0.035] p-5"><p className="text-xs uppercase tracking-wider text-slate-500">Maintenance</p><p className={`mt-2 font-semibold ${health?.maintenance.active ? 'text-amber-300' : 'text-emerald-300'}`}>{health?.maintenance.active ? 'ACTIVE' : 'OFF'}</p></article>
       </section>
       {health && (health.backupTools === 'MISSING' || !health.persistentBackupDirectoryConfigured) && <div className="mt-5 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">Backup setup needs attention: PostgreSQL tools are {health.backupTools.toLowerCase()} and persistent backup storage is {health.persistentBackupDirectoryConfigured ? 'configured' : 'not configured'}. Do not enable scheduled backups until both are ready.</div>}
+
+      <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-semibold">Monitoring &amp; alerts</h2><p className="mt-1 text-sm text-slate-400">Checks production health every minute. New incidents and recoveries are sent through your configured notification channels, including Telegram.</p></div><button disabled={busy} onClick={() => void runHealthCheck()} className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200 disabled:opacity-50">{busy ? 'Checking…' : 'Run health check'}</button></div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3"><article className="rounded-xl bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">Monitor</p><p className={`mt-2 font-semibold ${monitoring?.enabled ? 'text-emerald-300' : 'text-amber-300'}`}>{monitoring?.enabled ? 'ENABLED' : 'DISABLED'}</p></article><article className="rounded-xl bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">Active incidents</p><p className={`mt-2 font-semibold ${(monitoring?.activeIncidents ?? 0) > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{monitoring?.activeIncidents ?? '—'}</p></article><article className="rounded-xl bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">Last check</p><p className="mt-2 text-sm font-semibold text-slate-200">{monitoring?.lastCheckedAt ? new Date(monitoring.lastCheckedAt).toLocaleString() : 'Not run yet'}</p></article></div>
+        <div className="mt-5 space-y-2">{monitoring?.incidents.slice(0, 10).map((incident) => <div key={incident.id} className={`rounded-xl border px-4 py-3 text-sm ${incident.active ? 'border-rose-400/30 bg-rose-400/10' : 'border-white/10 bg-slate-950/20'}`}><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><span><span className={`font-semibold ${incident.active ? 'text-rose-200' : 'text-emerald-300'}`}>{incident.active ? 'OPEN' : 'RESOLVED'}</span> · {incident.component}</span><span className="text-xs text-slate-500">{new Date(incident.lastCheckedAt).toLocaleString()}</span></div><p className="mt-1 text-slate-400">{incident.message}</p></div>)}</div>
+      </section>
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-semibold">Database backups</h2><p className="mt-1 text-sm text-slate-400">Verified PostgreSQL custom-format archives. Production storage should use a persistent disk.</p></div><button disabled={busy} onClick={() => void createBackup()} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{busy ? 'Working…' : 'Create backup now'}</button></div>

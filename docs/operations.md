@@ -247,13 +247,15 @@ Do not automatically roll back the database merely because an application deploy
 
 ## 10. Monitoring baseline
 
-Configure alerts for:
+The Admin & Operations Center performs an internal health check every minute and persists incident state for PostgreSQL, Redis, Binance LIVE scheduler heartbeats, permanently failed LIVE actions, and LIVE positions in `ERROR` state. A component transition to unhealthy generates one administrator notification; repeated checks update the same incident without repeated alerts. Recovery generates one recovery notification. Use **Run health check** in `/super/admin/control` for an immediate check.
+
+Internal monitoring cannot report a complete backend process outage because it runs inside that process. Configure an external uptime monitor for `/api/health` before unattended operation. External infrastructure monitoring should also cover:
 
 - backend health failures
 - repeated container restarts
 - PostgreSQL connection or storage failures
-- Redis connection failures
-- scheduler exceptions
+- Redis connection failures not observable from the application
+- scheduler/process failures not observable from the application
 - Testnet/LIVE order reconciliation failures
 - unresolved or stale strategy actions
 - webhook delivery failure rates
@@ -274,4 +276,4 @@ Regular maintenance should include:
 
 ## 12. Safety boundary
 
-The current operations package supports paper trading, historical backtesting, Binance Spot Testnet, and bounded Binance LIVE validation. Small-amount LIVE execution and Telegram delivery have been verified. Keep the configured risk budget and LIVE capital ceiling conservative, keep Binance withdrawal permission disabled, and do not treat bounded validation as certification for unattended trading. Complete the LIVE emergency-exit certification, monitoring, backup automation/restore drill, and incident-response verification before unattended operation.
+The current operations package supports paper trading, historical backtesting, Binance Spot Testnet, bounded Binance LIVE validation, and internal incident monitoring. Small-amount LIVE execution, emergency exit, and Telegram delivery have been verified. Keep the configured risk budget and LIVE capital ceiling conservative, keep Binance withdrawal permission disabled, and do not treat bounded validation as certification for unattended trading. Complete external uptime monitoring, backup automation/restore drill, and incident-response verification before unattended operation.

@@ -172,6 +172,24 @@ model SystemMaintenanceState {
   updatedAt DateTime @updatedAt
 }
 
+model SystemHealthIncident {
+  id                  String               @id @default(uuid())
+  component           String               @unique
+  active              Boolean              @default(true)
+  severity            NotificationSeverity @default(WARNING)
+  message             String
+  consecutiveFailures Int                  @default(0)
+  openedAt            DateTime             @default(now())
+  resolvedAt          DateTime?
+  lastCheckedAt       DateTime             @default(now())
+  lastAlertedAt       DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([active, openedAt])
+  @@index([updatedAt])
+}
+
 model PasswordResetToken {
   id        String   @id @default(uuid())
   userId    String
