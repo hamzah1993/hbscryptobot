@@ -217,6 +217,7 @@ Detailed operator documentation:
 - [Binance v1 release checklist](docs/release-checklist.md)
 - [Production operations runbook](docs/operations.md)
 - [PostgreSQL backup and restore runbook](docs/backup-and-restore.md)
+- [Admin & Operations Center](docs/admin-operations.md)
 - [Binance LIVE validation checklist](docs/final-live-readiness-checklist.md)
 
 ## Known limitations

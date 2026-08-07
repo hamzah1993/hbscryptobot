@@ -10,7 +10,8 @@
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "admin:promote": "node scripts/promote-admin.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
