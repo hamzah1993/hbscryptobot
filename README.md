@@ -213,6 +213,7 @@ Before using the platform outside local development:
 
 Detailed operator documentation:
 
+- [Canonical project checklist](docs/project-checklist.md)
 - [User manual](docs/user-manual.md)
 - [Binance v1 release checklist](docs/release-checklist.md)
 - [Production operations runbook](docs/operations.md)
