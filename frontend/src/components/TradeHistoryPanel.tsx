@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type TestnetOrder, type TestnetPosition, type TradingOrder, type TradingPosition } from '../lib/api';
 
-type Props = { token: string; mode: 'PAPER' | 'TESTNET' };
+type Props = { token: string; mode: 'PAPER' | 'TESTNET' | 'LIVE' };
 
 type HistoryOrder = {
   id: string;
@@ -18,7 +18,7 @@ type HistoryOrder = {
 
 type HistoryCycle = {
   id: string;
-  environment: 'PAPER' | 'TESTNET';
+  environment: 'PAPER' | 'TESTNET' | 'LIVE';
   symbol: string;
   strategyName: string;
   status: string;
@@ -60,8 +60,8 @@ export function TradeHistoryPanel({ token, mode }: Props) {
         setPaper(await api.listPaperPositions(token));
       } else {
         const [positions, orders] = await Promise.all([
-          api.listTestnetPositions(token, 500),
-          api.listTestnetOrders(token, 500),
+          mode === 'LIVE' ? api.listLivePositions(token, 500) : api.listTestnetPositions(token, 500),
+          mode === 'LIVE' ? api.listLiveOrders(token, 500) : api.listTestnetOrders(token, 500),
         ]);
         setTestnet(positions);
         setTestnetOrders(orders);
@@ -105,7 +105,7 @@ export function TradeHistoryPanel({ token, mode }: Props) {
       const orders = (ordersByPosition.get(position.id) ?? []).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       return {
         id: position.id,
-        environment: 'TESTNET' as const,
+        environment: mode === 'LIVE' ? 'LIVE' as const : 'TESTNET' as const,
         symbol: position.symbol,
         strategyName: position.strategy.name,
         status: position.status,
@@ -149,7 +149,7 @@ export function TradeHistoryPanel({ token, mode }: Props) {
 
   return <section className="mt-6 space-y-5">
     <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-400/[0.08] via-white/[0.03] to-violet-400/[0.06] p-5 sm:p-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">{mode === 'PAPER' ? 'Paper' : 'Binance Spot Testnet'}</p><h3 className="mt-2 text-2xl font-semibold">Trade cycle history</h3><p className="mt-2 text-sm text-slate-400">Review complete campaigns and every order inside each cycle. Realized P&amp;L includes independent legs.</p></div><button onClick={exportCsv} disabled={!filtered.length} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-40">Export visible CSV</button></div>
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">{mode === 'PAPER' ? 'Paper' : mode === 'LIVE' ? 'Binance Spot LIVE' : 'Binance Spot Testnet'}</p><h3 className="mt-2 text-2xl font-semibold">Trade cycle history</h3><p className="mt-2 text-sm text-slate-400">Review complete campaigns and every order inside each cycle. Realized P&amp;L includes independent legs.</p></div><button onClick={exportCsv} disabled={!filtered.length} className="rounded-xl bg-cyan-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-40">Export visible CSV</button></div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Cycles" value={String(totals.cycles)} /><Metric label="Completed" value={String(totals.closed)} /><Metric label="Realized P&L" value={money(totals.pnl)} /><Metric label="Recorded fees" value={money(totals.fees)} /></div>
       <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(180px,1fr)_auto_auto]"><input value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="Filter symbol" className="rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm outline-none ring-cyan-400/40 focus:ring" /><label className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm"><input type="checkbox" checked={closedOnly} onChange={(event) => setClosedOnly(event.target.checked)} className="accent-cyan-400" />Completed only</label><button onClick={() => void load()} disabled={loading} className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold">Refresh</button></div>
     </div>

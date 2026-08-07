@@ -6,14 +6,14 @@ import { ConfirmDialog } from './ConfirmDialog';
 type Props = {
   token: string;
   initialPositionId?: string | null;
-  initialMode?: 'PAPER' | 'TESTNET';
+  initialMode?: 'PAPER' | 'TESTNET' | 'LIVE';
 };
 
-type Mode = 'ALL' | 'PAPER' | 'TESTNET';
+type Mode = 'ALL' | 'PAPER' | 'TESTNET' | 'LIVE';
 
 type UnifiedPosition = {
   id: string;
-  source: 'PAPER' | 'TESTNET';
+  source: 'PAPER' | 'TESTNET' | 'LIVE';
   symbol: string;
   status: TradingPosition['status'];
   strategyId: string;
@@ -70,7 +70,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     try {
       const [paper, testnet] = await Promise.all([
         api.listPaperPositions(token),
-        api.listTestnetPositions(token, 250),
+        initialMode === 'LIVE' ? api.listLivePositions(token, 250) : api.listTestnetPositions(token, 250),
       ]);
       setPaperPositions(paper);
       setTestnetPositions(testnet);
@@ -87,7 +87,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     void load();
     const timer = window.setInterval(() => void load(true), 5000);
     return () => window.clearInterval(timer);
-  }, [token]);
+  }, [token, initialMode]);
 
   useEffect(() => {
     if (initialPositionId) setExpandedId(initialPositionId);
@@ -126,7 +126,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     })),
     ...testnetPositions.map((position) => ({
       id: position.id,
-      source: 'TESTNET' as const,
+      source: (position.strategy.environment === 'LIVE' ? 'LIVE' : 'TESTNET') as 'LIVE' | 'TESTNET',
       symbol: position.symbol,
       status: position.status,
       strategyId: position.strategy.id,
@@ -159,7 +159,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     const unsubscribes = symbols.map((currentSymbol) => subscribeSharedMarketPrice(
       token,
       currentSymbol,
-      'testnet',
+      initialMode === 'LIVE' ? 'live' : 'testnet',
       (streamed) => {
         if (cancelled || !streamed?.price || !Number.isFinite(streamed.price)) return;
         setPrices((current) => ({ ...current, [currentSymbol]: streamed.price }));
@@ -169,7 +169,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
       cancelled = true;
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [token, allPositions]);
+  }, [token, allPositions, initialMode]);
 
   const filtered = useMemo(() => {
     const normalized = symbol.trim().toUpperCase();
@@ -213,10 +213,11 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     const quantity = Number(subPosition?.quantity ?? position.totalQuantity);
     setBusyId(subPositionId ?? position.id);
     try {
-      await api.closeTestnetPosition(token, position.id, subPositionId);
+      if (position.source === 'LIVE') await api.closeLivePosition(token, position.id, subPositionId);
+      else await api.closeTestnetPosition(token, position.id, subPositionId);
       await load(true);
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : 'Unable to close Testnet position');
+      setError(reason instanceof Error ? reason.message : `Unable to close ${position.source === 'LIVE' ? 'LIVE' : 'Testnet'} position`);
     } finally {
       setBusyId(null);
     }
@@ -253,8 +254,8 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     const target = subPosition ? `independent level #${subPosition.level}` : 'parent position';
     setConfirmation({
       title: `Close ${target}?`,
-      description: `${position.symbol} · Quantity: ${number(quantity)}\nEstimated value: ${money(quantity * currentPrice)}\n\nThis submits a Binance Testnet SELL market order.`,
-      confirmLabel: 'Submit Testnet sell',
+      description: `${position.symbol} · Quantity: ${number(quantity)}\nEstimated value: ${money(quantity * currentPrice)}\n\nThis submits a Binance ${position.source === 'LIVE' ? 'LIVE' : 'Testnet'} SELL market order.`,
+      confirmLabel: `Submit ${position.source === 'LIVE' ? 'LIVE' : 'Testnet'} sell`,
       tone: 'danger',
       busyId: subPositionId ?? position.id,
       action: () => closeTestnet(position, subPositionId),
@@ -276,7 +277,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
     }
     setBusyId(position.id);
     try {
-      await Promise.all(pending.map((order) => api.syncTestnetOrder(token, order.id)));
+      await Promise.all(pending.map((order) => position.source === 'LIVE' ? api.syncLiveOrder(token, order.id) : api.syncTestnetOrder(token, order.id)));
       await load(true);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : 'Unable to sync Testnet orders');
@@ -319,7 +320,8 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
       if (position.source === 'PAPER') {
         await api.updatePaperPositionTakeProfit(token, position.id, payload);
       } else {
-        await api.updateTestnetPositionTakeProfit(token, position.id, payload);
+        if (position.source === 'LIVE') await api.updateLivePositionTakeProfit(token, position.id, payload);
+        else await api.updateTestnetPositionTakeProfit(token, position.id, payload);
       }
       setEditingTp(null);
       await load(true);
@@ -350,6 +352,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
       open: open.length,
       paper: allPositions.filter((position) => position.source === 'PAPER').length,
       testnet: allPositions.filter((position) => position.source === 'TESTNET').length,
+      live: allPositions.filter((position) => position.source === 'LIVE').length,
       unrealized,
       realized,
     };
@@ -361,12 +364,12 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-300">Unified position operations</p>
-            <h3 className="mt-2 text-2xl font-semibold">Paper and Binance Testnet positions</h3>
-            <p className="mt-2 text-sm text-slate-400">Prices and P&amp;L update every second; filled position state refreshes every 5 seconds. Live-money positions remain disabled.</p>
+            <h3 className="mt-2 text-2xl font-semibold">{initialMode === 'LIVE' ? 'Binance LIVE positions' : 'Paper and Binance Testnet positions'}</h3>
+            <p className="mt-2 text-sm text-slate-400">Prices and P&amp;L update continuously; filled position state refreshes every 5 seconds.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {(['ALL', 'PAPER', 'TESTNET'] as Mode[]).map((item) => (
-              <button key={item} onClick={() => setMode(item)} className={`rounded-xl px-4 py-2.5 text-sm font-semibold ${mode === item ? 'bg-cyan-400 text-slate-950' : 'border border-white/10 bg-white/[0.04] text-slate-300'}`}>{item === 'ALL' ? 'All' : item === 'PAPER' ? 'Paper' : 'Binance Testnet'}</button>
+            {(initialMode === 'LIVE' ? ['LIVE'] as Mode[] : ['ALL', 'PAPER', 'TESTNET'] as Mode[]).map((item) => (
+              <button key={item} onClick={() => setMode(item)} className={`rounded-xl px-4 py-2.5 text-sm font-semibold ${mode === item ? 'bg-cyan-400 text-slate-950' : 'border border-white/10 bg-white/[0.04] text-slate-300'}`}>{item === 'ALL' ? 'All' : item === 'PAPER' ? 'Paper' : item === 'LIVE' ? 'Binance LIVE' : 'Binance Testnet'}</button>
             ))}
           </div>
         </div>
@@ -375,6 +378,7 @@ export function UnifiedPositionsPanel({ token, initialPositionId = null, initial
           <Metric label="Open positions" value={String(totals.open)} />
           <Metric label="Paper positions" value={String(totals.paper)} />
           <Metric label="Testnet positions" value={String(totals.testnet)} />
+          {initialMode === 'LIVE' && <Metric label="LIVE positions" value={String(totals.live)} />}
           <Metric label="Unrealized P&L" value={money(totals.unrealized)} />
           <Metric label="Realized P&L" value={money(totals.realized)} />
         </div>

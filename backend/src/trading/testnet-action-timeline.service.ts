@@ -5,12 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TestnetActionTimelineService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(userId: string, limit = 100) {
+  async list(userId: string, limit = 100, environment: 'TESTNET' | 'LIVE' = 'TESTNET') {
     return this.prisma.strategyAction.findMany({
       where: {
         userId,
         strategy: {
-          environment: 'TESTNET',
+          environment,
           paperTrading: false,
         },
       },

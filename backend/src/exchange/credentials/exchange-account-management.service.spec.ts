@@ -8,6 +8,7 @@ describe('ExchangeAccountManagementService', () => {
   };
   const binance = {
     getAccount: jest.fn(),
+    getApiKeyPermissions: jest.fn(),
   };
 
   const service = new ExchangeAccountManagementService(
@@ -80,6 +81,7 @@ describe('ExchangeAccountManagementService', () => {
       accountType: 'SPOT',
       permissions: ['SPOT'],
     });
+    binance.getApiKeyPermissions.mockResolvedValue({ enableSpotAndMarginTrading: true, enableWithdrawals: false });
 
     await expect(service.validateBinanceLiveCredentials('live-key', 'live-secret')).resolves.toEqual(
       expect.objectContaining({ connected: true, environment: 'LIVE', canTrade: true, canWithdraw: false, spotEnabled: true }),
@@ -89,13 +91,15 @@ describe('ExchangeAccountManagementService', () => {
 
   it('rejects Binance LIVE credentials with withdrawal permission', async () => {
     binance.getAccount.mockResolvedValue({ canTrade: true, canWithdraw: true, accountType: 'SPOT' });
+    binance.getApiKeyPermissions.mockResolvedValue({ enableSpotAndMarginTrading: true, enableWithdrawals: true });
     await expect(service.validateBinanceLiveCredentials('live-key', 'live-secret')).rejects.toThrow(
       'must not have withdrawal permission',
     );
   });
 
   it('rejects Binance LIVE credentials without Spot trading permission', async () => {
-    binance.getAccount.mockResolvedValue({ canTrade: false, canWithdraw: false, accountType: 'SPOT' });
+    binance.getAccount.mockResolvedValue({ canTrade: true, canWithdraw: true, accountType: 'SPOT' });
+    binance.getApiKeyPermissions.mockResolvedValue({ enableSpotAndMarginTrading: false, enableWithdrawals: false });
     await expect(service.validateBinanceLiveCredentials('live-key', 'live-secret')).rejects.toThrow(
       'must have Spot trading permission',
     );

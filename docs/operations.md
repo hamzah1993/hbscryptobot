@@ -31,6 +31,15 @@ At minimum, verify:
 - scheduler and execution lock TTLs
 - notification retention and webhook settings
 
+For one-click Telegram account linking, configure these backend variables once:
+
+- `TELEGRAM_BOT_TOKEN` — BotFather token; server-side only.
+- `TELEGRAM_BOT_USERNAME` — the bot username, for example `HBS_Trading_Alerts_Bot`.
+- `TELEGRAM_WEBHOOK_URL` — the public HTTPS backend URL ending in `/api/notifications/telegram/webhook`.
+- `TELEGRAM_WEBHOOK_SECRET` — a random secret using only letters, numbers, `_`, or `-` (up to 256 characters).
+
+On backend startup the app registers `TELEGRAM_WEBHOOK_URL` with Telegram and supplies the secret-token header requirement. The bot token and webhook secret must never be exposed in the frontend. After that one-time server setup, each user connects from **Notifications → Connect Telegram** and presses **START** in Telegram; Chat IDs are captured by the webhook and are never entered manually.
+
 Never commit `.env`, exchange keys, encryption keys, webhook secrets, or database credentials.
 
 ## 3. Initial deployment

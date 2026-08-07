@@ -130,9 +130,16 @@ export type NotificationChannelSettings = {
   telegram: {
     enabled: boolean;
     chatId: string;
+    connected: boolean;
     minimumSeverity: NotificationSeverity;
     providerConfigured: boolean;
+    connectionConfigured: boolean;
   };
+};
+
+export type TelegramConnectionLink = {
+  url: string;
+  expiresAt: string;
 };
 
 export type ExchangeCredentialSummary = {
@@ -204,7 +211,7 @@ export type BinanceLiveConnectionResponse = {
 
 export type BinanceTestnetBalancesResponse = {
   exchange: 'BINANCE';
-  environment: 'TESTNET';
+  environment: ExchangeEnvironment;
   canTrade: boolean;
   balances: Array<{ asset: string; free: number; locked: number }>;
 };
@@ -640,8 +647,12 @@ export const api = {
     request<TradingStrategy>(`/strategies/${strategyId}/status`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ status }) }),
   previewTestnetOrder: (token: string, payload: { symbol: string; quoteAmount: number }) =>
     request<TestnetOrderPreview>('/strategies/testnet-order-preview', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  previewLiveOrder: (token: string, payload: { symbol: string; quoteAmount: number }) =>
+    request<TestnetOrderPreview>('/strategies/live-order-preview', { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   executeTestnetOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number; type?: 'MARKET' | 'LIMIT'; price?: number }) =>
     request<unknown>(`/strategies/${strategyId}/testnet-order`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
+  executeLiveOrder: (token: string, strategyId: string, payload: { side: 'BUY' | 'SELL'; quantity: number; type?: 'MARKET' | 'LIMIT'; price?: number }) =>
+    request<unknown>(`/strategies/${strategyId}/live-order`, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(payload) }),
   closeTestnetPosition: (token: string, positionId: string, subPositionId?: string) =>
     request<unknown>(`/strategies/testnet-positions/${encodeURIComponent(positionId)}/close`, {
       method: 'POST',
@@ -650,6 +661,14 @@ export const api = {
     }),
   updateTestnetPositionTakeProfit: (token: string, positionId: string, payload: { target: TakeProfitTarget; takeProfitPrice: number; subPositionId?: string }) =>
     request<TestnetPosition>(`/strategies/testnet-positions/${encodeURIComponent(positionId)}/take-profit`, {
+      method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
+    }),
+  closeLivePosition: (token: string, positionId: string, subPositionId?: string) =>
+    request<unknown>(`/strategies/live-positions/${encodeURIComponent(positionId)}/close`, {
+      method: 'POST', headers: authHeaders(token), body: JSON.stringify(subPositionId ? { subPositionId } : {}),
+    }),
+  updateLivePositionTakeProfit: (token: string, positionId: string, payload: { target: TakeProfitTarget; takeProfitPrice: number; subPositionId?: string }) =>
+    request<TestnetPosition>(`/strategies/live-positions/${encodeURIComponent(positionId)}/take-profit`, {
       method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
     }),
   getTestnetRunnerHealth: (token: string) =>
@@ -682,18 +701,30 @@ export const api = {
     request<NotificationChannelSettings>('/strategies/notifications/channels', { headers: authHeaders(token) }),
   updateNotificationChannels: (token: string, payload: Omit<NotificationChannelSettings, 'email' | 'telegram'> & {
     email: Omit<NotificationChannelSettings['email'], 'providerConfigured'>;
-    telegram: Omit<NotificationChannelSettings['telegram'], 'providerConfigured'>;
+    telegram: Pick<NotificationChannelSettings['telegram'], 'enabled' | 'minimumSeverity'>;
   }) => request<NotificationChannelSettings>('/strategies/notifications/channels', {
     method: 'PATCH', headers: authHeaders(token), body: JSON.stringify(payload),
   }),
   testNotificationChannel: (token: string, channel: 'email' | 'telegram') =>
     request<{ delivered: true; channel: 'EMAIL' | 'TELEGRAM' }>(`/strategies/notifications/channels/${channel}/test`, { method: 'POST', headers: authHeaders(token) }),
+  connectTelegram: (token: string) =>
+    request<TelegramConnectionLink>('/strategies/notifications/telegram/connect', { method: 'POST', headers: authHeaders(token) }),
+  disconnectTelegram: (token: string) =>
+    request<{ disconnected: true }>('/strategies/notifications/telegram', { method: 'DELETE', headers: authHeaders(token) }),
   listTestnetOrders: (token: string, limit = 100) =>
     request<TestnetOrder[]>(`/strategies/testnet-orders?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   syncTestnetOrder: (token: string, tradingOrderId: string) =>
     request<TestnetOrderSyncResponse>(`/strategies/testnet-orders/${tradingOrderId}/sync`, { method: 'POST', headers: authHeaders(token) }),
   listTestnetPositions: (token: string, limit = 100) =>
     request<TestnetPosition[]>(`/strategies/testnet-positions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
+  listLiveOrders: (token: string, limit = 100) =>
+    request<TestnetOrder[]>(`/strategies/live-orders?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
+  syncLiveOrder: (token: string, tradingOrderId: string) =>
+    request<TestnetOrderSyncResponse>(`/strategies/live-orders/${tradingOrderId}/sync`, { method: 'POST', headers: authHeaders(token) }),
+  listLivePositions: (token: string, limit = 100) =>
+    request<TestnetPosition[]>(`/strategies/live-positions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
+  listLiveActions: (token: string, limit = 100) =>
+    request<TestnetAction[]>(`/strategies/live-actions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   listTestnetActions: (token: string, limit = 100) =>
     request<TestnetAction[]>(`/strategies/testnet-actions?limit=${encodeURIComponent(String(limit))}`, { headers: authHeaders(token) }),
   stopTestnetStrategies: (token: string) =>
@@ -732,6 +763,8 @@ export const api = {
     request<BinanceLiveConnectionResponse>('/exchange/credentials/binance/live/test-connection', { method: 'POST', headers: authHeaders(token) }),
   getBinanceTestnetBalances: (token: string) =>
     request<BinanceTestnetBalancesResponse>('/exchange/credentials/binance/testnet/balances', { headers: authHeaders(token) }),
+  getBinanceLiveBalances: (token: string) =>
+    request<BinanceTestnetBalancesResponse>('/exchange/credentials/binance/live/balances', { headers: authHeaders(token) }),
   getMarketCandles: (token: string, symbol: string, interval: BinanceKlineInterval = '5m', limit = 200, environment: BinanceStreamEnvironment = 'live') =>
     request<MarketCandlesResponse>(`/market-data/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(String(limit))}&environment=${environment}`, { headers: authHeaders(token) }),
   subscribeMarketStream: (token: string, symbol: string, environment: BinanceStreamEnvironment) =>

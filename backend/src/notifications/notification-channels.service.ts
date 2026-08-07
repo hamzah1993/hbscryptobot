@@ -14,14 +14,16 @@ export type NotificationChannelSettings = {
   telegram: {
     enabled: boolean;
     chatId: string;
+    connected: boolean;
     minimumSeverity: NotificationSeverity;
     providerConfigured: boolean;
+    connectionConfigured: boolean;
   };
 };
 
 export type NotificationChannelSettingsInput = {
   email?: { enabled?: boolean; address?: string; minimumSeverity?: NotificationSeverity };
-  telegram?: { enabled?: boolean; chatId?: string; minimumSeverity?: NotificationSeverity };
+  telegram?: { enabled?: boolean; minimumSeverity?: NotificationSeverity };
 };
 
 type Channel = 'EMAIL' | 'TELEGRAM';
@@ -55,8 +57,10 @@ export class NotificationChannelsService {
       telegram: {
         enabled: preference?.telegramEnabled ?? false,
         chatId: preference?.telegramChatId ?? '',
+        connected: Boolean(preference?.telegramChatId),
         minimumSeverity: (preference?.telegramMinimumSeverity as NotificationSeverity | undefined) ?? 'WARNING',
         providerConfigured: this.telegramProviderConfigured(),
+        connectionConfigured: this.telegramConnectionConfigured(),
       },
     };
   }
@@ -64,7 +68,7 @@ export class NotificationChannelsService {
   async updateSettings(userId: string, input: NotificationChannelSettingsInput): Promise<NotificationChannelSettings> {
     const current = await this.getSettings(userId);
     const emailAddress = input.email?.address?.trim() ?? current.email.address;
-    const telegramChatId = input.telegram?.chatId?.trim() ?? current.telegram.chatId;
+    const telegramChatId = current.telegram.chatId;
     const emailEnabled = input.email?.enabled ?? current.email.enabled;
     const telegramEnabled = input.telegram?.enabled ?? current.telegram.enabled;
     const emailMinimumSeverity = this.validateSeverity(input.email?.minimumSeverity ?? current.email.minimumSeverity);
@@ -74,7 +78,7 @@ export class NotificationChannelsService {
       throw new BadRequestException('Enter a valid notification email address');
     }
     if (emailEnabled && !emailAddress) throw new BadRequestException('Email address is required');
-    if (telegramEnabled && !telegramChatId) throw new BadRequestException('Telegram chat ID is required');
+    if (telegramEnabled && !telegramChatId) throw new BadRequestException('Connect Telegram before enabling notifications');
 
     await this.prisma.notificationPreference.upsert({
       where: { userId },
@@ -246,6 +250,18 @@ export class NotificationChannelsService {
 
   private telegramProviderConfigured(): boolean {
     return Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim());
+  }
+
+  private telegramConnectionConfigured(): boolean {
+    const username = process.env.TELEGRAM_BOT_USERNAME?.trim().replace(/^@/, '') ?? '';
+    const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+    const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL?.trim() ?? '';
+    return Boolean(
+      process.env.TELEGRAM_BOT_TOKEN?.trim()
+      && /^[A-Za-z0-9_]{5,32}$/.test(username)
+      && /^[A-Za-z0-9_-]{1,256}$/.test(secret)
+      && /^https:\/\//i.test(webhookUrl),
+    );
   }
 
   private emailProviderConfigured(): boolean {
