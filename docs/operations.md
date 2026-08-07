@@ -1,8 +1,8 @@
 # Production Operations Runbook
 
-This runbook covers deployment and recovery for the current HBS Trading Platform scope: paper trading, historical backtesting, and Binance Spot Testnet execution.
+This runbook covers deployment and recovery for the current HBS Trading Platform scope: paper trading, historical backtesting, Binance Spot Testnet, and bounded Binance LIVE execution.
 
-> Live-money execution remains disabled. Do not use this runbook as approval for live trading.
+> Binance LIVE is enabled for controlled, bounded validation. This runbook is operational guidance, not approval for unattended trading or for increasing configured risk/capital limits.
 
 ## 1. Deployment prerequisites
 
@@ -44,9 +44,31 @@ Never commit `.env`, exchange keys, encryption keys, webhook secrets, or databas
 
 ## 3. Initial deployment
 
+### Render production deployment
+
+The current production backend is deployed on Render. Use committed Prisma migrations; the one-time baseline required by the original `db push` deployment has already been completed.
+
+Backend build command:
+
 ```bash
-git clone https://github.com/hamzah1993/hbstrading.git
-cd hbstrading
+npm install --include=dev && npx prisma generate && npm run build
+```
+
+Backend start command:
+
+```bash
+npx prisma migrate deploy && npm run start:prod
+```
+
+Do not restore the old one-time `prisma migrate resolve` baseline command after a successful baseline, and do not use `prisma db push --accept-data-loss` in production.
+
+After a Render deployment, verify the service reports a successful Nest application start, check `/api/health`, then smoke-test authentication, Binance connection/balance reads, and Telegram delivery before resuming bounded LIVE validation.
+
+### Docker Compose deployment
+
+```bash
+git clone https://github.com/hamzah1993/hbscryptobot.git
+cd hbscryptobot
 cp .env.example .env
 # Edit .env before continuing.
 docker compose config
@@ -57,7 +79,7 @@ docker compose up -d
 Apply the database schema:
 
 ```bash
-docker compose exec backend npx prisma db push
+docker compose exec backend npx prisma migrate deploy
 docker compose exec backend npx prisma generate
 docker compose restart backend
 ```
@@ -78,9 +100,9 @@ curl --fail http://127.0.0.1:3000/api/health
 2. Back up PostgreSQL before schema or application changes.
 3. Pull the approved commit or release tag.
 4. Rebuild images.
-5. Apply the Prisma schema.
+5. Apply committed Prisma migrations.
 6. Restart services.
-7. Verify health, authentication, backtest creation, report retrieval, and Binance Spot Testnet status.
+7. Verify health, authentication, backtest creation, report retrieval, Telegram status, and Binance Testnet/LIVE connection status without increasing LIVE exposure.
 8. Watch logs and external monitors during the release window.
 
 ```bash
@@ -88,7 +110,7 @@ git fetch --all --tags
 git checkout <approved-commit-or-tag>
 docker compose build
 docker compose up -d
-docker compose exec backend npx prisma db push
+docker compose exec backend npx prisma migrate deploy
 docker compose restart backend frontend
 docker compose ps
 ```
@@ -107,7 +129,7 @@ Operational checks should verify:
 - PostgreSQL accepts connections
 - Redis responds to `PING`
 - scheduled jobs are not repeatedly failing
-- no stale Testnet actions or unresolved orders are accumulating
+- no stale Testnet/LIVE actions or unresolved orders are accumulating
 - notification webhook failures remain within expected limits
 - disk space is sufficient for PostgreSQL, logs, and backups
 
@@ -205,9 +227,9 @@ Do not automatically roll back the database merely because an application deploy
 - recover the database before restarting normal schedulers
 - restore from backup only when database repair is not possible
 
-### Binance Spot Testnet inconsistency
+### Binance Testnet or LIVE inconsistency
 
-- use the Testnet emergency stop
+- use the appropriate Testnet stop or LIVE emergency-exit control
 - stop automatic strategy execution
 - inspect unresolved orders and reconciliation logs
 - verify exchange credentials and permissions
@@ -230,7 +252,7 @@ Configure alerts for:
 - PostgreSQL connection or storage failures
 - Redis connection failures
 - scheduler exceptions
-- Testnet order reconciliation failures
+- Testnet/LIVE order reconciliation failures
 - unresolved or stale strategy actions
 - webhook delivery failure rates
 - high CPU, memory, disk, and database growth
@@ -244,10 +266,10 @@ Regular maintenance should include:
 - review dependency and container-image updates
 - inspect notification and application log retention
 - review rate limits and Redis lock TTLs
-- verify Binance Spot Testnet credentials
+- verify Binance Testnet/LIVE credentials and confirm withdrawal permission remains disabled
 - purge obsolete test records only through controlled procedures
 - run the full CI validation suite before every release
 
 ## 12. Safety boundary
 
-The current operations package supports controlled paper trading, historical backtesting, and Binance Spot Testnet use. It does not establish live-money readiness. Live execution requires separate safeguards, approvals, exposure limits, audit controls, and production validation.
+The current operations package supports paper trading, historical backtesting, Binance Spot Testnet, and bounded Binance LIVE validation. Small-amount LIVE execution and Telegram delivery have been verified. Keep the configured risk budget and LIVE capital ceiling conservative, keep Binance withdrawal permission disabled, and do not treat bounded validation as certification for unattended trading. Complete the LIVE emergency-exit certification, monitoring, backup automation/restore drill, and incident-response verification before unattended operation.

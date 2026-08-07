@@ -2,7 +2,7 @@
 
 This runbook covers backup, verification, restore, and recovery checks for the HBS Trading Platform PostgreSQL database when the stack is deployed with Docker Compose.
 
-> Live-money execution remains disabled. Backups may contain encrypted exchange credentials, user data, strategy configuration, orders, fills, notifications, historical candles, and backtest results. Store backup files as sensitive production data.
+> Bounded Binance LIVE execution is enabled. Backups may contain encrypted exchange credentials, user data, strategy configuration, orders, fills, notifications, historical candles, and backtest results. Store backup files as sensitive production data.
 
 ## Scope
 
@@ -220,13 +220,13 @@ Perform these application checks with a non-live test account:
 
 - Login succeeds
 - Strategies and paper positions load
-- Binance Spot Testnet records load without enabling live execution
+- Binance Testnet/LIVE records load without starting a LIVE strategy or placing an order
 - Notifications load
 - Historical candles can be queried
 - Existing backtest reports and CSV exports load
 - A small paper-trading or backtest workflow succeeds
 
-Do not enable live-money execution as part of a restore test.
+Do not place a LIVE order as part of a restore test.
 
 ## Recovery failure handling
 
