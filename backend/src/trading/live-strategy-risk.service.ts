@@ -1,12 +1,11 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ProductionReadinessService } from './production-readiness.service';
 import { TestnetRiskActionType, TestnetStrategyRiskService } from './testnet-strategy-risk.service';
 
 /**
  * Final server-side risk boundary for every Binance LIVE submission.
- * Reducing exits intentionally remain available if readiness later degrades;
- * only new exposure requires the complete, current LIVE readiness snapshot.
+ * LIVE exposure is allowed without the operational production-readiness gate,
+ * but fixed strategy limits and the user-wide capital ceiling remain enforced.
  */
 @Injectable()
 export class LiveStrategyRiskService extends TestnetStrategyRiskService {
@@ -18,10 +17,7 @@ export class LiveStrategyRiskService extends TestnetStrategyRiskService {
     return 'LIVE';
   }
 
-  constructor(
-    prisma: PrismaService,
-    private readonly readiness: ProductionReadinessService,
-  ) {
+  constructor(prisma: PrismaService) {
     super(prisma);
   }
 
@@ -31,29 +27,13 @@ export class LiveStrategyRiskService extends TestnetStrategyRiskService {
     openPosition: any | null,
     actionType: TestnetRiskActionType,
     estimatedOrderQuote: number,
-    retrying = false,
+    _retrying = false,
   ) {
     const isEntry = !actionType || ['INITIAL_ENTRY', 'DCA_ENTRY', 'INDEPENDENT_ENTRY', 'RECOVERY_DCA_ENTRY'].includes(actionType);
 
     if (isEntry) {
-      const snapshot = await this.readiness.snapshot(userId);
-      const retryReady = retrying
-        && snapshot.hardeningChecks.executionLatencyEvidence
-        && snapshot.hardeningChecks.schedulersHealthy
-        && snapshot.hardeningChecks.redisAvailable
-        && snapshot.hardeningChecks.noPermanentActionFailures
-        && snapshot.liveChecks.operationalNotificationProvider
-        && snapshot.liveChecks.liveFeatureFlag
-        && snapshot.liveChecks.liveRoutingImplemented
-        && snapshot.liveChecks.binanceLiveCredentialsConfigured
-        && snapshot.liveChecks.liveCapitalCeilingConfigured
-        && snapshot.liveChecks.explicitLiveConfirmationRecorded
-        && snapshot.liveChecks.liveEmergencyExitAdapterVerified;
-      if (!snapshot.liveMoneyReady && !retryReady) {
-        throw new ConflictException('Binance LIVE execution is blocked because the current production-readiness gate is not satisfied');
-      }
-
-      const capitalCeiling = Number(snapshot.liveSafetyProfile.capitalCeilingQuote ?? 0);
+      const liveSafetyProfile = await this.prisma.liveTradingSafetyProfile.findUnique({ where: { userId } });
+      const capitalCeiling = Number(liveSafetyProfile?.capitalCeilingQuote ?? 0);
       if (!Number.isFinite(capitalCeiling) || capitalCeiling <= 0) {
         throw new ConflictException('Binance LIVE capital ceiling is not configured');
       }

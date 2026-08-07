@@ -9,7 +9,7 @@ describe('LiveStrategyRiskService', () => {
     maxDailyRealizedLossQuote: 100, maxOpenPairs: 5, cooldownMinutes: 0,
   };
 
-  function createService(liveMoneyReady: boolean, ceiling = 100) {
+  function createService(ceiling: number | null = 100) {
     const prisma = {
       tradingPosition: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -18,31 +18,28 @@ describe('LiveStrategyRiskService', () => {
       },
       tradingOrder: { findMany: jest.fn().mockResolvedValue([]) },
       tradingSubPosition: { findMany: jest.fn().mockResolvedValue([]) },
+      liveTradingSafetyProfile: { findUnique: jest.fn().mockResolvedValue(ceiling === null ? null : { capitalCeilingQuote: ceiling }) },
     } as any;
-    const readiness = { snapshot: jest.fn().mockResolvedValue({
-      liveMoneyReady,
-      liveSafetyProfile: { capitalCeilingQuote: ceiling },
-    }) } as any;
-    return { service: new LiveStrategyRiskService(prisma, readiness), readiness };
+    return { service: new LiveStrategyRiskService(prisma), prisma };
   }
 
-  it('blocks new LIVE exposure whenever the current readiness gate is not green', async () => {
-    const { service } = createService(false);
+  it('requires a user-wide LIVE capital ceiling before a new entry', async () => {
+    const { service } = createService(null);
     await expect(service.assertCanExecute('user-1', strategy, null, 'INITIAL_ENTRY', 50))
       .rejects.toBeInstanceOf(ConflictException);
   });
 
   it('enforces the user-wide LIVE capital ceiling before a new entry', async () => {
-    const { service } = createService(true, 100);
+    const { service } = createService(100);
     await expect(service.assertCanExecute('user-1', strategy, null, 'INITIAL_ENTRY', 100)).resolves.toBeUndefined();
     await expect(service.assertCanExecute('user-1', strategy, null, 'INITIAL_ENTRY', 100.01))
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('keeps risk-reducing exits available after readiness degrades', async () => {
-    const { service, readiness } = createService(false);
+  it('keeps risk-reducing exits available without requiring a capital-ceiling lookup', async () => {
+    const { service, prisma } = createService(null);
     const openPosition = { id: 'position-1', totalCostQuote: 900 };
     await expect(service.assertCanExecute('user-1', strategy, openPosition, 'PARENT_EXIT', 900)).resolves.toBeUndefined();
-    expect(readiness.snapshot).not.toHaveBeenCalled();
+    expect(prisma.liveTradingSafetyProfile.findUnique).not.toHaveBeenCalled();
   });
 });
