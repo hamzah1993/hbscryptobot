@@ -36,7 +36,7 @@ describe('ProductionReadinessService', () => {
   it('keeps live money blocked even if the feature flag is set', async () => {
     const result = await createService([100, 120, 140, 150, 160, 170, 180, 190, 200, 250], { liveFlag: 'true' }).snapshot('user-1');
     expect(result.liveChecks.liveFeatureFlag).toBe(true);
-    expect(result.liveChecks.liveRoutingImplemented).toBe(false);
+    expect(result.liveChecks.liveRoutingImplemented).toBe(true);
     expect(result.liveChecks.explicitLiveConfirmationImplemented).toBe(true);
     expect(result.liveConfirmationAvailable).toBe(false);
     expect(result.liveMoneyReady).toBe(false);

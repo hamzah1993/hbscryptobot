@@ -55,13 +55,13 @@ export class TestnetStrategyRunnerService {
     private readonly recoveryStrategy: RecoveryStrategyService,
   ) {}
 
-  async runUserStrategies(userId: string): Promise<TestnetStrategyRunnerResult[]> {
+  async runUserStrategies(userId: string, environment: 'TESTNET' | 'LIVE' = 'TESTNET'): Promise<TestnetStrategyRunnerResult[]> {
     const strategies = await this.prisma.tradingStrategy.findMany({
       where: {
         userId,
         status: 'RUNNING',
         paperTrading: false,
-        environment: 'TESTNET',
+        environment,
       },
       include: {
         positions: {
@@ -81,7 +81,7 @@ export class TestnetStrategyRunnerService {
 
     const results: TestnetStrategyRunnerResult[] = [];
     for (const strategy of strategies) {
-      results.push(await this.runStrategy(userId, strategy));
+      results.push(await this.runStrategy(userId, strategy, environment));
     }
     return results;
   }
@@ -112,7 +112,7 @@ export class TestnetStrategyRunnerService {
     return Boolean(activeOrder || activeAction);
   }
 
-  private async runStrategy(userId: string, strategy: any): Promise<TestnetStrategyRunnerResult> {
+  private async runStrategy(userId: string, strategy: any, environment: 'TESTNET' | 'LIVE'): Promise<TestnetStrategyRunnerResult> {
     if (this.runningStrategies.has(strategy.id)) {
       return {
         strategyId: strategy.id,
@@ -149,7 +149,7 @@ export class TestnetStrategyRunnerService {
         };
       }
 
-      const quote = await this.marketData.getQuote(strategy.symbol, 'testnet');
+      const quote = await this.marketData.getQuote(strategy.symbol, environment === 'LIVE' ? 'live' : 'testnet');
       if (!Number.isFinite(quote.price) || quote.price <= 0) {
         throw new Error('Unable to calculate testnet quantity from the market price');
       }

@@ -31,6 +31,40 @@ export class ExchangeAccountManagementService {
     };
   }
 
+  async validateBinanceLiveCredentials(apiKey: string, apiSecret: string) {
+    const account = await this.binance.getAccount(apiKey.trim(), apiSecret.trim(), 'live') as any;
+    const permissions = Array.isArray(account?.permissions)
+      ? account.permissions.map((permission: unknown) => String(permission).toUpperCase())
+      : [];
+    const accountType = String(account?.accountType ?? '').toUpperCase();
+    const spotEnabled = accountType === 'SPOT' || permissions.includes('SPOT');
+    const canTrade = account?.canTrade === true;
+    const canWithdraw = account?.canWithdraw === true;
+
+    if (!canTrade || !spotEnabled) {
+      throw new BadRequestException('Binance LIVE API key must have Spot trading permission');
+    }
+    if (canWithdraw) {
+      throw new BadRequestException('Binance LIVE API key must not have withdrawal permission');
+    }
+
+    return {
+      connected: true,
+      exchange: 'BINANCE',
+      environment: 'LIVE',
+      canTrade,
+      canWithdraw,
+      spotEnabled,
+      accountType: account?.accountType ?? null,
+      permissions,
+    };
+  }
+
+  async testBinanceLiveConnection(userId: string) {
+    const credential = await this.credentials.getBinance(userId, ExchangeEnvironment.LIVE);
+    return this.validateBinanceLiveCredentials(credential.apiKey, credential.apiSecret);
+  }
+
   async getBinanceTestnetBalances(userId: string) {
     const credential = await this.credentials.getBinance(
       userId,

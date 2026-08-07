@@ -47,12 +47,12 @@ export class TestnetStrategyActionService {
 
     const strategy = await this.prisma.tradingStrategy.findFirst({
       where: { id: input.strategyId, userId },
-      select: { id: true, environment: true, paperTrading: true },
+      select: { id: true, exchange: true, environment: true, paperTrading: true },
     });
 
     if (!strategy) throw new BadRequestException('Strategy not found');
-    if (strategy.paperTrading || strategy.environment !== 'TESTNET') {
-      throw new BadRequestException('Only Binance testnet strategies can claim exchange actions');
+    if (strategy.paperTrading || strategy.exchange !== 'BINANCE') {
+      throw new BadRequestException('Only non-paper Binance strategies can claim exchange actions');
     }
 
     if (input.positionId) {
@@ -253,6 +253,7 @@ export class TestnetStrategyActionService {
     const now = new Date();
     return this.prisma.strategyAction.findMany({
       where: {
+        strategy: { environment: 'TESTNET', paperTrading: false },
         OR: [
           { status: { in: ['PENDING', 'SUBMITTED'] } },
           { status: 'FAILED', retryable: true, nextRetryAt: { lte: now } },
@@ -400,7 +401,7 @@ export class TestnetStrategyActionService {
         strategyId,
         actionKey,
         status: 'PENDING',
-        strategy: { environment: 'TESTNET', paperTrading: false },
+        strategy: { paperTrading: false, exchange: 'BINANCE' },
       },
     });
     if (!action) throw new BadRequestException('Claimed Testnet retry action was not found');

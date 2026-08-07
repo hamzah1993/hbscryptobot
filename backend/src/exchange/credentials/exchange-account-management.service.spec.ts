@@ -73,6 +73,34 @@ describe('ExchangeAccountManagementService', () => {
     });
   });
 
+  it('accepts a Binance LIVE Spot trading key only when withdrawals are disabled', async () => {
+    binance.getAccount.mockResolvedValue({
+      canTrade: true,
+      canWithdraw: false,
+      accountType: 'SPOT',
+      permissions: ['SPOT'],
+    });
+
+    await expect(service.validateBinanceLiveCredentials('live-key', 'live-secret')).resolves.toEqual(
+      expect.objectContaining({ connected: true, environment: 'LIVE', canTrade: true, canWithdraw: false, spotEnabled: true }),
+    );
+    expect(binance.getAccount).toHaveBeenCalledWith('live-key', 'live-secret', 'live');
+  });
+
+  it('rejects Binance LIVE credentials with withdrawal permission', async () => {
+    binance.getAccount.mockResolvedValue({ canTrade: true, canWithdraw: true, accountType: 'SPOT' });
+    await expect(service.validateBinanceLiveCredentials('live-key', 'live-secret')).rejects.toThrow(
+      'must not have withdrawal permission',
+    );
+  });
+
+  it('rejects Binance LIVE credentials without Spot trading permission', async () => {
+    binance.getAccount.mockResolvedValue({ canTrade: false, canWithdraw: false, accountType: 'SPOT' });
+    await expect(service.validateBinanceLiveCredentials('live-key', 'live-secret')).rejects.toThrow(
+      'must have Spot trading permission',
+    );
+  });
+
   it('rejects live account-management operations', () => {
     expect(() => service.assertTestnetOnly(ExchangeEnvironment.LIVE)).toThrow(
       BadRequestException,

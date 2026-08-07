@@ -13,12 +13,18 @@ import { HistoricalCandleController } from './historical-candle.controller';
 import { HistoricalCandleIngestionService } from './historical-candle-ingestion.service';
 import { HistoricalCandleQueryService } from './historical-candle-query.service';
 import { LiveTradingSafetyService } from './live-trading-safety.service';
+import { LiveEmergencyExitService } from './live-emergency-exit.service';
+import { LiveActionRetrySchedulerService } from './live-action-retry-scheduler.service';
+import { LiveOrderSyncSchedulerService } from './live-order-sync-scheduler.service';
+import { LiveStrategyRiskService } from './live-strategy-risk.service';
+import { LiveStrategySchedulerService } from './live-strategy-scheduler.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { PaperStrategySchedulerService } from './paper-strategy-scheduler.service';
 import { PaperTradingController } from './paper-trading.controller';
 import { PaperTradingService } from './paper-trading.service';
 import { ProductionReadinessService } from './production-readiness.service';
 import { RiskAwareTestnetStrategyExecutionService } from './risk-aware-testnet-strategy-execution.service';
+import { RiskAwareLiveStrategyExecutionService } from './risk-aware-live-strategy-execution.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
 import { StrategyController } from './strategy.controller';
@@ -54,6 +60,12 @@ import { TradingEngineService } from './trading-engine.service';
     PaperTradingService,
     ProductionReadinessService,
     LiveTradingSafetyService,
+    LiveStrategyRiskService,
+    RiskAwareLiveStrategyExecutionService,
+    LiveEmergencyExitService,
+    LiveActionRetrySchedulerService,
+    LiveOrderSyncSchedulerService,
+    LiveStrategySchedulerService,
     StrategyService,
     HistoricalCandleIngestionService,
     HistoricalCandleQueryService,

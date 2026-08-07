@@ -78,7 +78,7 @@ export function ProductionReadinessPanel({ token }: { token: string }) {
         </div>
         <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.05] p-4">
           <p className="text-sm font-semibold text-rose-100">Explicit LIVE activation acknowledgement</p>
-          <p className="mt-1 text-xs leading-5 text-slate-400">This stays locked until every exchange E2E, live-routing, credential, notification, emergency-exit, latency and server feature-flag gate passes.</p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">Binance LIVE stays locked until its Testnet W2W, routing, credentials, notifications, emergency-exit verification, latency and server feature-flag gates pass. Bybit/OKX are tracked separately and do not block Binance.</p>
           <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} disabled={!snapshot.liveConfirmationAvailable || busy} placeholder={snapshot.liveConfirmationAvailable ? 'I UNDERSTAND LIVE TRADING USES REAL MONEY' : 'Locked — prerequisites incomplete'} className="mt-3 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50" />
           <button type="button" disabled={!snapshot.liveConfirmationAvailable || busy} onClick={() => void confirmLiveTrading()} className="mt-3 rounded-xl bg-rose-500 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Confirm LIVE acknowledgement</button>
           {snapshot.liveSafetyProfile.confirmedAt && <p className="mt-3 text-xs text-emerald-300">Acknowledged {new Date(snapshot.liveSafetyProfile.confirmedAt).toLocaleString()}.</p>}

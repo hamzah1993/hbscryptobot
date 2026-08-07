@@ -5,6 +5,7 @@ import { BinanceTestnetOrderService } from '../exchange/binance/binance-testnet-
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationChannelsService, type NotificationChannelSettingsInput } from '../notifications/notification-channels.service';
 import { LiveTradingSafetyService } from './live-trading-safety.service';
+import { LiveEmergencyExitService } from './live-emergency-exit.service';
 import { PaperStrategyRunnerService } from './paper-strategy-runner.service';
 import { ProductionReadinessService } from './production-readiness.service';
 import { StrategyService, type StrategyInput } from './strategy.service';
@@ -34,6 +35,7 @@ export class StrategyController {
     private readonly notificationChannels: NotificationChannelsService,
     private readonly productionReadiness: ProductionReadinessService,
     private readonly liveTradingSafety: LiveTradingSafetyService,
+    private readonly liveEmergencyExit: LiveEmergencyExitService,
   ) {}
 
   @Get()
@@ -172,6 +174,11 @@ export class StrategyController {
   @Post('testnet-emergency-exit')
   emergencyExit(@Req() request: AuthenticatedRequest) {
     return this.testnetEmergencyStop.exitUserPositions(request.user.sub);
+  }
+
+  @Post('live-emergency-exit')
+  emergencyExitLive(@Req() request: AuthenticatedRequest) {
+    return this.liveEmergencyExit.exitUserPositions(request.user.sub);
   }
 
   @Post()
