@@ -1,18 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type AdminPackageStrategy, type AdminTradingPackage, type PackageStrategySettings } from '../lib/api';
+import { api, type AdminPackageStrategy, type AdminTradingPackage, type StrategyBacktestResult, type StrategyField } from '../lib/api';
+import { BacktestResultTable, StrategySettingsForm, toFormValues, toSettings, type StrategyFormValues } from './StrategySettingsForm';
 
-const EXAMPLE_SETTINGS: PackageStrategySettings = {
-  baseOrderQuote: 10,
-  maxDcaOrders: 3,
-  dcaStepPercent: 3,
-  dcaMultiplier: 1,
-  dcaMultipliers: [1, 1.5, 2],
-  takeProfitPercent: 1.5,
-  independentFromLevel: 3,
-  maxDailyRealizedLossQuote: 10,
-};
-
-type StrategyForm = { id: string | null; name: string; symbol: string; settings: string; active: boolean };
+type StrategyForm = { id: string | null; name: string; symbol: string; values: StrategyFormValues; active: boolean };
+type BacktestForm = { days: string; capitalQuote: string };
 type AllocationRow = { templateId: string; allocationPercent: string };
 type PackageForm = { id: string | null; name: string; description: string; amountQuote: string; active: boolean; sortOrder: string; allocations: AllocationRow[] };
 
@@ -23,20 +14,46 @@ const secondary = 'rounded-xl border border-white/10 px-4 py-2.5 text-sm';
 export function AdminPackagesPanel({ token, adminSessionToken }: { token: string; adminSessionToken: string }) {
   const [strategies, setStrategies] = useState<AdminPackageStrategy[]>([]);
   const [packages, setPackages] = useState<AdminTradingPackage[]>([]);
+  const [fields, setFields] = useState<StrategyField[]>([]);
   const [strategyForm, setStrategyForm] = useState<StrategyForm | null>(null);
   const [packageForm, setPackageForm] = useState<PackageForm | null>(null);
+  const [backtestForm, setBacktestForm] = useState<BacktestForm>({ days: '30', capitalQuote: '1000' });
+  const [backtest, setBacktest] = useState<StrategyBacktestResult | null>(null);
+  const [backtesting, setBacktesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStrategies, nextPackages] = await Promise.all([
+      const [nextStrategies, nextPackages, nextFields] = await Promise.all([
         api.listAdminPackageStrategies(token, adminSessionToken),
         api.listAdminPackages(token, adminSessionToken),
+        api.getAdminStrategyFields(token, adminSessionToken),
       ]);
-      setStrategies(nextStrategies); setPackages(nextPackages);
+      setStrategies(nextStrategies); setPackages(nextPackages); setFields(nextFields);
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load packages'); }
   }, [token, adminSessionToken]);
+
+  function openStrategy(strategy: AdminPackageStrategy | null) {
+    setStrategyForm(strategy
+      ? { id: strategy.id, name: strategy.name, symbol: strategy.symbol, values: toFormValues(fields, strategy.strategyTemplate), active: strategy.active }
+      : { id: null, name: '', symbol: 'BTCUSDT', values: toFormValues(fields), active: true });
+    setBacktest(null);
+    setError(null);
+  }
+
+  async function runBacktest() {
+    if (!strategyForm) return;
+    const { settings, error: formError } = toSettings(fields, strategyForm.values);
+    if (formError) { setError(formError); return; }
+    setBacktesting(true); setError(null); setBacktest(null);
+    try {
+      setBacktest(await api.backtestAdminStrategy(token, adminSessionToken, {
+        symbol: strategyForm.symbol, strategyTemplate: settings, days: Number(backtestForm.days), capitalQuote: Number(backtestForm.capitalQuote),
+      }));
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Backtest failed'); }
+    finally { setBacktesting(false); }
+  }
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -49,9 +66,8 @@ export function AdminPackagesPanel({ token, adminSessionToken }: { token: string
 
   function saveStrategy() {
     if (!strategyForm) return;
-    let strategyTemplate: PackageStrategySettings;
-    try { strategyTemplate = JSON.parse(strategyForm.settings) as PackageStrategySettings; }
-    catch { setError('Bot settings must be valid JSON'); return; }
+    const { settings: strategyTemplate, error: formError } = toSettings(fields, strategyForm.values);
+    if (formError) { setError(formError); return; }
     const payload = { name: strategyForm.name, symbol: strategyForm.symbol, strategyTemplate, active: strategyForm.active };
     void run(
       () => strategyForm.id
@@ -87,25 +103,40 @@ export function AdminPackagesPanel({ token, adminSessionToken }: { token: string
     <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div><h2 className="text-xl font-semibold">Package strategies</h2><p className="mt-1 text-sm text-slate-400">Predefined bot settings used inside packages. Users never see these. Changes apply to new subscriptions only.</p></div>
-        <button type="button" onClick={() => { setStrategyForm({ id: null, name: '', symbol: 'BTCUSDT', settings: JSON.stringify(EXAMPLE_SETTINGS, null, 2), active: true }); setError(null); }} className={primary}>New strategy</button>
+        <button type="button" disabled={!fields.length} onClick={() => openStrategy(null)} className={primary}>New strategy</button>
       </div>
-      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm">
-        <thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Strategy</th><th>Symbol</th><th>Base order</th><th>Status</th><th>Used in</th><th /></tr></thead>
+      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm">
+        <thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="pb-3">Strategy</th><th>Symbol</th><th>Entry</th><th>First buy</th><th>Take profit</th><th>Stop-loss</th><th>Status</th><th>Used in</th><th /></tr></thead>
         <tbody>{strategies.map((strategy) => <tr key={strategy.id} className="border-t border-white/10">
           <td className="py-4 font-semibold">{strategy.name}</td>
           <td>{strategy.symbol}</td>
+          <td className="text-slate-300">{strategy.strategyTemplate.entryMode === 'DIP_CONFIRMATION' ? `Dip ${String(strategy.strategyTemplate.dipPercent ?? 3)}% + ${String(strategy.strategyTemplate.confirmTimeframe ?? '5m')}` : 'Immediate'}</td>
           <td>{String(strategy.strategyTemplate.baseOrderQuote)} USDT</td>
+          <td>{String(strategy.strategyTemplate.takeProfitPercent)}%</td>
+          <td>{strategy.strategyTemplate.stopLossPercent ? `${String(strategy.strategyTemplate.stopLossPercent)}%` : 'Off'}</td>
           <td className={strategy.active ? 'text-emerald-300' : 'text-slate-500'}>{strategy.active ? 'Active' : 'Inactive'}</td>
           <td className="text-slate-400">{strategy.packages.map((item) => item.name).join(', ') || '—'}</td>
-          <td><button type="button" onClick={() => { setStrategyForm({ id: strategy.id, name: strategy.name, symbol: strategy.symbol, settings: JSON.stringify(strategy.strategyTemplate, null, 2), active: strategy.active }); setError(null); }} className="rounded-lg border border-white/10 px-3 py-1.5">Edit</button></td>
+          <td><button type="button" disabled={!fields.length} onClick={() => openStrategy(strategy)} className="rounded-lg border border-white/10 px-3 py-1.5">Edit</button></td>
         </tr>)}</tbody>
       </table>{strategies.length === 0 && <p className="py-5 text-sm text-slate-500">No strategies yet. Create strategies first, then assign them to packages.</p>}</div>
 
       {strategyForm && <div className="mt-5 grid gap-4 rounded-xl border border-white/10 bg-slate-950/30 p-4 md:grid-cols-2">
         <label className="text-sm text-slate-300">Name<input value={strategyForm.name} onChange={(event) => setStrategyForm({ ...strategyForm, name: event.target.value })} className={input} /></label>
         <label className="text-sm text-slate-300">Symbol<input value={strategyForm.symbol} onChange={(event) => setStrategyForm({ ...strategyForm, symbol: event.target.value })} className={input} /></label>
-        <label className="text-sm text-slate-300 md:col-span-2">Bot settings (JSON)<textarea rows={12} value={strategyForm.settings} onChange={(event) => setStrategyForm({ ...strategyForm, settings: event.target.value })} className={`${input} font-mono text-xs`} /></label>
-        <p className="text-xs text-slate-500 md:col-span-2">Each bot's budget and exposure limit come from its package allocation. The base order must be at least 5 USDT. Backtest settings before using them in a package.</p>
+        <div className="md:col-span-2"><StrategySettingsForm fields={fields} values={strategyForm.values} onChange={(values) => setStrategyForm({ ...strategyForm, values })} /></div>
+        <p className="text-xs text-slate-500 md:col-span-2">Each bot's budget and exposure limit come from its package allocation. Changes apply to new subscriptions only.</p>
+
+        <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 md:col-span-2">
+          <p className="text-sm font-semibold text-slate-200">Backtest these settings</p>
+          <p className="mt-1 text-xs text-slate-400">Runs the settings above, saved or not, on Binance history and compares them with the same settings without the dip and DCA confirmation rules.</p>
+          <div className="mt-3 flex flex-wrap items-end gap-3">
+            <label className="text-sm text-slate-300">Days<input type="number" min="1" max="365" value={backtestForm.days} onChange={(event) => setBacktestForm({ ...backtestForm, days: event.target.value })} className={`${input} w-28`} /></label>
+            <label className="text-sm text-slate-300">Capital (USDT)<input type="number" min="10" value={backtestForm.capitalQuote} onChange={(event) => setBacktestForm({ ...backtestForm, capitalQuote: event.target.value })} className={`${input} w-36`} /></label>
+            <button type="button" disabled={backtesting} onClick={() => void runBacktest()} className={primary}>{backtesting ? 'Running…' : 'Run backtest'}</button>
+          </div>
+          {backtest && <BacktestResultTable result={backtest} />}
+        </div>
+
         <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={strategyForm.active} onChange={(event) => setStrategyForm({ ...strategyForm, active: event.target.checked })} />Active</label>
         <div className="flex justify-end gap-2"><button type="button" disabled={busy} onClick={() => setStrategyForm(null)} className={secondary}>Cancel</button><button type="button" disabled={busy} onClick={saveStrategy} className={primary}>{busy ? 'Saving…' : strategyForm.id ? 'Save strategy' : 'Create strategy'}</button></div>
       </div>}

@@ -43,7 +43,28 @@ export type MarketTicker = { symbol: string; baseAsset: string; quoteAsset: stri
 export type Announcement = { id: string; title: string; body: string; pinned: boolean; publishedAt: string | null };
 export type AdminAnnouncement = Announcement & { published: boolean; createdAt: string; updatedAt: string };
 export type RecentProfit = { id: string; symbol: string; profitPercent: number; user: string; closedAt: string };
-export type PackageStrategySettings = Record<string, number | boolean | number[]>;
+export type PackageStrategySettings = Record<string, number | boolean | string | number[] | null>;
+export type StrategyField = {
+  key: string;
+  label: string;
+  group: string;
+  type: 'number' | 'integer' | 'boolean' | 'select' | 'numberList';
+  required?: boolean;
+  nullable?: boolean;
+  default?: number | boolean | string | number[] | null;
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  options?: Array<{ value: string; label: string }>;
+  showWhen?: Array<{ key: string; values: Array<string | boolean> }>;
+  help: string;
+};
+export type StrategyBacktestSummary = { returnPercent: number; profitQuote: number; maxDrawdownPercent: number; cycles: number; stopLosses: number; trades: number; profitableExitPercent: number };
+export type StrategyBacktestResult = {
+  symbol: string; interval: string; from: string; to: string; candles: number; capitalQuote: number; feePercent: number; marketChangePercent: number;
+  strategy: StrategyBacktestSummary; withoutEntryRules: StrategyBacktestSummary | null;
+};
 export type PackageBotStatus = 'RUNNING' | 'PARTIAL' | 'STOPPED';
 export type TradingPackage = { id: string; name: string; description: string | null; amountQuote: number };
 export type AdminPackageStrategy = { id: string; name: string; symbol: string; strategyTemplate: PackageStrategySettings; active: boolean; packages: Array<{ id: string; name: string }>; createdAt: string; updatedAt: string };
@@ -873,6 +894,10 @@ export const api = {
     request<AdminPackageStrategy>('/super/admin/control/package-strategies', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   updateAdminPackageStrategy: (token: string, adminSessionToken: string, templateId: string, payload: Partial<AdminPackageStrategyInput>) =>
     request<AdminPackageStrategy>(`/super/admin/control/package-strategies/${encodeURIComponent(templateId)}`, { method: 'PATCH', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
+  getAdminStrategyFields: (token: string, adminSessionToken: string) =>
+    request<StrategyField[]>('/super/admin/control/package-strategies/fields', { headers: adminHeaders(token, adminSessionToken) }),
+  backtestAdminStrategy: (token: string, adminSessionToken: string, payload: { symbol: string; strategyTemplate: PackageStrategySettings; days: number; capitalQuote: number }) =>
+    request<StrategyBacktestResult>('/super/admin/control/package-strategies/backtest', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   listAdminPackages: (token: string, adminSessionToken: string) =>
     request<AdminTradingPackage[]>('/super/admin/control/packages', { headers: adminHeaders(token, adminSessionToken) }),
   getBilling: (token: string) => request<BillingOverview>('/billing', { headers: authHeaders(token) }),

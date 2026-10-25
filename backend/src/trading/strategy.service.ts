@@ -3,6 +3,10 @@ import { ExchangeName, Prisma, TradingMode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
+import {
+  CONFIRM_RULES, CONFIRM_TIMEFRAMES, ENTRY_MODES, MAX_SIGNAL_CANDLES, timeframeMinutes,
+  type ConfirmRule, type ConfirmTimeframe, type EntryMode,
+} from './entry-signal';
 
 export type StrategyInput = {
   name: string;
@@ -32,6 +36,15 @@ export type StrategyInput = {
   maxStrategyExposureQuote?: number | null;
   maxOrderQuote?: number | null;
   maxDailyRealizedLossQuote?: number | null;
+  entryMode?: EntryMode;
+  dipPercent?: number;
+  dipLookbackMinutes?: number;
+  confirmTimeframe?: ConfirmTimeframe;
+  confirmRule?: ConfirmRule;
+  confirmCandles?: number;
+  rsiMax?: number | null;
+  dcaRequiresConfirmation?: boolean;
+  stopLossPercent?: number | null;
 };
 
 @Injectable()
@@ -95,6 +108,15 @@ export class StrategyService {
           maxStrategyExposureQuote: normalized.maxStrategyExposureQuote,
           maxOrderQuote: normalized.maxOrderQuote,
           maxDailyRealizedLossQuote: normalized.maxDailyRealizedLossQuote,
+          entryMode: normalized.entryMode,
+          dipPercent: normalized.dipPercent,
+          dipLookbackMinutes: normalized.dipLookbackMinutes,
+          confirmTimeframe: normalized.confirmTimeframe,
+          confirmRule: normalized.confirmRule,
+          confirmCandles: normalized.confirmCandles,
+          rsiMax: normalized.rsiMax,
+          dcaRequiresConfirmation: normalized.dcaRequiresConfirmation,
+          stopLossPercent: normalized.stopLossPercent,
         },
       });
     } catch (error) {
@@ -150,6 +172,15 @@ export class StrategyService {
       maxStrategyExposureQuote: input.maxStrategyExposureQuote !== undefined ? input.maxStrategyExposureQuote : existing.maxStrategyExposureQuote === null ? null : Number(existing.maxStrategyExposureQuote),
       maxOrderQuote: input.maxOrderQuote !== undefined ? input.maxOrderQuote : existing.maxOrderQuote === null ? null : Number(existing.maxOrderQuote),
       maxDailyRealizedLossQuote: input.maxDailyRealizedLossQuote !== undefined ? input.maxDailyRealizedLossQuote : existing.maxDailyRealizedLossQuote === null ? null : Number(existing.maxDailyRealizedLossQuote),
+      entryMode: input.entryMode ?? existing.entryMode,
+      dipPercent: input.dipPercent ?? Number(existing.dipPercent),
+      dipLookbackMinutes: input.dipLookbackMinutes ?? existing.dipLookbackMinutes,
+      confirmTimeframe: input.confirmTimeframe ?? (existing.confirmTimeframe as ConfirmTimeframe),
+      confirmRule: input.confirmRule ?? existing.confirmRule,
+      confirmCandles: input.confirmCandles ?? existing.confirmCandles,
+      rsiMax: input.rsiMax !== undefined ? input.rsiMax : existing.rsiMax === null ? null : Number(existing.rsiMax),
+      dcaRequiresConfirmation: input.dcaRequiresConfirmation ?? existing.dcaRequiresConfirmation,
+      stopLossPercent: input.stopLossPercent !== undefined ? input.stopLossPercent : existing.stopLossPercent === null ? null : Number(existing.stopLossPercent),
     });
     this.riskBudget.buildPlan(merged);
 
@@ -242,8 +273,18 @@ export class StrategyService {
       maxStrategyExposureQuote: input.maxStrategyExposureQuote == null ? null : Number(input.maxStrategyExposureQuote),
       maxOrderQuote: input.maxOrderQuote == null ? null : Number(input.maxOrderQuote),
       maxDailyRealizedLossQuote: input.maxDailyRealizedLossQuote == null ? null : Number(input.maxDailyRealizedLossQuote),
+      entryMode: input.entryMode ?? 'IMMEDIATE',
+      dipPercent: Number(input.dipPercent ?? 3),
+      dipLookbackMinutes: Number(input.dipLookbackMinutes ?? 1440),
+      confirmTimeframe: input.confirmTimeframe ?? '5m',
+      confirmRule: input.confirmRule ?? 'CLOSE_ABOVE_PREV_HIGH',
+      confirmCandles: Number(input.confirmCandles ?? 2),
+      rsiMax: input.rsiMax == null ? null : Number(input.rsiMax),
+      dcaRequiresConfirmation: input.dcaRequiresConfirmation ?? false,
+      stopLossPercent: input.stopLossPercent == null ? null : Number(input.stopLossPercent),
     } as const;
     this.validateConfigRanges(normalized);
+    this.validateEntryRules(normalized);
     this.recoveryStrategy.normalizeConfig(normalized);
     return normalized;
   }
@@ -275,6 +316,26 @@ export class StrategyService {
       if (value !== null && value !== undefined && (!Number.isFinite(value) || value <= 0)) {
         throw new BadRequestException(`${label} must be greater than zero when configured`);
       }
+    }
+  }
+
+  private validateEntryRules(input: {
+    entryMode: string; dipPercent: number; dipLookbackMinutes: number; confirmTimeframe: string; confirmRule: string;
+    confirmCandles: number; rsiMax: number | null; dcaRequiresConfirmation: unknown; stopLossPercent: number | null;
+  }) {
+    if (!(ENTRY_MODES as readonly string[]).includes(input.entryMode)) throw new BadRequestException(`Entry mode must be one of ${ENTRY_MODES.join(', ')}`);
+    if (!(CONFIRM_RULES as readonly string[]).includes(input.confirmRule)) throw new BadRequestException(`Confirmation rule must be one of ${CONFIRM_RULES.join(', ')}`);
+    if (!(CONFIRM_TIMEFRAMES as readonly string[]).includes(input.confirmTimeframe)) throw new BadRequestException(`Confirmation timeframe must be one of ${CONFIRM_TIMEFRAMES.join(', ')}`);
+    if (!(input.dipPercent >= 0.1 && input.dipPercent <= 50)) throw new BadRequestException('Dip size must be between 0.1% and 50%');
+    const maxLookback = timeframeMinutes(input.confirmTimeframe as ConfirmTimeframe) * (MAX_SIGNAL_CANDLES - 60);
+    if (!Number.isInteger(input.dipLookbackMinutes) || input.dipLookbackMinutes < 5 || input.dipLookbackMinutes > maxLookback) {
+      throw new BadRequestException(`Dip lookback must be a whole number of minutes between 5 and ${maxLookback} for ${input.confirmTimeframe} candles`);
+    }
+    if (!Number.isInteger(input.confirmCandles) || input.confirmCandles < 1 || input.confirmCandles > 5) throw new BadRequestException('Confirmation candles must be between 1 and 5');
+    if (input.rsiMax !== null && !(input.rsiMax >= 5 && input.rsiMax <= 60)) throw new BadRequestException('RSI threshold must be between 5 and 60 when set');
+    if (typeof input.dcaRequiresConfirmation !== 'boolean') throw new BadRequestException('DCA confirmation must be true or false');
+    if (input.stopLossPercent !== null && !(input.stopLossPercent >= 0.5 && input.stopLossPercent <= 90)) {
+      throw new BadRequestException('Stop-loss must be between 0.5% and 90% when set');
     }
   }
 }

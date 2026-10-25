@@ -4,9 +4,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetStrategyExecutionRouterService } from './testnet-strategy-execution-router.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
+import { EntrySignalService } from './entry-signal.service';
 
 export type TestnetStrategyRunnerAction =
   | 'OPEN'
+  | 'STOP_LOSS'
   | 'DCA'
   | 'INDEPENDENT_ENTRY'
   | 'INDEPENDENT_TAKE_PROFIT'
@@ -53,7 +55,57 @@ export class TestnetStrategyRunnerService {
     private readonly testnetExecution: TestnetStrategyExecutionRouterService,
     private readonly redisLock: RedisLockService,
     private readonly recoveryStrategy: RecoveryStrategyService,
+    private readonly entrySignal: EntrySignalService,
   ) {}
+
+  /**
+   * Sells the whole basket, one leg per tick (independent legs first, then the
+   * parent), once price falls stopLossPercent below the basket's average entry.
+   */
+  private async stopLossExit(userId: string, strategy: any, openPosition: any, price: number): Promise<TestnetStrategyRunnerResult | null> {
+    const percent = strategy.stopLossPercent === null || strategy.stopLossPercent === undefined ? null : Number(strategy.stopLossPercent);
+    if (!percent || !(percent > 0)) return null;
+    const basket = this.recoveryStrategy.basketTotals(openPosition, openPosition.subPositions ?? []);
+    if (!(basket.quantity > 0 && basket.averageEntryPrice > 0)) return null;
+    const stopPrice = basket.averageEntryPrice * (1 - percent / 100);
+    if (price > stopPrice) return null;
+
+    const leg = [...(openPosition.subPositions ?? [])]
+      .filter((item: any) => item.status === 'OPEN' && Number(item.quantity) > 0)
+      .sort((a: any, b: any) => Number(b.level) - Number(a.level))[0];
+    const quantity = leg ? Number(leg.quantity) : Number(openPosition.totalQuantity);
+    if (!(quantity > 0)) return null;
+
+    const execution = await this.testnetExecution.executeMarketOrder(userId, leg
+      ? {
+          strategyId: strategy.id, side: 'SELL', quantity, actionType: 'INDEPENDENT_EXIT', level: Number(leg.level),
+          actionKey: `strategy:${strategy.id}:position:${openPosition.id}:stop-loss:sub:${leg.id}`,
+          triggerPrice: stopPrice, allowRunningStrategy: true,
+        }
+      : {
+          strategyId: strategy.id, side: 'SELL', quantity, actionType: 'PARENT_EXIT',
+          actionKey: `strategy:${strategy.id}:position:${openPosition.id}:stop-loss:parent`,
+          triggerPrice: stopPrice, allowRunningStrategy: true,
+        });
+    return {
+      strategyId: strategy.id,
+      symbol: strategy.symbol,
+      action: execution.duplicate ? 'SKIP' : 'STOP_LOSS',
+      price,
+      quantity,
+      positionId: openPosition.id,
+      subPositionId: leg?.id,
+      message: execution.duplicate ? 'Stop-loss exit was already claimed' : `Stop-loss at ${percent}% below the average entry`,
+    };
+  }
+
+  /** When enabled, holds a DCA or recovery buy until a closed candle confirms the bounce. */
+  private async dcaConfirmationHold(strategy: any, environment: 'TESTNET' | 'LIVE', positionId: string, price: number): Promise<TestnetStrategyRunnerResult | null> {
+    if (!strategy.dcaRequiresConfirmation) return null;
+    const signal = await this.entrySignal.check(strategy, environment === 'LIVE' ? 'live' : 'testnet', false);
+    if (signal.ok) return null;
+    return { strategyId: strategy.id, symbol: strategy.symbol, action: 'HOLD', price, positionId, message: `DCA level reached. ${signal.reason}` };
+  }
 
   async runUserStrategies(userId: string, environment: 'TESTNET' | 'LIVE' = 'TESTNET'): Promise<TestnetStrategyRunnerResult[]> {
     const strategies = await this.prisma.tradingStrategy.findMany({
@@ -155,7 +207,17 @@ export class TestnetStrategyRunnerService {
       }
 
       const openPosition = strategy.positions[0];
+      if (openPosition) {
+        const stopLoss = await this.stopLossExit(userId, strategy, openPosition, quote.price);
+        if (stopLoss) return stopLoss;
+      }
       if (!openPosition) {
+        if (strategy.entryMode === 'DIP_CONFIRMATION') {
+          const signal = await this.entrySignal.check(strategy, environment === 'LIVE' ? 'live' : 'testnet', true);
+          if (!signal.ok) {
+            return { strategyId: strategy.id, symbol: strategy.symbol, action: 'HOLD', price: quote.price, message: signal.reason };
+          }
+        }
         const baseOrderQuote = Number(strategy.baseOrderQuote);
         const riskBudgetQuote = Number(strategy.riskBudgetQuote);
         const quoteAmount = Math.min(baseOrderQuote, riskBudgetQuote);
@@ -164,7 +226,9 @@ export class TestnetStrategyRunnerService {
         }
 
         const quantity = quoteAmount / quote.price;
-        const actionKey = `strategy:${strategy.id}:initial-entry`;
+        // One key per cycle: a fixed key would make every cycle after the first a "duplicate".
+        const cycle = (await this.prisma.tradingPosition.count({ where: { strategyId: strategy.id } })) + 1;
+        const actionKey = `strategy:${strategy.id}:initial-entry:${cycle}`;
         const execution = await this.testnetExecution.executeMarketOrder(userId, {
           strategyId: strategy.id,
           side: 'BUY',
@@ -257,6 +321,8 @@ export class TestnetStrategyRunnerService {
           remainingRiskBudget: remainingBudget,
         });
         if (recoveryLeg && recoveryLeg.quoteAmount > 0 && quote.price <= recoveryLeg.triggerPrice) {
+          const hold = await this.dcaConfirmationHold(strategy, environment, openPosition.id, quote.price);
+          if (hold) return hold;
           const quantity = recoveryLeg.quoteAmount / quote.price;
           const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:recovery-dca:${recoveryLeg.recoveryLevel}`;
           const execution = await this.testnetExecution.executeMarketOrder(userId, {
@@ -377,6 +443,8 @@ export class TestnetStrategyRunnerService {
           remainingRiskBudget: Math.max(Number(strategy.riskBudgetQuote) - basket.costQuote, 0),
         });
         if (recoveryLeg && recoveryLeg.quoteAmount > 0 && quote.price <= recoveryLeg.triggerPrice) {
+          const hold = await this.dcaConfirmationHold(strategy, environment, openPosition.id, quote.price);
+          if (hold) return hold;
           const quantity = recoveryLeg.quoteAmount / quote.price;
           const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:recovery-dca:${recoveryLeg.recoveryLevel}`;
           const execution = await this.testnetExecution.executeMarketOrder(userId, {
@@ -458,6 +526,8 @@ export class TestnetStrategyRunnerService {
         };
       }
 
+      const hold = await this.dcaConfirmationHold(strategy, environment, openPosition.id, quote.price);
+      if (hold) return hold;
       const quantity = quoteAmount / quote.price;
       const independentFromLevel = Number(strategy.independentFromLevel);
       const independent = nextLevel >= independentFromLevel;

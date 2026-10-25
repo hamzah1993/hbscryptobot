@@ -1,0 +1,17 @@
+-- CreateEnum
+CREATE TYPE "EntryMode" AS ENUM ('IMMEDIATE', 'DIP_CONFIRMATION');
+
+-- CreateEnum
+CREATE TYPE "EntryConfirmRule" AS ENUM ('GREEN_CLOSE', 'CLOSE_ABOVE_PREV_HIGH', 'CONSECUTIVE_GREEN');
+
+-- AlterTable
+ALTER TABLE "TradingStrategy" ADD COLUMN     "confirmCandles" INTEGER NOT NULL DEFAULT 2,
+ADD COLUMN     "confirmRule" "EntryConfirmRule" NOT NULL DEFAULT 'CLOSE_ABOVE_PREV_HIGH',
+ADD COLUMN     "confirmTimeframe" TEXT NOT NULL DEFAULT '5m',
+ADD COLUMN     "dcaRequiresConfirmation" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "dipLookbackMinutes" INTEGER NOT NULL DEFAULT 1440,
+ADD COLUMN     "dipPercent" DECIMAL(10,4) NOT NULL DEFAULT 3,
+ADD COLUMN     "entryMode" "EntryMode" NOT NULL DEFAULT 'IMMEDIATE',
+ADD COLUMN     "rsiMax" DECIMAL(6,2),
+ADD COLUMN     "stopLossPercent" DECIMAL(10,4);
+

@@ -4,6 +4,7 @@ import type { BinanceKlineInterval } from '../exchange/binance/binance.service';
 import { BacktestDcaSimulatorService } from './backtest-dca-simulator.service';
 import { BacktestExecutionService } from './backtest-execution.service';
 import { BacktestRunService } from './backtest-run.service';
+import { EntrySignalService } from './entry-signal.service';
 import { BinanceHistoricalCandleImporterService } from './binance-historical-candle-importer.service';
 import { HistoricalCandleQueryService } from './historical-candle-query.service';
 
@@ -19,6 +20,7 @@ export class BacktestCandleRunnerService {
     private readonly candles: HistoricalCandleQueryService,
     private readonly simulator: BacktestDcaSimulatorService,
     private readonly binanceImporter: BinanceHistoricalCandleImporterService,
+    private readonly entrySignal: EntrySignalService,
   ) {}
 
   async run(userId: string, runId: string) {
@@ -53,6 +55,13 @@ export class BacktestCandleRunnerService {
       const independentFromLevel = strategyMode === BacktestStrategyMode.DCA_SUB_POSITIONS
         ? run.strategy.independentFromLevel
         : maxEntries + 1;
+      const dipEntry = run.strategy.entryMode === 'DIP_CONFIRMATION';
+      const dcaRequiresConfirmation = run.strategy.dcaRequiresConfirmation;
+      if ((dipEntry || dcaRequiresConfirmation) && run.interval !== run.strategy.confirmTimeframe) {
+        throw new BadRequestException(
+          `This strategy confirms entries on ${run.strategy.confirmTimeframe} candles; run the backtest on the ${run.strategy.confirmTimeframe} interval`,
+        );
+      }
       const result = this.simulator.simulate({
         initialCapital: run.initialCapital,
         candles,
@@ -74,6 +83,10 @@ export class BacktestCandleRunnerService {
         recoveryMultipliers: run.strategy.recoveryMultipliers as number[],
         recoveryTakeProfitPercent: run.strategy.recoveryTakeProfitPercent,
         continuousCycles: true,
+        ...(dipEntry || dcaRequiresConfirmation
+          ? { signalConfig: this.entrySignal.configFrom(run.strategy), dipEntry, dcaRequiresConfirmation }
+          : {}),
+        ...(run.strategy.stopLossPercent == null ? {} : { stopLossPercent: Number(run.strategy.stopLossPercent) }),
       });
 
       return this.execution.complete(run.id, result);

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BinanceModule } from '../exchange/binance/binance.module';
 import { AdminModule } from '../admin/admin.module';
 import { BillingModule } from '../billing/billing.module';
+import { EntrySignalService } from './entry-signal.service';
 import { MarketDataModule } from '../market/market-data.module';
 import { BacktestBuyHoldSimulatorService } from './backtest-buy-hold-simulator.service';
 import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
@@ -93,6 +94,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetActionRetrySchedulerService,
     TestnetActionTimelineService,
     TestnetEmergencyStopService,
+    EntrySignalService,
     TestnetStrategyRunnerService,
     TestnetStrategyExecutionRouterService,
     TestnetStrategySchedulerService,
@@ -122,6 +124,7 @@ import { TradingEngineService } from './trading-engine.service';
     TestnetStrategyExecutionRouterService,
     TestnetRunnerHealthService,
     LiveTradingSafetyService,
+    EntrySignalService,
   ],
 })
 export class TradingEngineModule {}

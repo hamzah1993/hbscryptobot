@@ -29,15 +29,21 @@ Users only see a package's name, description and amount, plus its combined statu
 
 ### 1. Package strategies
 
-Create the predefined bots under **Package strategies** in the Admin Center. Each has a name, a symbol such as `BTCUSDT`, and bot settings (JSON). Capital, exchange and environment fields are rejected, and the base order must be at least 5 USDT. Example:
+Create the predefined bots under **Package strategies** in the Admin Center. Each has a name, a symbol such as `BTCUSDT`, and a settings form grouped into Entry, Orders, Exit, Sub-positions, Recovery and Limits. Every field shows its help text and allowed range; fields that do not apply are hidden. The form is generated from the field list in `backend/src/packages/package-template.ts`, so a new setting added there appears in the panel automatically.
 
-```json
-{ "baseOrderQuote": 10, "maxDcaOrders": 3, "dcaStepPercent": 3, "dcaMultiplier": 1,
-  "dcaMultipliers": [1, 1.5, 2], "takeProfitPercent": 1.5, "independentFromLevel": 3,
-  "maxDailyRealizedLossQuote": 10 }
-```
+**Entry rules.** With *Entry mode* set to *Wait for dip + bounce candle*, a new cycle opens only when:
 
-Backtest settings before using them. A strategy cannot be deactivated while an active package uses it, and an edit is refused if any package using it could no longer fund it.
+1. the price has dropped at least *Dip size* % below the highest price of the *Recent high window*, and
+2. the latest **closed** candle(s) on the *Candle timeframe* confirm a bounce: one green candle, a green candle that closes above the previous candle's high (recommended), or several green candles in a row;
+3. optionally, RSI(14) dipped to the *RSI filter* value or below just before the bounce.
+
+*DCA waits for bounce candle* applies the same confirmation (without the dip) to DCA and recovery buys.
+
+**Exit.** *Take profit* sells everything at that % above the average buy price. The optional *Stop-loss* sells the whole basket once the price is that % below the average buy price; leave it empty to hold and DCA instead.
+
+**Backtest before publishing.** *Backtest these settings* runs the form's current values, saved or not, on Binance history for the chosen days and capital (0.1% fee per buy and sell). It shows return, drawdown, cycles, stop-losses and profitable exits next to the same settings without the entry rules, so you can see whether the rules help. Cooldown and the daily loss stop are not simulated, and results on past data do not guarantee future returns.
+
+A strategy cannot be deactivated while an active package uses it, and an edit is refused if any package using it could no longer fund it.
 
 ### 2. Packages
 

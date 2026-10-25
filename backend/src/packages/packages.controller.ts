@@ -4,9 +4,11 @@ import { AdminGuard } from '../admin/admin.guard';
 import { AdminSessionGuard } from '../admin/admin-session.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
-  CreatePackageStrategyTemplateDto, CreateTradingPackageDto, UpdatePackageStrategyTemplateDto, UpdateTradingPackageDto,
+  CreatePackageStrategyTemplateDto, CreateTradingPackageDto, StrategyBacktestDto, UpdatePackageStrategyTemplateDto, UpdateTradingPackageDto,
 } from './dto/trading-package.dto';
+import { STRATEGY_FIELDS } from './package-template';
 import { PackagesService } from './packages.service';
+import { StrategyBacktestService } from './strategy-backtest.service';
 
 type AuthenticatedRequest = Request & { user: { sub: string } };
 
@@ -49,11 +51,26 @@ export class PackagesController {
 @Controller('super/admin/control')
 @UseGuards(JwtAuthGuard, AdminGuard, AdminSessionGuard)
 export class AdminPackagesController {
-  constructor(private readonly packages: PackagesService) {}
+  constructor(
+    private readonly packages: PackagesService,
+    private readonly backtests: StrategyBacktestService,
+  ) {}
 
   @Get('package-strategies')
   listTemplates() {
     return this.packages.adminListTemplates();
+  }
+
+  /** Field definitions the admin form is rendered from. */
+  @Get('package-strategies/fields')
+  fields() {
+    return STRATEGY_FIELDS;
+  }
+
+  /** Backtests saved or unsaved strategy settings on Binance history. */
+  @Post('package-strategies/backtest')
+  backtest(@Body() body: StrategyBacktestDto) {
+    return this.backtests.run(body);
   }
 
   @Post('package-strategies')

@@ -131,6 +131,17 @@ enum PackageSubscriptionStatus {
   CANCELLED
 }
 
+enum EntryMode {
+  IMMEDIATE
+  DIP_CONFIRMATION
+}
+
+enum EntryConfirmRule {
+  GREEN_CLOSE
+  CLOSE_ABOVE_PREV_HIGH
+  CONSECUTIVE_GREEN
+}
+
 enum BalanceEntryType {
   DEPOSIT
   MEMBERSHIP_FEE
@@ -467,6 +478,19 @@ model TradingStrategy {
   maxOpenParentPositions       Int                   @default(1)
   maxOpenIndependentPositions  Int                   @default(20)
   maxIndependentExposureQuote  Decimal?              @db.Decimal(28, 8)
+  /// IMMEDIATE buys at once; DIP_CONFIRMATION waits for a dip and a bounce candle (see entry-signal.ts).
+  entryMode                    EntryMode             @default(IMMEDIATE)
+  dipPercent                   Decimal               @default(3) @db.Decimal(10, 4)
+  dipLookbackMinutes           Int                   @default(1440)
+  confirmTimeframe             String                @default("5m")
+  confirmRule                  EntryConfirmRule      @default(CLOSE_ABOVE_PREV_HIGH)
+  confirmCandles               Int                   @default(2)
+  /// When set, RSI(14) must have dipped to this value or below before the bounce.
+  rsiMax                       Decimal?              @db.Decimal(6, 2)
+  /// DCA and recovery buys also wait for a bounce candle.
+  dcaRequiresConfirmation      Boolean               @default(false)
+  /// When set, the whole basket is sold once price falls this far below its average entry.
+  stopLossPercent              Decimal?              @db.Decimal(10, 4)
   positions                    TradingPosition[]
   actions                      StrategyAction[]
   backtestRuns                 BacktestRun[]

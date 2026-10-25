@@ -7,6 +7,24 @@ import {
 const SYMBOL_PATTERN = /^[A-Za-z0-9/_-]{5,20}$/;
 const SYMBOL_MESSAGE = { message: 'symbol must be a Binance pair such as BTCUSDT' };
 
+export class StrategyBacktestDto {
+  @IsString()
+  @Matches(SYMBOL_PATTERN, SYMBOL_MESSAGE)
+  symbol!: string;
+
+  @IsObject()
+  strategyTemplate!: Record<string, unknown>;
+
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  days!: number;
+
+  @IsNumber()
+  @Min(10)
+  capitalQuote!: number;
+}
+
 export class CreatePackageStrategyTemplateDto {
   @IsString()
   @Length(2, 60)

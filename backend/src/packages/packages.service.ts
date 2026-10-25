@@ -223,6 +223,7 @@ export class PackagesService {
       active: dto.active ?? true,
     };
     this.assertBaseOrderMinimum(data.strategyTemplate.baseOrderQuote);
+    this.validateSettingsAlone(data);
     const created = await this.writeUniquely('strategy', () => this.prisma.packageStrategyTemplate.create({ data }));
     await this.audit(adminId, 'PACKAGE_STRATEGY_CREATED', created.id, { name: created.name, symbol: created.symbol });
     return created;
@@ -243,6 +244,7 @@ export class PackagesService {
       active: dto.active ?? existing.active,
     };
     this.assertBaseOrderMinimum(data.strategyTemplate.baseOrderQuote);
+    this.validateSettingsAlone(data);
 
     const usedByActivePackage = existing.packages.filter((item) => item.package.active);
     if (!data.active && usedByActivePackage.length) {
@@ -381,6 +383,11 @@ export class PackagesService {
       }
       this.strategies.validateInput(input);
     }
+  }
+
+  /** Range-checks strategy settings on save; whether a package's share can fund them is checked on assignment. */
+  private validateSettingsAlone(data: { symbol: string; strategyTemplate: unknown }) {
+    this.strategies.validateInput(packageStrategyInput(data, 1_000_000, 'validation'));
   }
 
   private assertBaseOrderMinimum(baseOrderQuote: number) {
