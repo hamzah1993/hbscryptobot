@@ -17,17 +17,24 @@ export type AdminHealth = {
 export type AdminAuditEvent = { id: string; action: string; target: string | null; metadata?: Record<string, unknown> | null; createdAt: string; admin: { id: string; email: string; fullName: string } };
 export type SystemHealthIncident = { id: string; component: string; active: boolean; severity: NotificationSeverity; message: string; consecutiveFailures: number; openedAt: string; resolvedAt: string | null; lastCheckedAt: string; lastAlertedAt: string | null; updatedAt: string };
 export type AdminMonitoringStatus = { enabled: boolean; intervalSeconds: number; lastCheckedAt: string | null; activeIncidents: number; incidents: SystemHealthIncident[]; heartbeats: { startedAt: string; liveStrategyScheduler: string | null; liveOrderSync: string | null; liveRetryScheduler: string | null } };
-export type PackageStrategyTemplate = Record<string, number | boolean | number[]>;
-export type TradingPackage = { id: string; name: string; description: string | null; amountQuote: number; symbol: string; strategyTemplate: PackageStrategyTemplate };
-export type AdminTradingPackage = TradingPackage & { active: boolean; sortOrder: number; activeSubscriptions: number; activeCapitalQuote: number; createdAt: string; updatedAt: string };
-export type TradingPackageInput = { name: string; description?: string; amountQuote: number; symbol: string; strategyTemplate: PackageStrategyTemplate; active?: boolean; sortOrder?: number };
+export type PackageStrategySettings = Record<string, number | boolean | number[]>;
+export type PackageBotStatus = 'RUNNING' | 'PARTIAL' | 'STOPPED';
+export type TradingPackage = { id: string; name: string; description: string | null; amountQuote: number };
+export type AdminPackageStrategy = { id: string; name: string; symbol: string; strategyTemplate: PackageStrategySettings; active: boolean; packages: Array<{ id: string; name: string }>; createdAt: string; updatedAt: string };
+export type AdminPackageStrategyInput = { name: string; symbol: string; strategyTemplate: PackageStrategySettings; active?: boolean };
+export type PackageAllocation = { templateId: string; allocationPercent: number };
+export type AdminTradingPackage = TradingPackage & {
+  active: boolean; sortOrder: number; activeSubscriptions: number; activeCapitalQuote: number; createdAt: string; updatedAt: string;
+  strategies: Array<PackageAllocation & { name: string; symbol: string; active: boolean; budgetQuote: number }>;
+};
+export type TradingPackageInput = { name: string; description?: string; amountQuote: number; strategies: PackageAllocation[]; active?: boolean; sortOrder?: number };
 export type PackageSubscription = {
-  id: string; packageId: string; strategyId: string | null; status: 'ACTIVE' | 'CANCELLED'; amountQuote: number; startedAt: string; cancelledAt: string | null;
-  package: { id: string; name: string; symbol: string };
-  strategy: { id: string; name: string; status: StrategyStatus } | null;
+  id: string; packageId: string; status: 'ACTIVE' | 'CANCELLED'; amountQuote: number; startedAt: string; cancelledAt: string | null;
+  package: { id: string; name: string };
+  botStatus: PackageBotStatus;
   performance: { realizedPnlQuote: number; realizedReturnPercent: number; openPositions: number; openPositionCostQuote: number; closedPositions: number };
 };
-export type PackageSubscribeResult = { subscription: { id: string }; strategy: { id: string; name: string; status: StrategyStatus }; capitalCeilingQuote: number; confirmationRequired: boolean };
+export type PackageSubscribeResult = { subscription: { id: string }; botStatus: PackageBotStatus; capitalCeilingQuote: number; confirmationRequired: boolean };
 
 export type TradingOrder = {
   id: string;
@@ -830,8 +837,16 @@ export const api = {
   listPackageSubscriptions: (token: string) => request<PackageSubscription[]>('/packages/subscriptions', { headers: authHeaders(token) }),
   subscribeToPackage: (token: string, packageId: string) =>
     request<PackageSubscribeResult>(`/packages/${encodeURIComponent(packageId)}/subscribe`, { method: 'POST', headers: authHeaders(token) }),
+  setPackageBotStatus: (token: string, subscriptionId: string, action: 'start' | 'stop') =>
+    request<{ id: string; botStatus: PackageBotStatus }>(`/packages/subscriptions/${encodeURIComponent(subscriptionId)}/${action}`, { method: 'POST', headers: authHeaders(token) }),
   cancelPackageSubscription: (token: string, subscriptionId: string) =>
-    request<PackageSubscription>(`/packages/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, { method: 'POST', headers: authHeaders(token) }),
+    request<{ id: string; status: 'CANCELLED' }>(`/packages/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, { method: 'POST', headers: authHeaders(token) }),
+  listAdminPackageStrategies: (token: string, adminSessionToken: string) =>
+    request<AdminPackageStrategy[]>('/super/admin/control/package-strategies', { headers: adminHeaders(token, adminSessionToken) }),
+  createAdminPackageStrategy: (token: string, adminSessionToken: string, payload: AdminPackageStrategyInput) =>
+    request<AdminPackageStrategy>('/super/admin/control/package-strategies', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
+  updateAdminPackageStrategy: (token: string, adminSessionToken: string, templateId: string, payload: Partial<AdminPackageStrategyInput>) =>
+    request<AdminPackageStrategy>(`/super/admin/control/package-strategies/${encodeURIComponent(templateId)}`, { method: 'PATCH', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   listAdminPackages: (token: string, adminSessionToken: string) =>
     request<AdminTradingPackage[]>('/super/admin/control/packages', { headers: adminHeaders(token, adminSessionToken) }),
   createAdminPackage: (token: string, adminSessionToken: string, payload: TradingPackageInput) =>

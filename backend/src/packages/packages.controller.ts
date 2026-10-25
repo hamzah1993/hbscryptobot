@@ -3,7 +3,9 @@ import type { Request } from 'express';
 import { AdminGuard } from '../admin/admin.guard';
 import { AdminSessionGuard } from '../admin/admin-session.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CreateTradingPackageDto, UpdateTradingPackageDto } from './dto/trading-package.dto';
+import {
+  CreatePackageStrategyTemplateDto, CreateTradingPackageDto, UpdatePackageStrategyTemplateDto, UpdateTradingPackageDto,
+} from './dto/trading-package.dto';
 import { PackagesService } from './packages.service';
 
 type AuthenticatedRequest = Request & { user: { sub: string } };
@@ -28,28 +30,53 @@ export class PackagesController {
     return this.packages.subscribe(request.user.sub, packageId);
   }
 
+  @Post('subscriptions/:subscriptionId/start')
+  start(@Req() request: AuthenticatedRequest, @Param('subscriptionId') subscriptionId: string) {
+    return this.packages.setBotStatus(request.user.sub, subscriptionId, 'RUNNING');
+  }
+
+  @Post('subscriptions/:subscriptionId/stop')
+  stop(@Req() request: AuthenticatedRequest, @Param('subscriptionId') subscriptionId: string) {
+    return this.packages.setBotStatus(request.user.sub, subscriptionId, 'STOPPED');
+  }
+
   @Post('subscriptions/:subscriptionId/cancel')
   cancel(@Req() request: AuthenticatedRequest, @Param('subscriptionId') subscriptionId: string) {
     return this.packages.cancel(request.user.sub, subscriptionId);
   }
 }
 
-@Controller('super/admin/control/packages')
+@Controller('super/admin/control')
 @UseGuards(JwtAuthGuard, AdminGuard, AdminSessionGuard)
 export class AdminPackagesController {
   constructor(private readonly packages: PackagesService) {}
 
-  @Get()
+  @Get('package-strategies')
+  listTemplates() {
+    return this.packages.adminListTemplates();
+  }
+
+  @Post('package-strategies')
+  createTemplate(@Req() request: AuthenticatedRequest, @Body() body: CreatePackageStrategyTemplateDto) {
+    return this.packages.adminCreateTemplate(request.user.sub, body);
+  }
+
+  @Patch('package-strategies/:templateId')
+  updateTemplate(@Req() request: AuthenticatedRequest, @Param('templateId') templateId: string, @Body() body: UpdatePackageStrategyTemplateDto) {
+    return this.packages.adminUpdateTemplate(request.user.sub, templateId, body);
+  }
+
+  @Get('packages')
   list() {
     return this.packages.adminList();
   }
 
-  @Post()
+  @Post('packages')
   create(@Req() request: AuthenticatedRequest, @Body() body: CreateTradingPackageDto) {
     return this.packages.adminCreate(request.user.sub, body);
   }
 
-  @Patch(':packageId')
+  @Patch('packages/:packageId')
   update(@Req() request: AuthenticatedRequest, @Param('packageId') packageId: string, @Body() body: UpdateTradingPackageDto) {
     return this.packages.adminUpdate(request.user.sub, packageId, body);
   }

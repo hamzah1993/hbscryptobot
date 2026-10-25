@@ -1,4 +1,58 @@
-import { IsBoolean, IsInt, IsNumber, IsObject, IsOptional, IsPositive, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsInt, IsNumber, IsObject, IsOptional, IsPositive, IsString, IsUUID,
+  Length, Matches, Max, MaxLength, Min, ValidateNested,
+} from 'class-validator';
+
+const SYMBOL_PATTERN = /^[A-Za-z0-9/_-]{5,20}$/;
+const SYMBOL_MESSAGE = { message: 'symbol must be a Binance pair such as BTCUSDT' };
+
+export class CreatePackageStrategyTemplateDto {
+  @IsString()
+  @Length(2, 60)
+  name!: string;
+
+  @IsString()
+  @Matches(SYMBOL_PATTERN, SYMBOL_MESSAGE)
+  symbol!: string;
+
+  @IsObject()
+  strategyTemplate!: Record<string, unknown>;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class UpdatePackageStrategyTemplateDto {
+  @IsOptional()
+  @IsString()
+  @Length(2, 60)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(SYMBOL_PATTERN, SYMBOL_MESSAGE)
+  symbol?: string;
+
+  @IsOptional()
+  @IsObject()
+  strategyTemplate?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class PackageStrategyAllocationDto {
+  @IsUUID()
+  templateId!: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(100)
+  allocationPercent!: number;
+}
 
 export class CreateTradingPackageDto {
   @IsString()
@@ -14,12 +68,12 @@ export class CreateTradingPackageDto {
   @IsPositive()
   amountQuote!: number;
 
-  @IsString()
-  @Matches(/^[A-Za-z0-9]{5,20}$/, { message: 'symbol must be a Binance pair such as BTCUSDT' })
-  symbol!: string;
-
-  @IsObject()
-  strategyTemplate!: Record<string, unknown>;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => PackageStrategyAllocationDto)
+  strategies!: PackageStrategyAllocationDto[];
 
   @IsOptional()
   @IsBoolean()
@@ -47,13 +101,12 @@ export class UpdateTradingPackageDto {
   amountQuote?: number;
 
   @IsOptional()
-  @IsString()
-  @Matches(/^[A-Za-z0-9]{5,20}$/, { message: 'symbol must be a Binance pair such as BTCUSDT' })
-  symbol?: string;
-
-  @IsOptional()
-  @IsObject()
-  strategyTemplate?: Record<string, unknown>;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => PackageStrategyAllocationDto)
+  strategies?: PackageStrategyAllocationDto[];
 
   @IsOptional()
   @IsBoolean()

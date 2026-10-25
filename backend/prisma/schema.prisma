@@ -156,30 +156,53 @@ model User {
   updatedAt           DateTime                  @updatedAt
 }
 
-/// Admin-defined managed trading package. Subscribing creates a Binance LIVE
-/// strategy on the user's own exchange account from `strategyTemplate`, with
-/// a risk budget equal to `amountQuote`. Funds never leave the user's account.
-model TradingPackage {
-  id               String                @id @default(uuid())
-  name             String                @unique
-  description      String?
-  amountQuote      Decimal               @db.Decimal(28, 8)
+/// Admin-only library of predefined bot settings. Never exposed to users.
+model PackageStrategyTemplate {
+  id               String                   @id @default(uuid())
+  name             String                   @unique
   symbol           String
   strategyTemplate Json
-  active           Boolean               @default(true)
-  sortOrder        Int                   @default(0)
-  subscriptions    PackageSubscription[]
-  createdAt        DateTime              @default(now())
-  updatedAt        DateTime              @updatedAt
+  active           Boolean                  @default(true)
+  packages         TradingPackageStrategy[]
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+}
+
+/// Admin-defined managed trading package. Subscribing creates one Binance LIVE
+/// strategy per assigned template on the user's own exchange account, each with
+/// a risk budget of `amountQuote * allocationPercent / 100`. Funds never leave
+/// the user's account.
+model TradingPackage {
+  id            String                   @id @default(uuid())
+  name          String                   @unique
+  description   String?
+  amountQuote   Decimal                  @db.Decimal(28, 8)
+  active        Boolean                  @default(true)
+  sortOrder     Int                      @default(0)
+  strategies    TradingPackageStrategy[]
+  subscriptions PackageSubscription[]
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
 
   @@index([active, sortOrder])
+}
+
+model TradingPackageStrategy {
+  id                String                  @id @default(uuid())
+  packageId         String
+  templateId        String
+  allocationPercent Decimal                 @db.Decimal(5, 2)
+  package           TradingPackage          @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  template          PackageStrategyTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@unique([packageId, templateId])
+  @@index([templateId])
 }
 
 model PackageSubscription {
   id          String                    @id @default(uuid())
   userId      String
   packageId   String
-  strategyId  String?                   @unique
   status      PackageSubscriptionStatus @default(ACTIVE)
   /// Package amount at subscription time; later package edits do not change it.
   amountQuote Decimal                   @db.Decimal(28, 8)
@@ -187,7 +210,7 @@ model PackageSubscription {
   cancelledAt DateTime?
   user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   package     TradingPackage            @relation(fields: [packageId], references: [id], onDelete: Restrict)
-  strategy    TradingStrategy?          @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategies  TradingStrategy[]
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
 
@@ -358,13 +381,15 @@ model TradingStrategy {
   positions                    TradingPosition[]
   actions                      StrategyAction[]
   backtestRuns                 BacktestRun[]
-  packageSubscription          PackageSubscription?
+  packageSubscriptionId        String?
+  packageSubscription          PackageSubscription?  @relation(fields: [packageSubscriptionId], references: [id], onDelete: SetNull)
   user                         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt                    DateTime              @default(now())
   updatedAt                    DateTime              @updatedAt
 
   @@index([userId, status])
   @@index([userId, mode, status])
+  @@index([packageSubscriptionId])
   @@unique([userId, name])
 }
 

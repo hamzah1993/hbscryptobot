@@ -54,13 +54,19 @@ export class StrategyService {
   }
 
   /** Same as create(), using the given client so callers can create inside their own transaction. */
-  async createWithClient(client: Prisma.TransactionClient, userId: string, input: StrategyInput) {
+  async createWithClient(
+    client: Prisma.TransactionClient,
+    userId: string,
+    input: StrategyInput,
+    options: { packageSubscriptionId?: string } = {},
+  ) {
     const normalized = this.validateInput(input);
 
     try {
       return await client.tradingStrategy.create({
         data: {
           userId,
+          packageSubscriptionId: options.packageSubscriptionId ?? null,
           name: normalized.name,
           symbol: normalized.symbol,
           exchange: normalized.exchange,
@@ -96,9 +102,10 @@ export class StrategyService {
     }
   }
 
+  /** Trading package bots are managed from the Packages page and their settings are admin-only, so they are never listed here. */
   list(userId: string) {
     return this.prisma.tradingStrategy.findMany({
-      where: { userId },
+      where: { userId, packageSubscriptionId: null },
       include: {
         positions: {
           where: { status: 'OPEN' },
@@ -159,6 +166,7 @@ export class StrategyService {
   async setStatus(userId: string, strategyId: string, status: 'RUNNING' | 'PAUSED' | 'STOPPED') {
     const existing = await this.prisma.tradingStrategy.findFirst({ where: { id: strategyId, userId } });
     if (!existing) throw new NotFoundException('Strategy not found');
+    await this.assertNotPackageManaged(strategyId, 'started or stopped here');
     return this.prisma.tradingStrategy.update({ where: { id: strategyId }, data: { status } });
   }
 
@@ -174,13 +182,14 @@ export class StrategyService {
   }
 
   /** Package strategies keep the admin-defined settings for as long as the subscription is active. */
-  private async assertNotPackageManaged(strategyId: string, verb: 'edited' | 'deleted') {
-    const subscription = await this.prisma.packageSubscription.findFirst({
-      where: { strategyId, status: 'ACTIVE' },
+  /** Package bots keep admin-defined settings for life, including after the subscription is cancelled. */
+  private async assertNotPackageManaged(strategyId: string, verb: 'edited' | 'deleted' | 'started or stopped here') {
+    const managed = await this.prisma.tradingStrategy.findFirst({
+      where: { id: strategyId, packageSubscriptionId: { not: null } },
       select: { id: true },
     });
-    if (subscription) {
-      throw new BadRequestException(`This bot is managed by a trading package and cannot be ${verb}. Cancel the package subscription first.`);
+    if (managed) {
+      throw new BadRequestException(`This bot is managed by a trading package and cannot be ${verb}. Use the Packages page instead.`);
     }
   }
 

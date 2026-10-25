@@ -84,19 +84,28 @@ export function sanitizePackageTemplate(raw: unknown): PackageStrategyTemplate {
   return template as PackageStrategyTemplate;
 }
 
+/** Binance Spot's minimum order value for USDT pairs is 5 USDT. */
+export const MIN_PACKAGE_BASE_ORDER_QUOTE = 5;
+
+/** A package bot's share of the package amount, rounded down to 8 decimals so shares never sum above the amount. */
+export function allocatedBudget(amountQuote: number, allocationPercent: number) {
+  return Math.floor(((amountQuote * allocationPercent) / 100) * 1e8) / 1e8;
+}
+
+/** Builds the Binance LIVE bot for one package strategy; its budget and exposure limit both equal its allocation. */
 export function packageStrategyInput(
-  pkg: { symbol: string; amountQuote: unknown; strategyTemplate: unknown },
+  template: { symbol: string; strategyTemplate: unknown },
+  budgetQuote: number,
   name: string,
 ): StrategyInput {
-  const amount = Number(pkg.amountQuote);
   return {
-    ...sanitizePackageTemplate(pkg.strategyTemplate),
+    ...sanitizePackageTemplate(template.strategyTemplate),
     name,
-    symbol: pkg.symbol,
+    symbol: template.symbol,
     exchange: 'BINANCE',
     environment: 'LIVE',
     paperTrading: false,
-    riskBudgetQuote: amount,
-    maxStrategyExposureQuote: amount,
+    riskBudgetQuote: budgetQuote,
+    maxStrategyExposureQuote: budgetQuote,
   };
 }

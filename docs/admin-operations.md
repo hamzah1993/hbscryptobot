@@ -23,13 +23,13 @@ The command increments `authVersion`, invalidating existing sessions. Sign in ag
 
 ## Trading packages
 
-Packages are fixed-amount, admin-defined Binance LIVE bots that users subscribe to. Funds never leave the subscriber's own Binance account: subscribing creates a strategy on that account through the user's own API key, so each user's profit and loss is their own strategy's result.
+Packages are fixed-amount managed plans that users subscribe to. Funds never leave the subscriber's own Binance account: subscribing creates Binance LIVE bots on that account through the user's own API key, so each user's profit and loss is their own bots' result.
 
-Create packages under **Trading packages** in the Admin Center. Each package has:
+Users only see a package's name, description and amount, plus its combined status and profit. They never see which strategies a package uses or their settings. Users who prefer their own settings create their own bots from the **Bots** page as before.
 
-- an **amount** in USDT, which becomes the strategy's risk budget and its exposure limit;
-- a **symbol**, such as `BTCUSDT`;
-- a **strategy template** (JSON) with the DCA and take-profit settings. Capital, exchange and environment fields are rejected; the base order must be at least 5 USDT and no larger than the amount. Example:
+### 1. Package strategies
+
+Create the predefined bots under **Package strategies** in the Admin Center. Each has a name, a symbol such as `BTCUSDT`, and bot settings (JSON). Capital, exchange and environment fields are rejected, and the base order must be at least 5 USDT. Example:
 
 ```json
 { "baseOrderQuote": 10, "maxDcaOrders": 3, "dcaStepPercent": 3, "dcaMultiplier": 1,
@@ -37,16 +37,24 @@ Create packages under **Trading packages** in the Admin Center. Each package has
   "maxDailyRealizedLossQuote": 10 }
 ```
 
-Backtest a template before publishing it. Edits apply to new subscriptions only; existing package bots keep their original settings. Hide a package by unticking **Visible to users** instead of deleting it.
+Backtest settings before using them. A strategy cannot be deactivated while an active package uses it, and an edit is refused if any package using it could no longer fund it.
 
-User flow:
+### 2. Packages
+
+Create packages under **Trading packages**. Each has a USDT amount and one or more strategies with a percentage of the amount; percentages must add up to 100%. For example, a 500 USDT package at BTC 60% / ETH 40% creates a 300 USDT BTC bot and a 200 USDT ETH bot. Each strategy's share must cover its base order.
+
+Package and strategy edits apply to new subscriptions only; existing bots keep the settings they were created with. Hide a package by unticking **Visible to users** instead of deleting it.
+
+### User flow
 
 1. Connect a Binance LIVE API key with trading enabled and **withdrawals disabled**.
-2. Subscribe on the **Packages** page. The bot is created `STOPPED`. If the user-wide LIVE capital ceiling is below the total of their active packages, it is raised to that total, which clears the LIVE confirmation.
-3. Confirm LIVE trading on the LIVE overview, then press **Start**.
-4. To leave, stop the bot, close any open position, then cancel. While a subscription is active the bot cannot be edited or deleted.
+2. Subscribe on the **Packages** page. One bot per package strategy is created `STOPPED`, with generic names. If the user-wide LIVE capital ceiling is below the total of their active packages, it is raised to that total, which clears the LIVE confirmation.
+3. Confirm LIVE trading on the LIVE overview, then press **Start**, which starts all of the package's bots.
+4. To leave, press **Stop**, close any open positions, then **Cancel**.
 
-All package changes are recorded in the admin audit log.
+Package bots never appear in the user's Bots list and cannot be edited, started, stopped or deleted individually, including after cancelling. Positions remain visible (they are trades on the user's own account), but their strategy settings are blanked. Emergency exit still closes package positions.
+
+All package and strategy changes are recorded in the admin audit log.
 
 ## Render configuration
 
