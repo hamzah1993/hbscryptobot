@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { AdminBillingPanel } from '../components/AdminBillingPanel';
 import { AdminPackagesPanel } from '../components/AdminPackagesPanel';
 import { api, type AdminAuditEvent, type AdminBackup, type AdminHealth, type AdminMonitoringStatus } from '../lib/api';
 
@@ -128,6 +129,7 @@ export function AdminPage() {
         <div className="mt-5 space-y-2">{monitoring?.incidents.slice(0, 10).map((incident) => <div key={incident.id} className={`rounded-xl border px-4 py-3 text-sm ${incident.active ? 'border-rose-400/30 bg-rose-400/10' : 'border-white/10 bg-slate-950/20'}`}><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><span><span className={`font-semibold ${incident.active ? 'text-rose-200' : 'text-emerald-300'}`}>{incident.active ? 'OPEN' : 'RESOLVED'}</span> · {incident.component}</span><span className="text-xs text-slate-500">{new Date(incident.lastCheckedAt).toLocaleString()}</span></div><p className="mt-1 text-slate-400">{incident.message}</p></div>)}</div>
       </section>
 
+      {token && <AdminBillingPanel token={token} adminSessionToken={adminSessionToken} />}
       {token && <AdminPackagesPanel token={token} adminSessionToken={adminSessionToken} />}
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">

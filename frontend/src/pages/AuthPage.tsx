@@ -9,8 +9,10 @@ export function AuthPage() {
   const { user, login, register } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const resetToken = searchParams.get('resetToken') ?? '';
-  const [mode, setModeState] = useState<Mode>(resetToken ? 'reset' : 'login');
+  const inviteCode = searchParams.get('ref') ?? '';
+  const [mode, setModeState] = useState<Mode>(resetToken ? 'reset' : inviteCode ? 'register' : 'login');
   const [fullName, setFullName] = useState('');
+  const [referralCode, setReferralCode] = useState(inviteCode.toUpperCase());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -38,7 +40,7 @@ export function AuthPage() {
       if (mode === 'login') {
         await login(email, password);
       } else if (mode === 'register') {
-        await register(fullName, email, password);
+        await register(fullName, email, password, referralCode);
       } else if (mode === 'forgot') {
         await api.forgotPassword(email);
         setSuccess('If an account exists for that email, a password reset link has been sent.');
@@ -81,6 +83,9 @@ export function AuthPage() {
           )}
           {mode === 'reset' && (
             <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-500" type="password" placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={8} required />
+          )}
+          {mode === 'register' && (
+            <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 uppercase outline-none placeholder:normal-case focus:border-emerald-500" placeholder="Invitation code (optional)" value={referralCode} onChange={(e) => setReferralCode(e.target.value.toUpperCase())} maxLength={16} />
           )}
           {error && <p className="rounded-xl border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-300">{error}</p>}
           {success && <p className="rounded-xl border border-emerald-800 bg-emerald-950/40 px-4 py-3 text-sm text-emerald-200">{success}</p>}

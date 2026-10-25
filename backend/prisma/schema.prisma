@@ -131,6 +131,14 @@ enum PackageSubscriptionStatus {
   CANCELLED
 }
 
+enum BalanceEntryType {
+  DEPOSIT
+  MEMBERSHIP_FEE
+  PROFIT_FEE
+  REFERRAL_REWARD
+  ADMIN_ADJUSTMENT
+}
+
 model User {
   id                  String                    @id @default(uuid())
   email               String                    @unique
@@ -152,8 +160,89 @@ model User {
   knownDevices        UserKnownDevice[]
   adminAuditEvents    AdminAuditEvent[]
   packageSubscriptions PackageSubscription[]
+  billingAccount      BillingAccount?
+  balanceEntries      BalanceEntry[]
+  cryptoDeposits      CryptoDeposit[]
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
+}
+
+/// Prepaid USDT balance ("fuel") that pays the membership and profit fees,
+/// plus the user's referral position. Exchange funds are never touched.
+model BillingAccount {
+  userId              String           @id
+  /// Sum of this user's BalanceEntry amounts; may go negative after a profit fee.
+  balanceQuote        Decimal          @default(0) @db.Decimal(28, 8)
+  membershipExpiresAt DateTime?
+  referralCode        String           @unique
+  referrerId          String?
+  /// BIP-44 address index under the platform's watch-only deposit xpub.
+  depositIndex        Int              @unique @default(autoincrement())
+  depositAddress      String?          @unique
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referrer            BillingAccount?  @relation("Referrals", fields: [referrerId], references: [userId], onDelete: SetNull)
+  referrals           BillingAccount[] @relation("Referrals")
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([referrerId])
+}
+
+/// Append-only balance ledger. (userId, type, referenceId) makes every credit
+/// and debit idempotent, e.g. one profit fee per closed position.
+model BalanceEntry {
+  id                String           @id @default(uuid())
+  userId            String
+  type              BalanceEntryType
+  amountQuote       Decimal          @db.Decimal(28, 8)
+  balanceAfterQuote Decimal          @db.Decimal(28, 8)
+  referenceId       String
+  sourceUserId      String?
+  level             Int?
+  description       String?
+  createdAt         DateTime         @default(now())
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, referenceId])
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+}
+
+model CryptoDeposit {
+  id          String   @id @default(uuid())
+  userId      String
+  chain       String
+  txHash      String
+  logIndex    Int
+  fromAddress String
+  toAddress   String
+  amountQuote Decimal  @db.Decimal(28, 8)
+  blockNumber Int
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chain, txHash, logIndex])
+  @@index([userId, createdAt])
+}
+
+/// Admin-editable fee settings (single row, id = 1).
+model BillingSettings {
+  id                 Int      @id @default(1)
+  membershipFeeQuote Decimal  @default(100) @db.Decimal(28, 8)
+  membershipDays     Int      @default(365)
+  profitFeePercent   Decimal  @default(20) @db.Decimal(5, 2)
+  minBalanceQuote    Decimal  @default(20) @db.Decimal(28, 8)
+  /// Reward per upline level as a percent of each fee, e.g. [10, 5, 3].
+  referralPercents   Json     @default("[10,5,3]")
+  /// Only positions closed at or after this time are charged a profit fee.
+  profitFeeStartAt   DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model DepositScanState {
+  chain            String   @id
+  lastScannedBlock Int
+  updatedAt        DateTime @updatedAt
 }
 
 /// Admin-only library of predefined bot settings. Never exposed to users.
@@ -419,10 +508,13 @@ model TradingPosition {
   user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   openedAt          DateTime             @default(now())
   closedAt          DateTime?
+  /// Set once the platform profit fee for this closed position has been settled.
+  profitFeeSettledAt DateTime?
   updatedAt         DateTime             @updatedAt
 
   @@index([strategyId, status])
   @@index([userId, status])
+  @@index([status, profitFeeSettledAt, closedAt])
 }
 
 model TradingSubPosition {

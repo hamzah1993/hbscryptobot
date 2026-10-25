@@ -56,6 +56,30 @@ Package bots never appear in the user's Bots list and cannot be edited, started,
 
 All package and strategy changes are recorded in the admin audit log.
 
+## Billing, deposits and referrals
+
+Every user has a prepaid USDT **fuel balance** on the platform. It pays the fees; trading capital stays on the user's own exchange account.
+
+- **Membership:** users activate it from their balance on the **Wallet** page (default 100 USDT for 365 days). Extending adds time after the current expiry.
+- **Profit fee:** each Binance LIVE position that closes with a profit is charged `profitFeePercent` (default 20%) of its realized profit, within about a minute. Losing positions are not charged. Positions closed before billing was deployed (`profitFeeStartAt`) are never charged. The balance may go negative after a fee.
+- **Trading gate:** new LIVE entries (package and user-created bots) require an active membership and at least the minimum balance (default 20 USDT). Exits and emergency exit are never blocked.
+- **Referrals:** users sign up with an invitation code or link (`/auth?ref=CODE`). Each fee a user pays credits their uplines' balances by level (default 10% / 5% / 3%). An upline without an active membership is skipped for that fee. Rewards come only from fees actually paid, never from sign-ups. Total rewards are capped at 50% of a fee and at 5 levels.
+
+Change fees under **Billing & referrals** in the Admin Center; changes apply to future charges. Use **Manual balance adjustment** for refunds or promotions (negative to debit). Every change is in the audit log. Have the fee and referral terms reviewed by a lawyer before launch.
+
+### Deposit wallet setup
+
+Deposits use USDT on BNB Smart Chain (BEP20). Each user gets their own deposit address, derived from a **watch-only** extended public key, so the server can see deposits but can never move them.
+
+1. Create a new wallet seed phrase dedicated to deposits, offline, and store it securely. Never put it on the server.
+2. Export the account-level extended public key (`xpub`) for path `m/44'/60'/0'` and set it as `DEPOSIT_XPUB`. The backend refuses an `xprv`.
+3. Optionally set `BSC_RPC_URL` to a paid BSC RPC provider for reliability; the public endpoint is rate-limited.
+4. Deploy, then send a small test deposit to your own account's address on the Wallet page and confirm it is credited after `BSC_CONFIRMATIONS` blocks.
+
+Deposits land on individual addresses (`m/44'/60'/0'/0/<index>`). To collect them, import the seed phrase into a wallet that supports custom derivation paths, fund each address with a little BNB for gas, and transfer the USDT out. Do this from a secure machine, never from the server. The admin Billing page lists recent deposits.
+
+Do not change `DEPOSIT_XPUB` after users have addresses: existing addresses would stop being watched.
+
 ## Render configuration
 
 Set `BACKUP_DIRECTORY` to a directory on a **persistent Render disk**, for example `/var/data/hbs-backups`. A backup stored only on an ephemeral service filesystem is not a durable backup.

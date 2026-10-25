@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, IsUUID, Matches, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
@@ -15,4 +15,9 @@ export class RegisterDto {
   @IsOptional()
   @IsUUID()
   deviceId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9]{4,16}$/, { message: 'Referral code is invalid' })
+  referralCode?: string;
 }

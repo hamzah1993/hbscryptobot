@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { BillingService } from '../billing/billing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LIVE_CONFIRMATION_VERSION } from './live-trading-safety.service';
 import { TestnetRiskActionType, TestnetStrategyRiskService } from './testnet-strategy-risk.service';
@@ -7,9 +8,10 @@ import { TestnetRiskActionType, TestnetStrategyRiskService } from './testnet-str
 /**
  * Final server-side risk boundary for every Binance LIVE submission.
  * LIVE exposure is allowed without the operational production-readiness gate,
- * but every entry still requires the ENABLE_LIVE_TRADING kill switch, the
- * user's explicit LIVE confirmation, fixed strategy limits and the user-wide
- * capital ceiling. Exits are never gated so exposure can always be reduced.
+ * but every entry still requires the ENABLE_LIVE_TRADING kill switch, an
+ * active membership with the minimum platform balance, the user's explicit
+ * LIVE confirmation, fixed strategy limits and the user-wide capital ceiling.
+ * Exits are never gated so exposure can always be reduced.
  */
 @Injectable()
 export class LiveStrategyRiskService extends TestnetStrategyRiskService {
@@ -24,6 +26,7 @@ export class LiveStrategyRiskService extends TestnetStrategyRiskService {
   constructor(
     prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly billing: BillingService,
   ) {
     super(prisma);
   }
@@ -47,6 +50,7 @@ export class LiveStrategyRiskService extends TestnetStrategyRiskService {
       if (!Number.isFinite(estimatedOrderQuote) || estimatedOrderQuote <= 0) {
         throw new BadRequestException('Binance LIVE entry value could not be determined; order rejected');
       }
+      await this.billing.assertCanOpenLiveEntry(userId);
 
       const liveSafetyProfile = await this.prisma.liveTradingSafetyProfile.findUnique({ where: { userId } });
       const capitalCeiling = Number(liveSafetyProfile?.capitalCeilingQuote ?? 0);

@@ -17,6 +17,27 @@ export type AdminHealth = {
 export type AdminAuditEvent = { id: string; action: string; target: string | null; metadata?: Record<string, unknown> | null; createdAt: string; admin: { id: string; email: string; fullName: string } };
 export type SystemHealthIncident = { id: string; component: string; active: boolean; severity: NotificationSeverity; message: string; consecutiveFailures: number; openedAt: string; resolvedAt: string | null; lastCheckedAt: string; lastAlertedAt: string | null; updatedAt: string };
 export type AdminMonitoringStatus = { enabled: boolean; intervalSeconds: number; lastCheckedAt: string | null; activeIncidents: number; incidents: SystemHealthIncident[]; heartbeats: { startedAt: string; liveStrategyScheduler: string | null; liveOrderSync: string | null; liveRetryScheduler: string | null } };
+export type BalanceEntryType = 'DEPOSIT' | 'MEMBERSHIP_FEE' | 'PROFIT_FEE' | 'REFERRAL_REWARD' | 'ADMIN_ADJUSTMENT';
+export type BillingOverview = {
+  balanceQuote: number;
+  membership: { active: boolean; expiresAt: string | null };
+  referralCode: string;
+  deposit: { enabled: boolean; chain: string; network: string; asset: string; address: string | null };
+  fees: { membershipFeeQuote: number; membershipDays: number; profitFeePercent: number; minBalanceQuote: number };
+  trading: { allowed: boolean; reason: string | null };
+};
+export type BalanceEntry = { id: string; type: BalanceEntryType; amountQuote: number; balanceAfterQuote: number; level: number | null; description: string | null; createdAt: string };
+export type ReferralSummary = {
+  referralCode: string; eligible: boolean; totalEarnedQuote: number;
+  levels: Array<{ level: number; rewardPercent: number; members: number; activeMembers: number; earnedQuote: number }>;
+};
+export type BillingSettings = { membershipFeeQuote: number; membershipDays: number; profitFeePercent: number; minBalanceQuote: number; referralPercents: number[]; profitFeeStartAt: string };
+export type AdminBillingOverview = {
+  settings: BillingSettings;
+  depositsEnabled: boolean;
+  totals: { depositsQuote: number; membershipFeesQuote: number; profitFeesQuote: number; referralRewardsQuote: number; adminAdjustmentsQuote: number; userBalancesQuote: number; accounts: number; activeMembers: number };
+  recentDeposits: Array<{ id: string; chain: string; txHash: string; amountQuote: number; toAddress: string; createdAt: string; user: { email: string } }>;
+};
 export type PackageStrategySettings = Record<string, number | boolean | number[]>;
 export type PackageBotStatus = 'RUNNING' | 'PARTIAL' | 'STOPPED';
 export type TradingPackage = { id: string; name: string; description: string | null; amountQuote: number };
@@ -657,7 +678,7 @@ const toBinanceEnvironment = (environment: ExchangeEnvironment): BinanceStreamEn
   environment === 'LIVE' ? 'live' : 'testnet';
 
 export const api = {
-  register: (payload: { email: string; fullName: string; password: string; deviceId?: string }) =>
+  register: (payload: { email: string; fullName: string; password: string; deviceId?: string; referralCode?: string }) =>
     request<AuthResponse>('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
   login: (payload: { email: string; password: string; deviceId?: string }) =>
     request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
@@ -849,6 +870,17 @@ export const api = {
     request<AdminPackageStrategy>(`/super/admin/control/package-strategies/${encodeURIComponent(templateId)}`, { method: 'PATCH', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   listAdminPackages: (token: string, adminSessionToken: string) =>
     request<AdminTradingPackage[]>('/super/admin/control/packages', { headers: adminHeaders(token, adminSessionToken) }),
+  getBilling: (token: string) => request<BillingOverview>('/billing', { headers: authHeaders(token) }),
+  listBalanceEntries: (token: string, limit = 100) => request<BalanceEntry[]>(`/billing/entries?limit=${limit}`, { headers: authHeaders(token) }),
+  activateMembership: (token: string) =>
+    request<{ membership: { active: boolean; expiresAt: string }; balanceQuote: number }>('/billing/membership/activate', { method: 'POST', headers: authHeaders(token) }),
+  getReferrals: (token: string) => request<ReferralSummary>('/billing/referrals', { headers: authHeaders(token) }),
+  getAdminBilling: (token: string, adminSessionToken: string) =>
+    request<AdminBillingOverview>('/super/admin/control/billing', { headers: adminHeaders(token, adminSessionToken) }),
+  updateAdminBillingSettings: (token: string, adminSessionToken: string, payload: Partial<Omit<BillingSettings, 'profitFeeStartAt'>>) =>
+    request<BillingSettings>('/super/admin/control/billing/settings', { method: 'PATCH', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
+  adjustAdminBalance: (token: string, adminSessionToken: string, payload: { email: string; amountQuote: number; reason: string }) =>
+    request<{ userId: string; balanceQuote: number }>('/super/admin/control/billing/adjustments', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   createAdminPackage: (token: string, adminSessionToken: string, payload: TradingPackageInput) =>
     request<AdminTradingPackage>('/super/admin/control/packages', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   updateAdminPackage: (token: string, adminSessionToken: string, packageId: string, payload: Partial<TradingPackageInput>) =>

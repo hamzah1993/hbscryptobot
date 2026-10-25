@@ -12,7 +12,7 @@ describe('LiveStrategyRiskService', () => {
 
   function createService(
     ceiling: number | null = 100,
-    options: { liveFlag?: string; confirmed?: boolean } = {},
+    options: { liveFlag?: string; confirmed?: boolean; billingError?: Error } = {},
   ) {
     const confirmed = options.confirmed ?? true;
     const prisma = {
@@ -32,8 +32,19 @@ describe('LiveStrategyRiskService', () => {
       },
     } as any;
     const config = { get: jest.fn().mockReturnValue('liveFlag' in options ? options.liveFlag : 'true') } as any;
-    return { service: new LiveStrategyRiskService(prisma, config), prisma };
+    const billing = {
+      assertCanOpenLiveEntry: options.billingError
+        ? jest.fn().mockRejectedValue(options.billingError)
+        : jest.fn().mockResolvedValue(undefined),
+    } as any;
+    return { service: new LiveStrategyRiskService(prisma, config, billing), prisma, billing };
   }
+
+  it('blocks entries without an active membership and minimum balance', async () => {
+    const { service } = createService(100, { billingError: new ConflictException('An active membership is required to open new LIVE trades') });
+    await expect(service.assertCanExecute('user-1', strategy, null, 'INITIAL_ENTRY', 10))
+      .rejects.toThrow('active membership');
+  });
 
   it('requires a user-wide LIVE capital ceiling before a new entry', async () => {
     const { service } = createService(null);
@@ -73,10 +84,11 @@ describe('LiveStrategyRiskService', () => {
   });
 
   it('keeps risk-reducing exits available even with live entries disabled and no ceiling', async () => {
-    const { service, prisma } = createService(null, { liveFlag: 'false', confirmed: false });
+    const { service, prisma, billing } = createService(null, { liveFlag: 'false', confirmed: false, billingError: new ConflictException('no membership') });
     const openPosition = { id: 'position-1', totalCostQuote: 900 };
     await expect(service.assertCanExecute('user-1', strategy, openPosition, 'PARENT_EXIT', 900)).resolves.toBeUndefined();
     await expect(service.assertCanExecute('user-1', strategy, openPosition, 'INDEPENDENT_EXIT', 0)).resolves.toBeUndefined();
     expect(prisma.liveTradingSafetyProfile.findUnique).not.toHaveBeenCalled();
+    expect(billing.assertCanOpenLiveEntry).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, UnauthorizedExcepti
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHash, randomBytes } from 'crypto';
+import { BillingService } from '../billing/billing.service';
 import { NotificationChannelsService } from '../notifications/notification-channels.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,18 +23,22 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly notifications: NotificationsService,
     private readonly notificationChannels: NotificationChannelsService,
+    private readonly billing: BillingService,
   ) {}
 
   async register(dto: RegisterDto, metadata: LoginMetadata = {}) {
     const email = dto.email.trim().toLowerCase();
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) throw new ConflictException('Email is already registered');
+    // Resolved before the user exists so a bad referral code never leaves a half-registered account.
+    const referrerId = await this.billing.resolveReferrer(dto.referralCode);
 
     const passwordHash = await argon2.hash(dto.password);
     const user = await this.prisma.user.create({
       data: { email, fullName: dto.fullName.trim(), passwordHash },
       select: { id: true, email: true, fullName: true, role: true, authVersion: true, createdAt: true },
     });
+    await this.billing.ensureAccount(user.id, referrerId);
     if (dto.deviceId) await this.recordDevice(user.id, dto.deviceId, metadata, false);
 
     return { user: this.publicUser(user), accessToken: await this.signToken(user.id, user.email, user.role, user.authVersion) };
