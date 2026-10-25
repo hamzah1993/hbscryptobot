@@ -38,6 +38,11 @@ export type AdminBillingOverview = {
   totals: { depositsQuote: number; membershipFeesQuote: number; profitFeesQuote: number; referralRewardsQuote: number; adminAdjustmentsQuote: number; userBalancesQuote: number; accounts: number; activeMembers: number };
   recentDeposits: Array<{ id: string; chain: string; txHash: string; amountQuote: number; toAddress: string; createdAt: string; user: { email: string } }>;
 };
+export type MarketQuoteAsset = 'USDT' | 'BTC' | 'ETH' | 'USDC';
+export type MarketTicker = { symbol: string; baseAsset: string; quoteAsset: string; lastPrice: number; priceChangePercent: number; quoteVolume: number };
+export type Announcement = { id: string; title: string; body: string; pinned: boolean; publishedAt: string | null };
+export type AdminAnnouncement = Announcement & { published: boolean; createdAt: string; updatedAt: string };
+export type RecentProfit = { id: string; symbol: string; profitPercent: number; user: string; closedAt: string };
 export type PackageStrategySettings = Record<string, number | boolean | number[]>;
 export type PackageBotStatus = 'RUNNING' | 'PARTIAL' | 'STOPPED';
 export type TradingPackage = { id: string; name: string; description: string | null; amountQuote: number };
@@ -881,6 +886,16 @@ export const api = {
     request<BillingSettings>('/super/admin/control/billing/settings', { method: 'PATCH', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   adjustAdminBalance: (token: string, adminSessionToken: string, payload: { email: string; amountQuote: number; reason: string }) =>
     request<{ userId: string; balanceQuote: number }>('/super/admin/control/billing/adjustments', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
+  listMarketTickers: (token: string, quote: MarketQuoteAsset) =>
+    request<MarketTicker[]>(`/market-data/tickers?quote=${quote}`, { headers: authHeaders(token) }),
+  listAnnouncements: (token: string) => request<Announcement[]>('/content/announcements', { headers: authHeaders(token) }),
+  listRecentProfits: (token: string) => request<RecentProfit[]>('/content/recent-profits', { headers: authHeaders(token) }),
+  listAdminAnnouncements: (token: string, adminSessionToken: string) =>
+    request<AdminAnnouncement[]>('/super/admin/control/announcements', { headers: adminHeaders(token, adminSessionToken) }),
+  saveAdminAnnouncement: (token: string, adminSessionToken: string, id: string | null, payload: { title: string; body: string; pinned: boolean; published: boolean }) =>
+    request<AdminAnnouncement>(`/super/admin/control/announcements${id ? `/${encodeURIComponent(id)}` : ''}`, { method: id ? 'PATCH' : 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
+  deleteAdminAnnouncement: (token: string, adminSessionToken: string, id: string) =>
+    request<{ deleted: true }>(`/super/admin/control/announcements/${encodeURIComponent(id)}`, { method: 'DELETE', headers: adminHeaders(token, adminSessionToken) }),
   createAdminPackage: (token: string, adminSessionToken: string, payload: TradingPackageInput) =>
     request<AdminTradingPackage>('/super/admin/control/packages', { method: 'POST', headers: adminHeaders(token, adminSessionToken), body: JSON.stringify(payload) }),
   updateAdminPackage: (token: string, adminSessionToken: string, packageId: string, payload: Partial<TradingPackageInput>) =>

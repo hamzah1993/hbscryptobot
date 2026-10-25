@@ -9,7 +9,7 @@ import {
   BinanceWebsocketMarketDataService,
   type BinanceStreamEnvironment,
 } from './binance-websocket-market-data.service';
-import { MarketDataService } from './market-data.service';
+import { MARKET_LIST_QUOTES, MarketDataService, type MarketListQuote } from './market-data.service';
 
 @Controller('market-data')
 @UseGuards(JwtAuthGuard)
@@ -26,6 +26,16 @@ export class MarketDataController {
     @Query('refresh') refresh = 'false',
   ) {
     return this.marketData.getQuote(symbol, environment, refresh === 'true');
+  }
+
+  @Get('tickers')
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
+  getTickers(@Query('quote') quote = 'USDT') {
+    const normalized = quote.toUpperCase();
+    if (!(MARKET_LIST_QUOTES as readonly string[]).includes(normalized)) {
+      throw new BadRequestException(`quote must be one of ${MARKET_LIST_QUOTES.join(', ')}`);
+    }
+    return this.marketData.getTickers(normalized as MarketListQuote);
   }
 
   @Get('candles')

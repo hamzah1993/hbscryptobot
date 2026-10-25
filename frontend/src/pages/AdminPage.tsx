@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { AdminAnnouncementsPanel } from '../components/AdminAnnouncementsPanel';
 import { AdminBillingPanel } from '../components/AdminBillingPanel';
 import { AdminPackagesPanel } from '../components/AdminPackagesPanel';
 import { api, type AdminAuditEvent, type AdminBackup, type AdminHealth, type AdminMonitoringStatus } from '../lib/api';
@@ -131,6 +132,7 @@ export function AdminPage() {
 
       {token && <AdminBillingPanel token={token} adminSessionToken={adminSessionToken} />}
       {token && <AdminPackagesPanel token={token} adminSessionToken={adminSessionToken} />}
+      {token && <AdminAnnouncementsPanel token={token} adminSessionToken={adminSessionToken} />}
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-semibold">Database backups</h2><p className="mt-1 text-sm text-slate-400">Verified PostgreSQL custom-format archives. Production storage should use a persistent disk.</p></div><button disabled={busy} onClick={() => void createBackup()} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{busy ? 'Working…' : 'Create backup now'}</button></div>

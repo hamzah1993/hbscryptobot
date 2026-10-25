@@ -56,6 +56,14 @@ Package bots never appear in the user's Bots list and cannot be edited, started,
 
 All package and strategy changes are recorded in the admin audit log.
 
+## Mobile app and announcements
+
+Users land on the mobile-first app at `/` with five tabs: **Home** (banner, latest announcement, shortcuts, recent profits, Binance spot market list), **Strategy** (packages), **Team** (referrals), **News** and **Mine**. The previous full dashboard remains available at `/pro` (Mine → Full dashboard, or Home → More) for users who manage their own bots.
+
+- **Announcements** are written under **Announcements** in the Admin Center. Only published items are shown; pinned items stay on top and the newest one appears on Home. Users see a red dot on the bell until they open News.
+- **Recent profits** on Home show real closed, profitable Binance LIVE trades from the last 7 days: the symbol, the return over the position's filled buys, and the user's masked initial only. Nothing is shown when there are none; never seed this with invented trades.
+- **Market list** uses Binance's public 24-hour ticker, shared and cached for 5 seconds across all users. During a brief Binance outage the last snapshot is shown.
+
 ## Billing, deposits and referrals
 
 Every user has a prepaid USDT **fuel balance** on the platform. It pays the fees; trading capital stays on the user's own exchange account.

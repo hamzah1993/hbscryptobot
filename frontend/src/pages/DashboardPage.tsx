@@ -429,7 +429,7 @@ export function DashboardPage() {
             <button type="button" onClick={() => selectNavigation('Profile')} aria-label="Open profile" className="flex h-11 w-11 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-xs font-semibold">{initials}</button>
           </div>
           <header className="flex flex-col gap-4 border-b border-white/10 pb-4 sm:pb-6 md:flex-row md:items-center md:justify-between">
-            <div><p className="text-xs text-slate-400 sm:text-sm">Welcome back, {user?.fullName}</p><h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{pageTitle}</h2></div>
+            <div><p className="text-xs text-slate-400 sm:text-sm"><Link to="/" className="mr-2 text-cyan-300 hover:text-cyan-100">← Back to app</Link>Welcome back, {user?.fullName}</p><h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{pageTitle}</h2></div>
             <div className="flex flex-wrap items-center gap-3">
               {user?.role === 'ADMIN' && <Link to="/super/admin/control" className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-sm font-semibold text-cyan-200">Admin</Link>}
               <div className="grid w-full grid-cols-3 rounded-xl border border-white/10 bg-white/[0.04] p-1 sm:flex sm:w-auto">

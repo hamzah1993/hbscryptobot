@@ -89,6 +89,21 @@ export class BinanceService {
     return response.json();
   }
 
+  /** 24-hour rolling statistics for every spot symbol (request weight 80). */
+  async get24hTickers(environment: BinanceEnvironment = 'live') {
+    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/ticker/24hr`);
+    if (!response.ok) throw new Error(`Binance 24h ticker request failed: ${response.status}`);
+    return response.json() as Promise<Array<{ symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume: string }>>;
+  }
+
+  /** Base and quote assets of every currently tradable spot symbol. */
+  async getTradingSymbols(environment: BinanceEnvironment = 'live') {
+    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/exchangeInfo?permissions=SPOT&symbolStatus=TRADING`);
+    if (!response.ok) throw new Error(`Binance exchange info request failed: ${response.status}`);
+    const body = await response.json() as { symbols: Array<{ symbol: string; baseAsset: string; quoteAsset: string }> };
+    return body.symbols.map(({ symbol, baseAsset, quoteAsset }) => ({ symbol, baseAsset, quoteAsset }));
+  }
+
   async getKlines(
     symbol: string,
     interval: BinanceKlineInterval = '5m',

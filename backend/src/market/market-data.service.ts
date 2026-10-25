@@ -25,12 +25,80 @@ export type MarketCandle = {
 
 type CachedQuote = Omit<MarketQuote, 'source'> & { expiresAt: number };
 
+export const MARKET_LIST_QUOTES = ['USDT', 'BTC', 'ETH', 'USDC'] as const;
+export type MarketListQuote = (typeof MARKET_LIST_QUOTES)[number];
+
+export type MarketTicker = {
+  symbol: string;
+  baseAsset: string;
+  quoteAsset: string;
+  lastPrice: number;
+  priceChangePercent: number;
+  quoteVolume: number;
+};
+
+const TICKERS_TTL_MS = 5_000;
+const SYMBOLS_TTL_MS = 60 * 60_000;
+
 @Injectable()
 export class MarketDataService {
   private readonly cache = new Map<string, CachedQuote>();
   private readonly defaultTtlMs = 2_000;
+  private tickers: { at: number; data: MarketTicker[] } | null = null;
+  private tickersInFlight: Promise<MarketTicker[]> | null = null;
+  private symbols: { at: number; data: Map<string, { baseAsset: string; quoteAsset: string }> } | null = null;
 
   constructor(private readonly binance: BinanceService) {}
+
+  /**
+   * Binance LIVE spot market list for one quote asset. All users share one
+   * cached snapshot, so Binance sees at most one 24h-ticker request per 5 s.
+   */
+  async getTickers(quote: MarketListQuote) {
+    const all = await this.getAllTickers();
+    return all.filter((ticker) => ticker.quoteAsset === quote);
+  }
+
+  private async getAllTickers() {
+    if (this.tickers && Date.now() - this.tickers.at < TICKERS_TTL_MS) return this.tickers.data;
+    this.tickersInFlight ??= (async () => {
+      try {
+        const [raw, symbols] = await Promise.all([this.binance.get24hTickers('live'), this.getSymbolMap()]);
+        const data: MarketTicker[] = [];
+        for (const item of raw) {
+          const info = symbols.get(item.symbol);
+          const lastPrice = Number(item.lastPrice);
+          if (!info || !(lastPrice > 0)) continue;
+          data.push({
+            symbol: item.symbol,
+            baseAsset: info.baseAsset,
+            quoteAsset: info.quoteAsset,
+            lastPrice,
+            priceChangePercent: Number(item.priceChangePercent),
+            quoteVolume: Number(item.quoteVolume),
+          });
+        }
+        data.sort((a, b) => a.baseAsset.localeCompare(b.baseAsset));
+        this.tickers = { at: Date.now(), data };
+        return data;
+      } catch (error) {
+        // Serve the last good snapshot through a brief Binance outage.
+        if (this.tickers) return this.tickers.data;
+        throw error;
+      } finally {
+        this.tickersInFlight = null;
+      }
+    })();
+    return this.tickersInFlight;
+  }
+
+  private async getSymbolMap() {
+    if (this.symbols && Date.now() - this.symbols.at < SYMBOLS_TTL_MS) return this.symbols.data;
+    const list = await this.binance.getTradingSymbols('live');
+    const data = new Map(list.map((item) => [item.symbol, { baseAsset: item.baseAsset, quoteAsset: item.quoteAsset }]));
+    this.symbols = { at: Date.now(), data };
+    return data;
+  }
 
   async getQuote(
     symbol: string,
