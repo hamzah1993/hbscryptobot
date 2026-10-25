@@ -21,6 +21,33 @@ npm run admin:promote -- trusted-admin@example.com
 
 The command increments `authVersion`, invalidating existing sessions. Sign in again after promotion. Do not make shared/demo accounts administrators.
 
+## Trading packages
+
+Packages are fixed-amount, admin-defined Binance LIVE bots that users subscribe to. Funds never leave the subscriber's own Binance account: subscribing creates a strategy on that account through the user's own API key, so each user's profit and loss is their own strategy's result.
+
+Create packages under **Trading packages** in the Admin Center. Each package has:
+
+- an **amount** in USDT, which becomes the strategy's risk budget and its exposure limit;
+- a **symbol**, such as `BTCUSDT`;
+- a **strategy template** (JSON) with the DCA and take-profit settings. Capital, exchange and environment fields are rejected; the base order must be at least 5 USDT and no larger than the amount. Example:
+
+```json
+{ "baseOrderQuote": 10, "maxDcaOrders": 3, "dcaStepPercent": 3, "dcaMultiplier": 1,
+  "dcaMultipliers": [1, 1.5, 2], "takeProfitPercent": 1.5, "independentFromLevel": 3,
+  "maxDailyRealizedLossQuote": 10 }
+```
+
+Backtest a template before publishing it. Edits apply to new subscriptions only; existing package bots keep their original settings. Hide a package by unticking **Visible to users** instead of deleting it.
+
+User flow:
+
+1. Connect a Binance LIVE API key with trading enabled and **withdrawals disabled**.
+2. Subscribe on the **Packages** page. The bot is created `STOPPED`. If the user-wide LIVE capital ceiling is below the total of their active packages, it is raised to that total, which clears the LIVE confirmation.
+3. Confirm LIVE trading on the LIVE overview, then press **Start**.
+4. To leave, stop the bot, close any open position, then cancel. While a subscription is active the bot cannot be edited or deleted.
+
+All package changes are recorded in the admin audit log.
+
 ## Render configuration
 
 Set `BACKUP_DIRECTORY` to a directory on a **persistent Render disk**, for example `/var/data/hbs-backups`. A backup stored only on an ephemeral service filesystem is not a durable backup.

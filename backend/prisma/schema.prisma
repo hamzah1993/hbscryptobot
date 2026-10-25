@@ -126,6 +126,11 @@ enum BacktestTradeType {
   INDEPENDENT_EXIT
 }
 
+enum PackageSubscriptionStatus {
+  ACTIVE
+  CANCELLED
+}
+
 model User {
   id                  String                    @id @default(uuid())
   email               String                    @unique
@@ -146,8 +151,48 @@ model User {
   telegramConnectionTokens TelegramConnectionToken[]
   knownDevices        UserKnownDevice[]
   adminAuditEvents    AdminAuditEvent[]
+  packageSubscriptions PackageSubscription[]
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
+}
+
+/// Admin-defined managed trading package. Subscribing creates a Binance LIVE
+/// strategy on the user's own exchange account from `strategyTemplate`, with
+/// a risk budget equal to `amountQuote`. Funds never leave the user's account.
+model TradingPackage {
+  id               String                @id @default(uuid())
+  name             String                @unique
+  description      String?
+  amountQuote      Decimal               @db.Decimal(28, 8)
+  symbol           String
+  strategyTemplate Json
+  active           Boolean               @default(true)
+  sortOrder        Int                   @default(0)
+  subscriptions    PackageSubscription[]
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([active, sortOrder])
+}
+
+model PackageSubscription {
+  id          String                    @id @default(uuid())
+  userId      String
+  packageId   String
+  strategyId  String?                   @unique
+  status      PackageSubscriptionStatus @default(ACTIVE)
+  /// Package amount at subscription time; later package edits do not change it.
+  amountQuote Decimal                   @db.Decimal(28, 8)
+  startedAt   DateTime                  @default(now())
+  cancelledAt DateTime?
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package     TradingPackage            @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  strategy    TradingStrategy?          @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@index([userId, status])
+  @@index([packageId, status])
 }
 
 model AdminAuditEvent {
@@ -313,6 +358,7 @@ model TradingStrategy {
   positions                    TradingPosition[]
   actions                      StrategyAction[]
   backtestRuns                 BacktestRun[]
+  packageSubscription          PackageSubscription?
   user                         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt                    DateTime              @default(now())
   updatedAt                    DateTime              @updatedAt

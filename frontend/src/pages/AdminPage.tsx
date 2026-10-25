@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { AdminPackagesPanel } from '../components/AdminPackagesPanel';
 import { api, type AdminAuditEvent, type AdminBackup, type AdminHealth, type AdminMonitoringStatus } from '../lib/api';
 
 const ADMIN_SESSION_KEY = 'hbs_admin_step_up_session';
@@ -126,6 +127,8 @@ export function AdminPage() {
         <div className="mt-5 grid gap-3 sm:grid-cols-3"><article className="rounded-xl bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">Monitor</p><p className={`mt-2 font-semibold ${monitoring?.enabled ? 'text-emerald-300' : 'text-amber-300'}`}>{monitoring?.enabled ? 'ENABLED' : 'DISABLED'}</p></article><article className="rounded-xl bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">Active incidents</p><p className={`mt-2 font-semibold ${(monitoring?.activeIncidents ?? 0) > 0 ? 'text-rose-300' : 'text-emerald-300'}`}>{monitoring?.activeIncidents ?? '—'}</p></article><article className="rounded-xl bg-slate-950/30 p-4"><p className="text-xs uppercase tracking-wider text-slate-500">Last check</p><p className="mt-2 text-sm font-semibold text-slate-200">{monitoring?.lastCheckedAt ? new Date(monitoring.lastCheckedAt).toLocaleString() : 'Not run yet'}</p></article></div>
         <div className="mt-5 space-y-2">{monitoring?.incidents.slice(0, 10).map((incident) => <div key={incident.id} className={`rounded-xl border px-4 py-3 text-sm ${incident.active ? 'border-rose-400/30 bg-rose-400/10' : 'border-white/10 bg-slate-950/20'}`}><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><span><span className={`font-semibold ${incident.active ? 'text-rose-200' : 'text-emerald-300'}`}>{incident.active ? 'OPEN' : 'RESOLVED'}</span> · {incident.component}</span><span className="text-xs text-slate-500">{new Date(incident.lastCheckedAt).toLocaleString()}</span></div><p className="mt-1 text-slate-400">{incident.message}</p></div>)}</div>
       </section>
+
+      {token && <AdminPackagesPanel token={token} adminSessionToken={adminSessionToken} />}
 
       <section className="mt-6 rounded-2xl border border-white/10 bg-white/[0.035] p-5 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-semibold">Database backups</h2><p className="mt-1 text-sm text-slate-400">Verified PostgreSQL custom-format archives. Production storage should use a persistent disk.</p></div><button disabled={busy} onClick={() => void createBackup()} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:opacity-50">{busy ? 'Working…' : 'Create backup now'}</button></div>
