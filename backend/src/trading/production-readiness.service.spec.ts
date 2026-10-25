@@ -42,6 +42,17 @@ describe('ProductionReadinessService', () => {
     expect(result.liveMoneyReady).toBe(false);
   });
 
+  it('unlocks the LIVE confirmation once the flag, LIVE credentials and a ceiling exist, despite hardening gaps', async () => {
+    const service = createService([100, 200, 600], { unresolved: 1, liveFlag: 'true' });
+    const prisma = (service as any).prisma;
+    prisma.exchangeCredential.groupBy.mockResolvedValue([{ exchange: 'BINANCE', environment: 'LIVE', _count: { _all: 1 } }]);
+    prisma.liveTradingSafetyProfile.findUnique.mockResolvedValue({ capitalCeilingQuote: 10, confirmedAt: null, confirmationVersion: null });
+    const result = await service.snapshot('user-1');
+    expect(result.productionHardeningReady).toBe(false);
+    expect(result.liveConfirmationAvailable).toBe(true);
+    expect(result.liveMoneyReady).toBe(false);
+  });
+
   it('fails hardening when p95 latency breaches 500 ms or actions are unresolved', async () => {
     const result = await createService([100, 200, 600], { unresolved: 1 }).snapshot('user-1');
     expect(result.executionEvidence.meetsTarget).toBe(false);

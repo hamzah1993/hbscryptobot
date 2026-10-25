@@ -109,20 +109,12 @@ export class ProductionReadinessService {
       explicitLiveConfirmationRecorded,
       liveEmergencyExitAdapterVerified,
     };
-    const liveConfirmationAvailable = liveChecks.productionHardeningReady
-      && liveChecks.operationalNotificationProvider
-      && liveChecks.fixedRiskBudgetEnforced
-      && liveChecks.perBotRiskCeilingsImplemented
-      && liveChecks.dailyLossGateImplemented
-      && liveChecks.emergencyExitWorkflowImplemented
-      && liveChecks.emergencyReentryBlockImplemented
-      && liveChecks.binanceTestnetW2wCertified
-      && liveChecks.binanceStrategyRoutingVerified
-      && liveChecks.liveFeatureFlag
-      && liveChecks.liveRoutingImplemented
+    // The confirmation is enforced on every LIVE entry, so it can be recorded
+    // once the per-user prerequisites exist. Operational hardening checks stay
+    // reported above but no longer block bounded LIVE validation (PR #16).
+    const liveConfirmationAvailable = liveChecks.liveFeatureFlag
       && liveChecks.liveCredentialsConfigured
-      && liveChecks.liveCapitalCeilingConfigured
-      && liveChecks.liveEmergencyExitAdapterVerified;
+      && liveChecks.liveCapitalCeilingConfigured;
 
     return {
       executionEvidence,
