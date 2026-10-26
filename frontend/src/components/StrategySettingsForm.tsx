@@ -30,7 +30,8 @@ export function toSettings(fields: StrategyField[], values: StrategyFormValues):
     if (field.type === 'select') { settings[field.key] = String(value); continue; }
     const text = String(value ?? '').trim();
     if (field.type === 'numberList') {
-      if (!text) continue;
+      // An empty list is meaningful (e.g. "size every DCA level with the multiplier"), so send it as [].
+      if (!text) { settings[field.key] = []; continue; }
       const list = text.split(/[,\s]+/).filter(Boolean).map(Number);
       if (list.some((item) => !Number.isFinite(item))) return { settings, error: `${field.label}: enter numbers separated by commas` };
       settings[field.key] = list;

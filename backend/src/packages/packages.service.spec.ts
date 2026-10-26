@@ -34,7 +34,15 @@ describe('package template', () => {
     expect(() => sanitizePackageTemplate({ ...settings, riskBudgetQuote: 1_000_000 })).toThrow(BadRequestException);
     expect(() => sanitizePackageTemplate({ ...settings, environment: 'TESTNET' })).toThrow(BadRequestException);
     expect(() => sanitizePackageTemplate({ ...settings, baseOrderQuote: '10' })).toThrow(BadRequestException);
-    expect(() => sanitizePackageTemplate({ ...settings, dcaMultipliers: [] })).toThrow(BadRequestException);
+    expect(() => sanitizePackageTemplate({ ...settings, dcaMultipliers: [1, 'x'] })).toThrow(BadRequestException);
+  });
+
+  it('accepts many equal-size DCA levels with no stop-loss (buy until the budget runs out)', () => {
+    const strategies = new StrategyService({} as any, new RiskBudgetService(), new RecoveryStrategyService());
+    const unlimited = { ...settings, maxDcaOrders: 200, dcaMultiplier: 1, dcaMultipliers: [], independentFromLevel: 202, recoveryEnabled: false, stopLossPercent: null };
+    const input = strategies.validateInput(packageStrategyInput({ symbol: 'BTCUSDT', strategyTemplate: unlimited }, 100, 'Unlimited DCA'));
+    expect(input).toEqual(expect.objectContaining({ maxDcaOrders: 200, dcaMultipliers: [], stopLossPercent: null }));
+    expect(new RiskBudgetService().buildPlan(input)).toHaveLength(10);
   });
 
   it('builds a Binance LIVE bot whose budget and exposure equal its allocation', () => {

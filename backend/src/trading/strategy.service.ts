@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ExchangeName, Prisma, TradingMode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { RiskBudgetService } from './risk-budget.service';
+import { MAX_DCA_LEVELS, RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
 import {
   CONFIRM_RULES, CONFIRM_TIMEFRAMES, ENTRY_MODES, MAX_SIGNAL_CANDLES, timeframeMinutes,
@@ -295,8 +295,8 @@ export class StrategyService {
     maxTotalRiskPercent: number; maxOpenPairs: number; cooldownMinutes: number;
     maxStrategyExposureQuote: number | null; maxOrderQuote: number | null; maxDailyRealizedLossQuote: number | null;
   }) {
-    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 3 || input.maxDcaOrders > 5) {
-      throw new BadRequestException('DCA levels must be an integer between 3 and 5');
+    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 1 || input.maxDcaOrders > MAX_DCA_LEVELS) {
+      throw new BadRequestException(`DCA levels must be a whole number between 1 and ${MAX_DCA_LEVELS}`);
     }
     if (input.dcaStepPercent < 3 || input.dcaStepPercent > 15) throw new BadRequestException('DCA trigger must be between 3% and 15%');
     if (input.takeProfitPercent < 0.5 || input.takeProfitPercent > 5) throw new BadRequestException('Global take-profit must be between 0.5% and 5%');
@@ -306,7 +306,7 @@ export class StrategyService {
     if (input.maxTotalRiskPercent < 1 || input.maxTotalRiskPercent > 10) throw new BadRequestException('Maximum total risk must be between 1% and 10% of capital');
     if (!Number.isInteger(input.maxOpenPairs) || input.maxOpenPairs < 1 || input.maxOpenPairs > 20) throw new BadRequestException('Maximum open pairs must be between 1 and 20');
     if (!Number.isInteger(input.cooldownMinutes) || input.cooldownMinutes < 0 || input.cooldownMinutes > 1440) throw new BadRequestException('Cooldown must be between 0 and 1440 minutes');
-    if (input.dcaMultipliers.length < input.maxDcaOrders) throw new BadRequestException('DCA multipliers must cover every configured DCA level');
+    // Levels beyond the per-level list use dcaMultiplier growth (1 = equal-size buys), as the runner and backtests do.
     if (input.dcaMultipliers.some((value) => !Number.isFinite(value) || value <= 0)) throw new BadRequestException('Every DCA multiplier must be a positive number');
     for (const [label, value] of [
       ['Maximum strategy exposure', input.maxStrategyExposureQuote],

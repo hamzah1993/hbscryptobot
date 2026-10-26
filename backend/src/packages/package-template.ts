@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { CONFIRM_RULES, CONFIRM_TIMEFRAMES, ENTRY_MODES } from '../trading/entry-signal';
+import { MAX_DCA_LEVELS } from '../trading/risk-budget.service';
 import type { StrategyInput } from '../trading/strategy.service';
 
 /**
@@ -62,14 +63,14 @@ export const STRATEGY_FIELDS: StrategyField[] = [
 
   { key: 'baseOrderQuote', label: 'First buy', group: 'Orders', type: 'number', required: true, default: 10, min: 5, step: 0.5, unit: 'USDT',
     help: 'Size of the first buy of each cycle. Binance requires at least 5 USDT.' },
-  { key: 'maxDcaOrders', label: 'DCA levels', group: 'Orders', type: 'integer', required: true, default: 3, min: 3, max: 5,
-    help: 'Maximum number of extra buys if the price keeps falling.' },
+  { key: 'maxDcaOrders', label: 'DCA levels', group: 'Orders', type: 'integer', required: true, default: 3, min: 1, max: MAX_DCA_LEVELS,
+    help: `Maximum number of extra buys if the price keeps falling. For "keep buying until the budget runs out", set a high number (e.g. ${MAX_DCA_LEVELS}); the package budget is the real limit.` },
   { key: 'dcaStepPercent', label: 'DCA step', group: 'Orders', type: 'number', required: true, default: 3, min: 3, max: 15, step: 0.1, unit: '%',
     help: 'Price drop from the last buy that triggers the next DCA buy.' },
   { key: 'dcaMultiplier', label: 'DCA multiplier', group: 'Orders', type: 'number', required: true, default: 1, min: 1, step: 0.1, unit: '×',
-    help: 'Fallback size growth per DCA level when no per-level multipliers are set.' },
+    help: 'Size growth for levels not covered by the per-level list: level n buys first buy × this^n. 1 = every buy the same size.' },
   { key: 'dcaMultipliers', label: 'Per-level multipliers', group: 'Orders', type: 'numberList', default: [1, 1.5, 2],
-    help: 'Size of each DCA buy as a multiple of the first buy, one per level (e.g. 1, 1.5, 2).' },
+    help: 'Optional sizes for the first DCA levels as multiples of the first buy (e.g. 1, 1.5, 2). Leave empty to size every level with the DCA multiplier.' },
 
   { key: 'takeProfitPercent', label: 'Take profit', group: 'Exit', type: 'number', required: true, default: 1.5, min: 0.5, max: 5, step: 0.1, unit: '%',
     help: 'Sell everything once the price is this far above the average buy price. Must cover fees (about 0.2%).' },
@@ -79,7 +80,7 @@ export const STRATEGY_FIELDS: StrategyField[] = [
     help: 'Wait this long after a cycle closes before opening the next one.' },
 
   { key: 'independentFromLevel', label: 'Independent from level', group: 'Sub-positions', type: 'integer', required: true, default: 3, min: 2,
-    help: 'From this buy level on, each buy is its own sub-position with its own take profit.' },
+    help: 'From this buy level on, each buy is its own sub-position with its own take profit. Set it to DCA levels + 2 to keep every buy in one basket.' },
   { key: 'subPositionTriggerPercent', label: 'Sub-position trigger', group: 'Sub-positions', type: 'number', default: 2, min: 0.5, max: 5, step: 0.1, unit: '%',
     help: 'Price drop that triggers the next independent sub-position buy.' },
   { key: 'subPositionTakeProfitPercent', label: 'Sub-position take profit', group: 'Sub-positions', type: 'number', default: 1.5, min: 0.5, max: 5, step: 0.1, unit: '%',
@@ -152,8 +153,8 @@ export function sanitizePackageTemplate(raw: unknown): PackageStrategyTemplate {
         }
         break;
       case 'numberList':
-        if (!Array.isArray(value) || !value.length || !value.every(isFiniteNumber)) {
-          throw new BadRequestException(`${field.label} must be a non-empty list of numbers`);
+        if (!Array.isArray(value) || !value.every(isFiniteNumber)) {
+          throw new BadRequestException(`${field.label} must be a list of numbers`);
         }
         template[field.key] = [...value];
         continue;

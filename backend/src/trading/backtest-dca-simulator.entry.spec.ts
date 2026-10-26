@@ -49,6 +49,20 @@ describe('BacktestDcaSimulatorService dip entry and stop-loss', () => {
     expect(result.cycleCount).toBeGreaterThanOrEqual(1);
   });
 
+  it('keeps buying down a crash with unlimited levels and no stop-loss, and never sells at a loss', () => {
+    // 100 → 75 in 1% steps, then back up to 90: equal 10 USDT buys every 3% lower until the budget is used.
+    const down = Array.from({ length: 25 }, (_, i) => bar(100 - i, 99 - i));
+    const up = Array.from({ length: 15 }, (_, i) => bar(75 + i, 76 + i));
+    const result = simulator.simulate({ ...base, maxEntries: 200, candles: [...flat(3), ...down, ...up] });
+    const entries = result.trades!.filter((trade) => trade.type !== BacktestTradeType.PARENT_EXIT);
+    const exits = result.trades!.filter((trade) => trade.type === BacktestTradeType.PARENT_EXIT);
+    expect(entries.length).toBeGreaterThan(4);
+    expect(entries.reduce((sum, trade) => sum + Number(trade.quoteAmount ?? 0), 0)).toBeLessThanOrEqual(100.000001);
+    expect(result.stopLossCount).toBe(0);
+    expect(exits.length).toBeGreaterThanOrEqual(1);
+    for (const exit of exits) expect(Number(exit.realizedPnlQuote)).toBeGreaterThan(0);
+  });
+
   it('requires full candles for the dip rule', () => {
     expect(() => simulator.simulate({ ...base, candles: [{ close: 100 }], dipEntry: true })).toThrow('open/high/low/close');
   });

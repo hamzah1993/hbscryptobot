@@ -41,6 +41,20 @@ Create the predefined bots under **Package strategies** in the Admin Center. Eac
 
 **Exit.** *Take profit* sells everything at that % above the average buy price. The optional *Stop-loss* sells the whole basket once the price is that % below the average buy price; leave it empty to hold and DCA instead.
 
+**Buy until the budget runs out (no stop-loss).** *DCA levels* goes up to 200, but the risk budget is the real limit: buying stops when the next order no longer fits, and the bot then holds until the take profit is reached. It never sells below the average buy price. For equal-sized buys every *DCA step* % lower, use:
+
+| Field | Value |
+| --- | --- |
+| Entry mode | Wait for dip + bounce candle |
+| DCA levels | 200 |
+| DCA multiplier | 1 |
+| Per-level multipliers | empty (every level uses the multiplier) |
+| Stop-loss (optional) | empty |
+| Independent from level | DCA levels + 2 (e.g. 202), so all buys stay in one basket |
+| Recovery mode | off |
+
+With a 100 USDT budget and 10 USDT orders this makes 10 buys. The money stays locked while the price is below the average, so size the budget for the deepest drop you are willing to wait out.
+
 **Backtest before publishing.** *Backtest these settings* runs the form's current values, saved or not, on Binance history for the chosen days and capital (0.1% fee per buy and sell). It shows return, drawdown, cycles, stop-losses and profitable exits next to the same settings without the entry rules, so you can see whether the rules help. Cooldown and the daily loss stop are not simulated, and results on past data do not guarantee future returns.
 
 A strategy cannot be deactivated while an active package uses it, and an edit is refused if any package using it could no longer fund it.

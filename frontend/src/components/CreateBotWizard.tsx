@@ -164,7 +164,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (duplicateName) return setError(`You already have a bot named “${form.name.trim()}”. Choose another name or edit the existing bot.`);
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
     if (form.mode !== 'PAPER' && form.entryOrderType === 'LIMIT' && (!Number.isFinite(form.entryLimitPrice) || form.entryLimitPrice <= 0)) return setError('Enter a positive Limit Buy price.');
-    if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
+    if (form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Every DCA multiplier must be a positive number.');
     if (step === 2 && form.mode !== 'PAPER' && form.exchange === 'BINANCE') {
       setPreviewing(true);
       try {
@@ -186,7 +186,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
     if (!form.symbol || !form.marketPrice) return setError('A symbol and current market price are required.');
     if (form.mode !== 'PAPER' && form.entryOrderType === 'LIMIT' && (!Number.isFinite(form.entryLimitPrice) || form.entryLimitPrice <= 0)) return setError('Enter a positive Limit Buy price.');
     if (form.riskBudgetQuote < form.baseOrderQuote) return setError('Risk budget must be at least the base order amount.');
-    if (form.dcaMultipliers.length < form.maxDcaOrders || form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Enter one positive multiplier for every DCA level.');
+    if (form.dcaMultipliers.slice(0, form.maxDcaOrders).some((value) => !Number.isFinite(value) || value <= 0)) return setError('Every DCA multiplier must be a positive number.');
     if (form.mode !== 'PAPER' && !preview) return setError(`Refresh and confirm the Binance ${form.mode === 'LIVE' ? 'LIVE' : 'Testnet'} order preview before creating the bot.`);
     if (form.mode !== 'PAPER' && quoteBalance < Number(preview?.estimatedSpend ?? form.baseOrderQuote)) return setError(`Insufficient ${pair.quoteAsset} balance for the initial order.`);
 
@@ -250,7 +250,7 @@ export function CreateBotWizard({ token, defaultMode = 'TESTNET', onClose, onCre
       })}
         <label className="text-sm text-slate-300">Base position (% capital)<input type="number" min="0.1" max="5" step="0.1" value={form.basePositionPercent} onChange={(event) => update('basePositionPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300">Max total risk per pair (% capital)<input type="number" min="1" max="10" step="0.1" value={form.maxTotalRiskPercent} onChange={(event) => update('maxTotalRiskPercent', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
-        <label className="text-sm text-slate-300">Maximum DCA orders<input type="number" min="3" max="5" step="1" value={form.maxDcaOrders} onChange={(event) => update('maxDcaOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">Hard capped at 5 DCA levels.</span></label>
+        <label className="text-sm text-slate-300">Maximum DCA orders<input type="number" min="1" max="200" step="1" value={form.maxDcaOrders} onChange={(event) => update('maxDcaOrders', Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /><span className="mt-1 block text-xs text-slate-500">1–200. Buying always stops when the risk budget is used up.</span></label>
         <label className="text-sm text-slate-300">Maximum single order (USDT)<input type="number" min="0.01" step="any" value={form.maxOrderQuote ?? ''} onChange={(event) => update('maxOrderQuote', event.target.value ? Number(event.target.value) : null)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300">Maximum strategy exposure (USDT)<input type="number" min="0.01" step="any" value={form.maxStrategyExposureQuote ?? ''} onChange={(event) => update('maxStrategyExposureQuote', event.target.value ? Number(event.target.value) : null)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
         <label className="text-sm text-slate-300">Daily realized loss stop (USDT)<input type="number" min="0.01" step="any" value={form.maxDailyRealizedLossQuote ?? ''} onChange={(event) => update('maxDailyRealizedLossQuote', event.target.value ? Number(event.target.value) : null)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3" /></label>
