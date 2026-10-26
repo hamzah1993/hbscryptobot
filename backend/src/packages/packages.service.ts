@@ -57,7 +57,10 @@ export class PackagesService {
     const positions = strategyIds.length
       ? await this.prisma.tradingPosition.findMany({
           where: { userId, strategyId: { in: strategyIds } },
-          select: { strategyId: true, status: true, realizedPnlQuote: true, totalCostQuote: true },
+          select: {
+            strategyId: true, status: true, realizedPnlQuote: true, totalCostQuote: true,
+            subPositions: { select: { status: true, realizedPnlQuote: true, costQuote: true } },
+          },
         })
       : [];
 
@@ -65,7 +68,9 @@ export class PackagesService {
       const ids = new Set(strategies.map((strategy) => strategy.id));
       const own = positions.filter((position) => ids.has(position.strategyId));
       const open = own.filter((position) => position.status === 'OPEN');
-      const realizedPnlQuote = own.reduce((sum, position) => sum + Number(position.realizedPnlQuote), 0);
+      // Independent levels keep their own results and cost; include both.
+      const realizedPnlQuote = own.reduce((sum, position) => sum + Number(position.realizedPnlQuote)
+        + position.subPositions.reduce((subSum, item) => subSum + Number(item.realizedPnlQuote), 0), 0);
       const amountQuote = Number(subscription.amountQuote);
       return {
         ...subscription,
@@ -75,7 +80,8 @@ export class PackagesService {
           realizedPnlQuote,
           realizedReturnPercent: amountQuote > 0 ? (realizedPnlQuote / amountQuote) * 100 : 0,
           openPositions: open.length,
-          openPositionCostQuote: open.reduce((sum, position) => sum + Number(position.totalCostQuote), 0),
+          openPositionCostQuote: open.reduce((sum, position) => sum + Number(position.totalCostQuote)
+            + position.subPositions.filter((item) => item.status === 'OPEN').reduce((subSum, item) => subSum + Number(item.costQuote), 0), 0),
           closedPositions: own.length - open.length,
         },
       };

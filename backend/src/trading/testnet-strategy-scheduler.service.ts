@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyRunnerService } from './testnet-strategy-runner.service';
+import { forEachConcurrent, schedulerConcurrency } from './scheduler-concurrency';
 
 const TESTNET_STRATEGY_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-strategy-scheduler';
 const DEFAULT_TESTNET_STRATEGY_SCHEDULER_LOCK_TTL_MS = 30_000;
@@ -57,17 +58,21 @@ export class TestnetStrategySchedulerService {
         },
         select: { userId: true },
         distinct: ['userId'],
-        take: 100,
       });
 
       let opened = 0;
       let errors = 0;
 
-      for (const { userId } of users) {
-        const results = await this.runner.runUserStrategies(userId);
-        opened += results.filter((result) => result.action === 'OPEN').length;
-        errors += results.filter((result) => result.action === 'ERROR').length;
-      }
+      await forEachConcurrent(users, schedulerConcurrency('TESTNET_STRATEGY_CONCURRENCY'), async ({ userId }) => {
+        try {
+          const results = await this.runner.runUserStrategies(userId);
+          opened += results.filter((result) => result.action === 'OPEN').length;
+          errors += results.filter((result) => result.action === 'ERROR').length;
+        } catch (error) {
+          errors += 1;
+          this.health.markError(error);
+        }
+      });
 
       this.health.markStrategyTick();
       if (opened > 0) this.logger.log(`Opened ${opened} automatic Binance testnet position(s)`);

@@ -4,7 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisLockService, type RedisLock } from '../redis/redis-lock.service';
 import { TestnetRunnerHealthService } from './testnet-runner-health.service';
 import { TestnetStrategyActionService } from './testnet-strategy-action.service';
-import { TestnetStrategyExecutionService } from './testnet-strategy-execution.service';
+import { TestnetStrategyExecutionService, entryOrderTimeoutMs } from './testnet-strategy-execution.service';
+import { forEachConcurrent, schedulerConcurrency } from './scheduler-concurrency';
 
 const TESTNET_ORDER_SYNC_SCHEDULER_LOCK_KEY = 'hbs:lock:testnet-order-sync-scheduler';
 const DEFAULT_TESTNET_ORDER_SYNC_SCHEDULER_LOCK_TTL_MS = 30_000;
@@ -44,21 +45,25 @@ export class TestnetOrderSyncSchedulerService {
           exchangeOrderId: { not: null },
           position: { strategy: { mode: 'BINANCE_TESTNET', paperTrading: false, environment: 'TESTNET' } },
         },
-        select: { id: true, userId: true },
+        select: { id: true, userId: true, side: true, type: true, createdAt: true },
         orderBy: { createdAt: 'asc' },
-        take: 100,
       });
 
       let synced = 0;
-      for (const order of orders) {
+      const staleBefore = Date.now() - entryOrderTimeoutMs();
+      await forEachConcurrent(orders, schedulerConcurrency('TESTNET_ORDER_SYNC_CONCURRENCY'), async (order) => {
         try {
-          await this.testnetExecution.syncOrder(order.userId, order.id);
+          const result = await this.testnetExecution.syncOrder(order.userId, order.id);
           synced += 1;
+          const stillOpen = ['PENDING', 'PARTIALLY_FILLED'].includes(String(result?.tradingOrder?.status));
+          if (stillOpen && order.side === 'BUY' && order.type === 'LIMIT' && order.createdAt.getTime() < staleBefore) {
+            await this.testnetExecution.cancelStaleEntryOrder(order.userId, order.id);
+          }
         } catch (error) {
           this.health.markError(error);
           this.logger.warn(`Unable to synchronize testnet order ${order.id}: ${error instanceof Error ? error.message : String(error)}`);
         }
-      }
+      });
 
       const recoverableActions = await this.testnetActions.listRecoverable(100);
       let recovered = 0;

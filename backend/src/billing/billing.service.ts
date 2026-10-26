@@ -184,7 +184,8 @@ export class BillingService {
 
   /**
    * Settles the profit fee for one closed position: profitFeePercent of its
-   * realized profit, deducted from the user's balance (which may go negative,
+   * realized profit (main basket plus independent levels, net of Binance
+   * trading fees), deducted from the user's balance (which may go negative,
    * blocking new entries until topped up). Idempotent per position.
    */
   async settleProfitFee(positionId: string) {
@@ -201,10 +202,12 @@ export class BillingService {
       if (!claimed.count) return null;
       const position = await tx.tradingPosition.findUniqueOrThrow({
         where: { id: positionId },
-        select: { id: true, userId: true, symbol: true, realizedPnlQuote: true },
+        select: { id: true, userId: true, symbol: true, realizedPnlQuote: true, subPositions: { select: { realizedPnlQuote: true } } },
       });
 
-      const profit = Number(position.realizedPnlQuote);
+      // A position closes only after its independent levels have closed, so their results are final here.
+      const profit = Number(position.realizedPnlQuote)
+        + position.subPositions.reduce((sum, item) => sum + Number(item.realizedPnlQuote), 0);
       const feeQuote = floorQuote(profit > 0 ? (profit * settings.profitFeePercent) / 100 : 0);
       if (feeQuote <= 0) return { positionId: position.id, feeQuote: 0 };
 

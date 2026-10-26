@@ -29,8 +29,19 @@ At minimum, verify:
 - `FRONTEND_URL` (public frontend origin used to build password-reset links)
 - `EXCHANGE_CREDENTIALS_KEY`
 - `VITE_API_URL`
-- rate-limit settings
+- rate-limit settings, and `TRUST_PROXY_HOPS` (see below)
 - scheduler and execution lock TTLs
+
+### Client IP behind the hosting proxy
+
+Rate limits are applied per client IP. Behind Render (and Cloudflare, if used) the app only sees the real IP if `TRUST_PROXY_HOPS` matches the number of proxies in front of it; with the wrong value every user shares one limit and the app starts refusing requests once a few people use it. After each hosting change, sign in, open `GET /api/health/client-ip` with your token, and check that `ip` is your own public IP. If it shows a proxy address, increase `TRUST_PROXY_HOPS` by one and redeploy. Do not set it higher than needed: extra hops let a client spoof its IP.
+
+### Binance order handling
+
+- `BINANCE_HTTP_TIMEOUT_MS` (default 10000) bounds every Binance call. A timed-out or 5xx order request is retried and first looked up by its client order ID, so it is never placed twice.
+- Bot entry buys are limit orders at the last price. One that has not filled after `ENTRY_LIMIT_ORDER_TIMEOUT_MS` (default 45000) is cancelled; any partial fill is kept and the bot re-evaluates on its next tick.
+- Positions are tracked net of Binance trading fees, and exits never sell more than the account's free balance, so a take profit cannot fail with "insufficient balance" when fees were paid in the coin itself.
+- `LIVE_STRATEGY_CONCURRENCY` and `LIVE_ORDER_SYNC_CONCURRENCY` (default 8) set how many users / orders each 10-second pass handles in parallel. Every user with a running bot is processed on every pass.
 - notification retention and webhook settings
 
 For one-click Telegram account linking, configure these backend variables once:

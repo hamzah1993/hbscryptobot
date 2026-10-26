@@ -138,6 +138,22 @@ export class TestnetStrategyRunnerService {
     return results;
   }
 
+  /**
+   * Entry buys are limit orders that are cancelled when they do not fill in
+   * time. Each cancelled, unfilled attempt gets a fresh key so the level can be
+   * tried again, while a filled level keeps its key and is never bought twice.
+   */
+  private async entryActionKey(strategyId: string, baseKey: string) {
+    const cancelled = await this.prisma.strategyAction.count({
+      where: {
+        strategyId,
+        status: 'CANCELLED',
+        OR: [{ actionKey: baseKey }, { actionKey: { startsWith: `${baseKey}:attempt-` } }],
+      },
+    });
+    return cancelled ? `${baseKey}:attempt-${cancelled + 1}` : baseKey;
+  }
+
   private async hasPendingExecution(
     userId: string,
     strategyId: string,
@@ -155,7 +171,9 @@ export class TestnetStrategyRunnerService {
         where: {
           userId,
           strategyId,
-          status: { in: [...ACTIVE_ACTION_STATUSES] },
+          // A retryable failure may be an order whose result is unknown (timeout,
+          // 5xx); the retry scheduler resolves it by client order ID first.
+          OR: [{ status: { in: [...ACTIVE_ACTION_STATUSES] } }, { status: 'FAILED', retryable: true }],
         },
         select: { id: true },
       }),
@@ -324,7 +342,7 @@ export class TestnetStrategyRunnerService {
           const hold = await this.dcaConfirmationHold(strategy, environment, openPosition.id, quote.price);
           if (hold) return hold;
           const quantity = recoveryLeg.quoteAmount / quote.price;
-          const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:recovery-dca:${recoveryLeg.recoveryLevel}`;
+          const actionKey = await this.entryActionKey(strategy.id, `strategy:${strategy.id}:position:${openPosition.id}:recovery-dca:${recoveryLeg.recoveryLevel}`);
           const execution = await this.testnetExecution.executeMarketOrder(userId, {
             strategyId: strategy.id,
             side: 'BUY',
@@ -446,7 +464,7 @@ export class TestnetStrategyRunnerService {
           const hold = await this.dcaConfirmationHold(strategy, environment, openPosition.id, quote.price);
           if (hold) return hold;
           const quantity = recoveryLeg.quoteAmount / quote.price;
-          const actionKey = `strategy:${strategy.id}:position:${openPosition.id}:recovery-dca:${recoveryLeg.recoveryLevel}`;
+          const actionKey = await this.entryActionKey(strategy.id, `strategy:${strategy.id}:position:${openPosition.id}:recovery-dca:${recoveryLeg.recoveryLevel}`);
           const execution = await this.testnetExecution.executeMarketOrder(userId, {
             strategyId: strategy.id,
             side: 'BUY',
@@ -532,9 +550,9 @@ export class TestnetStrategyRunnerService {
       const independentFromLevel = Number(strategy.independentFromLevel);
       const independent = nextLevel >= independentFromLevel;
       const actionType = independent ? 'INDEPENDENT_ENTRY' : 'DCA_ENTRY';
-      const actionKey = independent
+      const actionKey = await this.entryActionKey(strategy.id, independent
         ? `strategy:${strategy.id}:position:${openPosition.id}:independent-entry:${nextLevel}`
-        : `strategy:${strategy.id}:position:${openPosition.id}:dca:${nextLevel}`;
+        : `strategy:${strategy.id}:position:${openPosition.id}:dca:${nextLevel}`);
 
       const execution = await this.testnetExecution.executeMarketOrder(userId, {
         strategyId: strategy.id,

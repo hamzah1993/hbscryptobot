@@ -419,7 +419,12 @@ export class TestnetStrategyActionService {
     const normalized = message.toLowerCase();
     const statusCode = this.extractStatusCode(error);
 
-    if (normalized.includes('timeout') || normalized.includes('timed out') || statusCode === 408) {
+    if (
+      normalized.includes('timeout') ||
+      normalized.includes('timed out') ||
+      normalized.includes('status unknown') ||
+      statusCode === 408
+    ) {
       return { category: 'TIMEOUT', retryable: true, message };
     }
     if (
@@ -427,6 +432,7 @@ export class TestnetStrategyActionService {
       normalized.includes('econnrefused') ||
       normalized.includes('enotfound') ||
       normalized.includes('network') ||
+      normalized.includes('fetch failed') ||
       normalized.includes('socket')
     ) {
       return { category: 'NETWORK', retryable: true, message };

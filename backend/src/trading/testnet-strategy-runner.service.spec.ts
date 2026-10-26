@@ -40,6 +40,7 @@ describe('TestnetStrategyRunnerService', () => {
       },
       strategyAction: {
         findFirst: jest.fn().mockResolvedValue(pendingAction),
+        count: jest.fn().mockResolvedValue(0),
       },
     } as any;
     const marketData = {

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
 
@@ -65,9 +65,31 @@ export type BinanceKlineQuery = {
   endTime?: number;
 };
 
+const DEFAULT_HTTP_TIMEOUT_MS = 10_000;
+
 @Injectable()
 export class BinanceService {
-  constructor(private readonly config: ConfigService) {}
+  private readonly timeoutMs: number;
+
+  constructor(private readonly config: ConfigService) {
+    const configured = Number(process.env.BINANCE_HTTP_TIMEOUT_MS);
+    this.timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_HTTP_TIMEOUT_MS;
+  }
+
+  /** Every Binance call is bounded so a hung request cannot stall the schedulers. */
+  private async http(url: string, init: RequestInit = {}) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(this.timeoutMs) });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'TimeoutError' || name === 'AbortError') {
+        throw new HttpException(`Binance request timed out after ${this.timeoutMs} ms`, HttpStatus.REQUEST_TIMEOUT);
+      }
+      const reason = (error as { cause?: unknown } | null)?.cause;
+      const cause = reason instanceof Error ? `: ${reason.message}` : '';
+      throw new HttpException(`Binance network error${cause}`, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
 
   private getBaseUrl(environment: BinanceEnvironment) {
     return environment === 'testnet'
@@ -76,13 +98,13 @@ export class BinanceService {
   }
 
   async getServerTime(environment: BinanceEnvironment = 'testnet') {
-    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/time`);
+    const response = await this.http(`${this.getBaseUrl(environment)}/api/v3/time`);
     if (!response.ok) throw new Error(`Binance time request failed: ${response.status}`);
     return response.json();
   }
 
   async getTickerPrice(symbol: string, environment: BinanceEnvironment = 'testnet') {
-    const response = await fetch(
+    const response = await this.http(
       `${this.getBaseUrl(environment)}/api/v3/ticker/price?symbol=${encodeURIComponent(symbol.toUpperCase())}`,
     );
     if (!response.ok) throw new Error(`Binance ticker request failed: ${response.status}`);
@@ -91,14 +113,14 @@ export class BinanceService {
 
   /** 24-hour rolling statistics for every spot symbol (request weight 80). */
   async get24hTickers(environment: BinanceEnvironment = 'live') {
-    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/ticker/24hr`);
+    const response = await this.http(`${this.getBaseUrl(environment)}/api/v3/ticker/24hr`);
     if (!response.ok) throw new Error(`Binance 24h ticker request failed: ${response.status}`);
     return response.json() as Promise<Array<{ symbol: string; lastPrice: string; priceChangePercent: string; quoteVolume: string }>>;
   }
 
   /** Base and quote assets of every currently tradable spot symbol. */
   async getTradingSymbols(environment: BinanceEnvironment = 'live') {
-    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/exchangeInfo?permissions=SPOT&symbolStatus=TRADING`);
+    const response = await this.http(`${this.getBaseUrl(environment)}/api/v3/exchangeInfo?permissions=SPOT&symbolStatus=TRADING`);
     if (!response.ok) throw new Error(`Binance exchange info request failed: ${response.status}`);
     const body = await response.json() as { symbols: Array<{ symbol: string; baseAsset: string; quoteAsset: string }> };
     return body.symbols.map(({ symbol, baseAsset, quoteAsset }) => ({ symbol, baseAsset, quoteAsset }));
@@ -142,7 +164,7 @@ export class BinanceService {
       search.set('endTime', String(query.endTime));
     }
 
-    const response = await fetch(`${this.getBaseUrl(environment)}/api/v3/klines?${search.toString()}`);
+    const response = await this.http(`${this.getBaseUrl(environment)}/api/v3/klines?${search.toString()}`);
     const body = await response.json();
     if (!response.ok) {
       const message = typeof body?.msg === 'string' ? body.msg : `Binance klines request failed: ${response.status}`;
@@ -173,7 +195,7 @@ export class BinanceService {
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
 
-    const response = await fetch(
+    const response = await this.http(
       `${this.getBaseUrl(environment)}/api/v3/exchangeInfo?symbol=${encodeURIComponent(normalized)}`,
     );
     const body = await response.json();
@@ -238,6 +260,24 @@ export class BinanceService {
       apiSecret,
       environment,
     );
+  }
+
+  /** Trades of one order, including each fill's commission (request weight 5). */
+  async getOrderTrades(
+    symbol: string,
+    orderId: string,
+    apiKey: string,
+    apiSecret: string,
+    environment: BinanceEnvironment = 'testnet',
+  ) {
+    return this.signedRequest(
+      '/api/v3/myTrades',
+      'GET',
+      { symbol: symbol.trim().toUpperCase(), orderId: orderId.trim() },
+      apiKey,
+      apiSecret,
+      environment,
+    ) as Promise<Array<{ price: string; qty: string; quoteQty: string; commission: string; commissionAsset: string }>>;
   }
 
   async cancelOrder(
@@ -336,17 +376,29 @@ export class BinanceService {
     const signature = createHmac('sha256', apiSecret).update(search.toString()).digest('hex');
     search.set('signature', signature);
 
-    const response = await fetch(`${this.getBaseUrl(environment)}${path}?${search.toString()}`, {
+    const response = await this.http(`${this.getBaseUrl(environment)}${path}?${search.toString()}`, {
       method,
       headers: { 'X-MBX-APIKEY': apiKey },
     });
-    const body = await response.json();
+    // Binance's edge can answer with HTML (e.g. a 502 page); never let that surface as a SyntaxError.
+    const body: any = await response.json().catch(() => null);
     if (!response.ok) {
       const message = typeof body?.msg === 'string' ? body.msg : `Binance request failed: ${response.status}`;
+      // Rate limits (429/418) and Binance server errors keep their status so
+      // callers can retry them; for an order, a 5xx means "status unknown".
+      if (response.status === 429 || response.status === 418) {
+        throw new HttpException(`Binance rate limit: ${message}`, HttpStatus.TOO_MANY_REQUESTS);
+      }
+      if (response.status >= 500) {
+        throw new HttpException(`Binance temporarily unavailable (${response.status}): ${message}`, HttpStatus.SERVICE_UNAVAILABLE);
+      }
       // A rejected signed request is normally a user-actionable credential,
       // permission, IP-whitelist, timestamp, or order validation error.  Do
       // not turn Binance's 4xx response into an opaque NestJS 500.
       throw new BadRequestException(`Binance: ${message}`);
+    }
+    if (body === null) {
+      throw new HttpException('Binance returned an unreadable response', HttpStatus.SERVICE_UNAVAILABLE);
     }
     return body;
   }

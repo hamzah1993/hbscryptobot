@@ -46,6 +46,20 @@ export class RedisLockService implements OnModuleDestroy {
     return result === 1;
   }
 
+  /** Extends a lock this process still owns; returns false if it expired or another owner took it. */
+  async extend(lock: RedisLock, ttlMilliseconds: number): Promise<boolean> {
+    await this.ensureConnected();
+    const result = await this.client.eval(
+      "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end",
+      {
+        keys: [lock.key],
+        arguments: [lock.token, String(ttlMilliseconds)],
+      },
+    );
+
+    return result === 1;
+  }
+
   async ping(): Promise<boolean> {
     await this.ensureConnected();
     return (await this.client.ping()) === 'PONG';

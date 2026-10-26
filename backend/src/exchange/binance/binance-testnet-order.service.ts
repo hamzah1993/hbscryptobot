@@ -164,6 +164,27 @@ export class BinanceTestnetOrderService {
     );
   }
 
+  /** Fills of one order with their commissions; GET /order alone does not report fees. */
+  async getOrderTrades(userId: string, symbol: string, exchangeOrderId: string) {
+    const credential = await this.credentials.getBinance(userId, this.credentialEnvironment);
+    return this.binance.getOrderTrades(symbol, exchangeOrderId, credential.apiKey, credential.apiSecret, this.binanceEnvironment);
+  }
+
+  /** Free (unlocked) balance of the symbol's base asset, e.g. BTC for BTCUSDT. */
+  async getFreeBaseBalance(userId: string, symbol: string) {
+    const normalized = symbol.trim().toUpperCase();
+    const [credential, symbolInfo] = await Promise.all([
+      this.credentials.getBinance(userId, this.credentialEnvironment),
+      this.binance.getSymbolInfo(normalized, this.binanceEnvironment),
+    ]);
+    const account = (await this.binance.getAccount(credential.apiKey, credential.apiSecret, this.binanceEnvironment)) as {
+      balances?: Array<{ asset?: string; free?: string }>;
+    };
+    const balance = account?.balances?.find((item) => item.asset === symbolInfo.baseAsset);
+    const free = Number(balance?.free ?? 0);
+    return Number.isFinite(free) ? free : 0;
+  }
+
   async findOrderByClientOrderId(userId: string, symbol: string, clientOrderId: string) {
     const normalized = symbol.trim().toUpperCase();
     if (!normalized) throw new BadRequestException('Symbol is required');
