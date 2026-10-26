@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, IsUUID, Matches, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -11,4 +11,9 @@ export class LoginDto {
   @IsOptional()
   @IsUUID()
   deviceId?: string;
+
+  /** Authenticator-app code; required when the account has two-factor authentication on. */
+  @IsOptional()
+  @Matches(/^\s*\d{3}\s?\d{3}\s*$/, { message: 'Authentication code must be 6 digits' })
+  totpCode?: string;
 }

@@ -7,7 +7,7 @@ import { ExchangeAccountsPage } from './pages/ExchangeAccountsPage';
 import { AdminPage } from './pages/AdminPage';
 import { AppShell } from './mobile/AppShell';
 import { AssetsScreen } from './mobile/AssetsScreen';
-import { GuideScreen, ProfitScreen, RewardScreen } from './mobile/DetailScreens';
+import { GuideScreen, ProfitScreen, RewardScreen, SecurityScreen } from './mobile/DetailScreens';
 import { HomeScreen } from './mobile/HomeScreen';
 import { MineScreen } from './mobile/MineScreen';
 import { NewsScreen } from './mobile/NewsScreen';
@@ -42,6 +42,7 @@ export default function App() {
           <Route path="/profits" element={<ProfitScreen />} />
           <Route path="/rewards" element={<RewardScreen />} />
           <Route path="/guide" element={<GuideScreen />} />
+          <Route path="/security" element={<SecurityScreen />} />
         </Route>
         <Route path="/pro" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
         <Route path="/exchange-accounts" element={<ProtectedRoute><ExchangeAccountsPage /></ProtectedRoute>} />

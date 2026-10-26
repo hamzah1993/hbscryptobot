@@ -11,7 +11,8 @@
     "test:watch": "jest --watch",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "admin:promote": "node scripts/promote-admin.mjs"
+    "admin:promote": "node scripts/promote-admin.mjs",
+    "user:reset-2fa": "node scripts/reset-two-factor.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -26,7 +27,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "ethers": "^6.17.0",
-    "nodemailer": "^7.0.6",
+    "nodemailer": "10.1.7",
     "redis": "^5.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
@@ -62,5 +63,9 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "overrides": {
+    "multer": "2.5.0",
+    "deepmerge-ts": "8.0.2"
   }
 }

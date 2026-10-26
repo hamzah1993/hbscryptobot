@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { api, type AuthUser } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
+import { TwoFactorSection } from './TwoFactorSection';
 
 type Props = {
   user: AuthUser;
@@ -94,6 +95,8 @@ export function UserProfilePanel({ user, onLogout }: Props) {
             </form>
           )}
         </div>
+
+        <TwoFactorSection />
 
         <div className="flex flex-col gap-3 border-t border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-7">
           <p className="text-xs leading-5 text-slate-500">You are signed in to HBS Trading Control Center.</p>

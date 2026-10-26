@@ -17,6 +17,14 @@ export class AppController {
    * Shows the address rate limits are applied to. When TRUST_PROXY_HOPS is
    * right for the hosting provider, `ip` is your own public IP address.
    */
+  /** Public outbound IP(s) of the trading server, for users to restrict their Binance API keys to. */
+  @Get('config/server-ip')
+  @UseGuards(JwtAuthGuard)
+  serverIp() {
+    const ips = (process.env.SERVER_OUTBOUND_IP ?? '').split(',').map((ip) => ip.trim()).filter(Boolean);
+    return { ips };
+  }
+
   @Get('health/client-ip')
   @UseGuards(JwtAuthGuard)
   clientIp(@Req() request: Request) {

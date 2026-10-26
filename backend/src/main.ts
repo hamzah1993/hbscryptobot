@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { allowedOrigins, securityHeaders } from './http-security';
 
 /** Number of reverse proxies in front of the app (Render, Cloudflare, ...); rate limits key on the client IP they forward. */
 export function trustProxyHops(value = process.env.TRUST_PROXY_HOPS) {
@@ -12,8 +13,10 @@ export function trustProxyHops(value = process.env.TRUST_PROXY_HOPS) {
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.set('trust proxy', trustProxyHops());
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
   app.setGlobalPrefix('api');
-  app.enableCors({ origin: true, credentials: true });
+  app.enableCors({ origin: allowedOrigins(), credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.listen(process.env.PORT ?? 3000);
 }

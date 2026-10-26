@@ -735,4 +735,14 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
       expect(testnetOrders.getOrder).toHaveBeenCalled();
     });
   });
+
+  it('refuses take-profit edits on package positions', async () => {
+    const { service, tradingPosition } = createService();
+    tradingPosition.findFirst.mockResolvedValueOnce({
+      id: 'position-1', status: 'OPEN', subPositions: [], orders: [],
+      strategy: { ...strategy, packageSubscriptionId: 'subscription-1' },
+    });
+    await expect(service.updateTakeProfit(userId, 'position-1', { target: 'PARENT', takeProfitPrice: 120 }))
+      .rejects.toThrow('Package positions');
+  });
 });

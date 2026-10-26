@@ -105,6 +105,9 @@ export class TestnetStrategyExecutionService {
     if (position.strategy.paperTrading || position.strategy.environment !== this.executionEnvironment) {
       throw new BadRequestException(`Only ${this.executionLabel} positions can be edited here`);
     }
+    if (position.strategy.packageSubscriptionId) {
+      throw new BadRequestException('Package positions follow the package settings and cannot be edited');
+    }
     if (position.status !== 'OPEN') throw new BadRequestException('Only open Testnet positions can be edited');
     if (position.strategy.status !== 'PAUSED') throw new BadRequestException('Pause the bot before editing Testnet take profit');
     if (position.orders.length > 0) {
