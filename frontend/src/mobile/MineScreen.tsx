@@ -1,4 +1,4 @@
-import { BookOpen, ChartLine, ChevronRight, Gift, KeyRound, LayoutDashboard, LogOut, ShieldCheck, Wallet } from 'lucide-react';
+import { BookOpen, ChartLine, ChevronRight, Gift, KeyRound, LayoutDashboard, Lock, LogOut, ShieldCheck, Wallet } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -14,6 +14,7 @@ export function MineScreen() {
   const items: Item[] = [
     { label: 'Assets', to: '/assets', icon: Wallet },
     { label: 'API Binding', to: '/exchange-accounts', icon: KeyRound },
+    { label: 'Security', to: '/security', icon: Lock },
     { label: 'Profit Details', to: '/profits', icon: ChartLine },
     { label: 'Reward Details', to: '/rewards', icon: Gift },
     { label: 'User Guide', to: '/guide', icon: BookOpen },

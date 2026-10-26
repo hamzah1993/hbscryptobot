@@ -1,3 +1,4 @@
+import { TwoFactorSection } from '../components/TwoFactorSection';
 import { useAuth } from '../auth/AuthContext';
 import { api, type BalanceEntryType } from '../lib/api';
 import { Card, Empty, ErrorNote, SubHeader, money, signed, usePolling } from './ui';
@@ -86,6 +87,15 @@ export function GuideScreen() {
           <div><h2 className="font-semibold">{step.title}</h2><p className="mt-1 text-sm leading-6 text-slate-500">{step.body}</p></div>
         </div>
       </Card>)}
+    </main>
+  </>;
+}
+
+export function SecurityScreen() {
+  return <>
+    <SubHeader title="Security" />
+    <main className="space-y-3 px-3">
+      <TwoFactorSection variant="light" />
     </main>
   </>;
 }

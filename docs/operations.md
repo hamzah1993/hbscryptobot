@@ -57,6 +57,10 @@ Never commit `.env`, exchange keys, encryption keys, webhook secrets, or databas
 
 ## 3. Initial deployment
 
+### VPS deployment (recommended)
+
+See [deployment-vps.md](deployment-vps.md): one server with Docker Compose, Caddy for HTTPS, a fixed IP for Binance API key restrictions, and steps for moving from Render.
+
 ### Render production deployment
 
 The current production backend is deployed on Render. Use committed Prisma migrations; the one-time baseline required by the original `db push` deployment has already been completed.

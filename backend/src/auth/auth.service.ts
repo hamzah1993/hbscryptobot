@@ -10,6 +10,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { TwoFactorService } from './two-factor.service';
 
 export type LoginMetadata = {
   userAgent?: string;
@@ -24,6 +25,7 @@ export class AuthService {
     private readonly notifications: NotificationsService,
     private readonly notificationChannels: NotificationChannelsService,
     private readonly billing: BillingService,
+    private readonly twoFactor: TwoFactorService,
   ) {}
 
   async register(dto: RegisterDto, metadata: LoginMetadata = {}) {
@@ -49,6 +51,11 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+    if (user.totpEnabledAt) {
+      // Password is right; the client now asks for the authenticator code and signs in again with it.
+      if (!dto.totpCode) return { twoFactorRequired: true as const };
+      await this.twoFactor.verifyLogin(user, dto.totpCode);
     }
 
     if (dto.deviceId) await this.recordDevice(user.id, dto.deviceId, metadata, true);

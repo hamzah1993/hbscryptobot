@@ -16,6 +16,8 @@ export function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [needsCode, setNeedsCode] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -28,6 +30,8 @@ export function AuthPage() {
     setSuccess('');
     setPassword('');
     setConfirmPassword('');
+    setTotpCode('');
+    setNeedsCode(false);
     if (next !== 'reset' && resetToken) setSearchParams({}, { replace: true });
   }
 
@@ -38,7 +42,8 @@ export function AuthPage() {
     setSuccess('');
     try {
       if (mode === 'login') {
-        await login(email, password);
+        const result = await login(email, password, needsCode ? totpCode : undefined);
+        if (result.twoFactorRequired) setNeedsCode(true);
       } else if (mode === 'register') {
         await register(fullName, email, password, referralCode);
       } else if (mode === 'forgot') {
@@ -80,6 +85,13 @@ export function AuthPage() {
           )}
           {mode !== 'forgot' && (
             <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-500" type="password" placeholder={mode === 'reset' ? 'New password (minimum 8 characters)' : 'Password (minimum 8 characters)'} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required />
+          )}
+          {mode === 'login' && needsCode && (
+            <label className="block text-sm text-slate-300">
+              Authentication code
+              <input className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-center text-xl tracking-[0.4em] outline-none focus:border-emerald-500" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={totpCode} onChange={(e) => setTotpCode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))} pattern="\d{6}" autoFocus required />
+              <span className="mt-1 block text-xs text-slate-500">Open your authenticator app and enter the 6-digit code for HBS Trading.</span>
+            </label>
           )}
           {mode === 'reset' && (
             <input className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-emerald-500" type="password" placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={8} required />

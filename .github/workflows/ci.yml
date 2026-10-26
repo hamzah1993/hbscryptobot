@@ -110,3 +110,44 @@ jobs:
 
       - name: Build Docker images
         run: docker compose build
+
+  production-stack:
+    name: Production stack smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create production environment file
+        run: |
+          cp deploy/.env.production.example deploy/.env.production
+          sed -i \
+            -e 's/^DOMAIN=.*/DOMAIN=localhost/' \
+            -e 's|^FRONTEND_URL=.*|FRONTEND_URL=https://localhost|' \
+            -e 's|^CORS_ORIGINS=.*|CORS_ORIGINS=https://localhost|' \
+            -e "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 16)/" \
+            -e "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD=$(openssl rand -hex 16)/" \
+            -e "s/^JWT_SECRET=.*/JWT_SECRET=$(openssl rand -hex 32)/" \
+            -e "s|^EXCHANGE_CREDENTIALS_KEY=.*|EXCHANGE_CREDENTIALS_KEY=$(openssl rand -base64 32)|" \
+            deploy/.env.production
+
+      - name: Validate production Compose configuration
+        run: docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml config --quiet
+
+      - name: Build and start the production stack
+        run: docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml up -d --build --wait --wait-timeout 300
+
+      - name: Validate the Caddy configuration
+        run: docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml exec -T web caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Smoke test the web app and API over HTTPS
+        run: |
+          curl -fsSk https://localhost/api/health | grep '"status":"ok"'
+          curl -fsSk https://localhost/ | grep -i '<div id="root"'
+          curl -fsSk https://localhost/some/client/route | grep -i '<div id="root"'
+          curl -fsSkI https://localhost/api/health | grep -i 'x-content-type-options: nosniff'
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose --env-file deploy/.env.production -f deploy/docker-compose.prod.yml logs --tail=200

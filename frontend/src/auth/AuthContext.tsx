@@ -5,7 +5,8 @@ type AuthContextValue = {
   user: AuthUser | null;
   token: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Resolves `{ twoFactorRequired: true }` when the account needs an authenticator code. */
+  login: (email: string, password: string, totpCode?: string) => Promise<{ twoFactorRequired: boolean }>;
   register: (fullName: string, email: string, password: string, referralCode?: string) => Promise<void>;
   logout: () => void;
 };
@@ -46,11 +47,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     token,
     loading,
-    async login(email, password) {
-      const result = await api.login({ email, password, deviceId: deviceId() });
+    async login(email, password, totpCode) {
+      const result = await api.login({ email, password, deviceId: deviceId(), totpCode: totpCode?.trim() || undefined });
+      if ('twoFactorRequired' in result) return { twoFactorRequired: true };
       localStorage.setItem(TOKEN_KEY, result.accessToken);
       setToken(result.accessToken);
       setUser(result.user);
+      return { twoFactorRequired: false };
     },
     async register(fullName, email, password, referralCode) {
       const result = await api.register({ fullName, email, password, deviceId: deviceId(), referralCode: referralCode?.trim() || undefined });

@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+backend/backups
+.git
+.env
+.env.*
+deploy/.env.production

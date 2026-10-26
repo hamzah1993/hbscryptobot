@@ -27,6 +27,10 @@ function exchangeMeta(exchange: Exchange) {
 
 export function ExchangeAccountsPanel({ token }: Props) {
   const [credentials, setCredentials] = useState<ExchangeCredentialSummary[]>([]);
+  const [serverIps, setServerIps] = useState<string[]>([]);
+  useEffect(() => {
+    api.serverIps(token).then((result) => setServerIps(result.ips)).catch(() => setServerIps([]));
+  }, [token]);
   const [selectedExchange, setSelectedExchange] = useState<Exchange>('BINANCE');
   const [selectedEnvironment, setSelectedEnvironment] = useState<ExchangeEnvironment>('TESTNET');
   const [formOpen, setFormOpen] = useState(false);
@@ -258,6 +262,18 @@ export function ExchangeAccountsPanel({ token }: Props) {
             </label>
           </div>
           <p className="mt-3 text-xs text-slate-500">{selectedExchange === 'BINANCE' && selectedEnvironment === 'LIVE' ? 'Binance Spot LIVE. The API key must permit Spot trading and must NOT permit withdrawals. Saving credentials does not activate real-money execution.' : meta.description}</p>
+          {selectedExchange === 'BINANCE' && selectedEnvironment === 'LIVE' && serverIps.length > 0 && (
+            <div className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+              <p className="font-semibold">Restrict the key to our server IP</p>
+              <p className="mt-1 text-xs leading-5 text-amber-100/80">In Binance → API Management → Edit restrictions, choose “Restrict access to trusted IPs only” and add:</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {serverIps.map((ip) => (
+                  <button key={ip} type="button" onClick={() => { void navigator.clipboard?.writeText(ip); }} title="Copy" className="rounded-lg bg-slate-950/50 px-3 py-1.5 font-mono text-xs text-amber-50">{ip} ⧉</button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-amber-100/70">Binance limits keys without an IP restriction, and an IP-restricted key is useless to anyone who steals it.</p>
+            </div>
+          )}
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <label className="text-sm text-slate-300">API key<input required value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" spellCheck={false} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 outline-none ring-cyan-400/40 focus:ring" /></label>
             <label className="text-sm text-slate-300">API secret<input required value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} type="password" autoComplete="new-password" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 outline-none ring-cyan-400/40 focus:ring" /></label>

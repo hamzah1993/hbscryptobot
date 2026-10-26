@@ -625,6 +625,11 @@ type AuthResponse = {
   accessToken: string;
 };
 
+/** Sign-in either succeeds or, for accounts with two-factor on, asks for the authenticator code. */
+type LoginResponse = AuthResponse | { twoFactorRequired: true };
+
+export type TwoFactorStatus = { enabled: boolean; enabledAt: string | null };
+
 export type CreateStrategyPayload = {
   name: string;
   symbol: string;
@@ -706,8 +711,15 @@ const toBinanceEnvironment = (environment: ExchangeEnvironment): BinanceStreamEn
 export const api = {
   register: (payload: { email: string; fullName: string; password: string; deviceId?: string; referralCode?: string }) =>
     request<AuthResponse>('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
-  login: (payload: { email: string; password: string; deviceId?: string }) =>
-    request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+  login: (payload: { email: string; password: string; deviceId?: string; totpCode?: string }) =>
+    request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
+  twoFactorStatus: (token: string) => request<TwoFactorStatus>('/auth/2fa', { headers: authHeaders(token) }),
+  setupTwoFactor: (token: string) =>
+    request<{ secret: string; otpauthUrl: string }>('/auth/2fa/setup', { method: 'POST', headers: authHeaders(token) }),
+  enableTwoFactor: (token: string, code: string) =>
+    request<{ enabled: true }>('/auth/2fa/enable', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ code }) }),
+  disableTwoFactor: (token: string, password: string, code: string) =>
+    request<{ enabled: false }>('/auth/2fa/disable', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ password, code }) }),
   forgotPassword: (email: string) =>
     request<{ requested: true }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token: string, newPassword: string) =>
@@ -715,6 +727,7 @@ export const api = {
   changePassword: (token: string, currentPassword: string, newPassword: string) =>
     request<{ changed: true; sessionsInvalidated: true }>('/auth/change-password', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ currentPassword, newPassword }) }),
   me: (token: string) => request<AuthUser>('/users/me', { headers: authHeaders(token) }),
+  serverIps: (token: string) => request<{ ips: string[] }>('/config/server-ip', { headers: authHeaders(token) }),
   createAdminSession: (token: string, password: string) => request<{ adminSessionToken: string; expiresInSeconds: number }>('/super/admin/control/session', { method: 'POST', headers: authHeaders(token), body: JSON.stringify({ password }) }),
   getAdminHealth: (token: string, adminSessionToken: string) => request<AdminHealth>('/super/admin/control/health', { headers: adminHeaders(token, adminSessionToken) }),
   getAdminMonitoring: (token: string, adminSessionToken: string) => request<AdminMonitoringStatus>('/super/admin/control/monitoring', { headers: adminHeaders(token, adminSessionToken) }),

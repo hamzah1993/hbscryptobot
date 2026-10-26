@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { getAuthRateLimitConfiguration } from './auth-rate-limit.config';
@@ -8,13 +8,18 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { DisableTwoFactorDto, TwoFactorCodeDto } from './dto/two-factor.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { TwoFactorService } from './two-factor.service';
 
 const authRateLimit = getAuthRateLimitConfiguration();
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly twoFactor: TwoFactorService,
+  ) {}
 
   @Post('register')
   @Throttle({
@@ -59,6 +64,33 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(request.user.sub, dto);
+  }
+
+  @Get('2fa')
+  @UseGuards(JwtAuthGuard)
+  twoFactorStatus(@Req() request: Request & { user: { sub: string } }) {
+    return this.twoFactor.status(request.user.sub);
+  }
+
+  @Post('2fa/setup')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: authRateLimit.ttlMilliseconds } })
+  setupTwoFactor(@Req() request: Request & { user: { sub: string } }) {
+    return this.twoFactor.setup(request.user.sub);
+  }
+
+  @Post('2fa/enable')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: authRateLimit.ttlMilliseconds } })
+  enableTwoFactor(@Req() request: Request & { user: { sub: string } }, @Body() dto: TwoFactorCodeDto) {
+    return this.twoFactor.enable(request.user.sub, dto.code);
+  }
+
+  @Post('2fa/disable')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: authRateLimit.ttlMilliseconds } })
+  disableTwoFactor(@Req() request: Request & { user: { sub: string } }, @Body() dto: DisableTwoFactorDto) {
+    return this.twoFactor.disable(request.user.sub, dto.password, dto.code);
   }
 
   private loginMetadata(request: Request) {

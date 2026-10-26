@@ -13,12 +13,34 @@ describe('AuthService account security', () => {
   const notifications = { publish: jest.fn() };
   const channels = { sendSecurityEmail: jest.fn().mockResolvedValue(true) };
   const billing = { resolveReferrer: jest.fn().mockResolvedValue(null), ensureAccount: jest.fn().mockResolvedValue({}) };
-  const service = () => new AuthService(prisma as any, jwt as any, notifications as any, channels as any, billing as any);
+  const twoFactor = { verifyLogin: jest.fn().mockResolvedValue(undefined) };
+  const service = () => new AuthService(prisma as any, jwt as any, notifications as any, channels as any, billing as any, twoFactor as any);
 
   beforeEach(() => {
     jest.clearAllMocks();
     jwt.signAsync.mockResolvedValue('signed-token');
     channels.sendSecurityEmail.mockResolvedValue(true);
+  });
+
+  it('asks for the authenticator code before issuing a token when two-factor is on', async () => {
+    const passwordHash = await argon2.hash('password123');
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@example.com', fullName: 'A', role: 'USER', authVersion: 0, passwordHash, totpEnabledAt: new Date() });
+
+    await expect(service().login({ email: 'a@example.com', password: 'password123' })).resolves.toEqual({ twoFactorRequired: true });
+    expect(jwt.signAsync).not.toHaveBeenCalled();
+
+    const result = await service().login({ email: 'a@example.com', password: 'password123', totpCode: '123456' });
+    expect(twoFactor.verifyLogin).toHaveBeenCalledWith(expect.objectContaining({ id: 'u1' }), '123456');
+    expect(result).toMatchObject({ accessToken: 'signed-token' });
+  });
+
+  it('rejects a wrong authenticator code', async () => {
+    const passwordHash = await argon2.hash('password123');
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@example.com', fullName: 'A', role: 'USER', authVersion: 0, passwordHash, totpEnabledAt: new Date() });
+    twoFactor.verifyLogin.mockRejectedValueOnce(new UnauthorizedException('Invalid or already used authentication code'));
+
+    await expect(service().login({ email: 'a@example.com', password: 'password123', totpCode: '000000' })).rejects.toThrow('authentication code');
+    expect(jwt.signAsync).not.toHaveBeenCalled();
   });
 
   it('records the first device without raising a new-device warning', async () => {

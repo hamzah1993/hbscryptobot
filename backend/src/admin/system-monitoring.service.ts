@@ -15,6 +15,12 @@ type CheckResult = {
 
 const HEARTBEAT_MAX_AGE_MS = 45_000;
 const STARTUP_GRACE_MS = 60_000;
+/** The deposit scanner saves progress every 30 s while BSC is reachable. */
+const DEPOSIT_SCAN_MAX_AGE_MS = 10 * 60_000;
+/** Bot entry orders are cancelled after ENTRY_LIMIT_ORDER_TIMEOUT_MS (45 s); one still open this long is stuck. */
+const STUCK_ORDER_AGE_MS = 10 * 60_000;
+/** A retryable failure is normally resolved within a few retries. */
+const STUCK_RETRY_AGE_MS = 15 * 60_000;
 @Injectable()
 export class SystemMonitoringService {
   private readonly logger = new Logger(SystemMonitoringService.name);
@@ -99,7 +105,41 @@ export class SystemMonitoringService {
     ]);
     checks.push(this.result('LIVE_FAILED_ACTIONS', failedActions ? 'ERROR' : 'HEALTHY', 'CRITICAL', failedActions ? `${failedActions} Binance LIVE action(s) require operator attention.` : 'No permanently failed Binance LIVE actions.'));
     checks.push(this.result('LIVE_ERROR_POSITIONS', errorPositions ? 'ERROR' : 'HEALTHY', 'CRITICAL', errorPositions ? `${errorPositions} Binance LIVE position(s) are in ERROR state.` : 'No Binance LIVE positions are in ERROR state.'));
+
+    const live = { mode: 'BINANCE_LIVE' as const, exchange: 'BINANCE' as const, environment: 'LIVE' as const, paperTrading: false };
+    const [stuckOrders, stuckRetries] = await Promise.all([
+      this.prisma.tradingOrder.count({
+        where: {
+          status: { in: ['PENDING', 'PARTIALLY_FILLED'] }, createdAt: { lt: new Date(now.getTime() - STUCK_ORDER_AGE_MS) },
+          position: { strategy: live }, strategyAction: { actionKey: { startsWith: 'strategy:' } },
+        },
+      }),
+      this.prisma.strategyAction.count({
+        where: { status: 'FAILED', retryable: true, createdAt: { lt: new Date(now.getTime() - STUCK_RETRY_AGE_MS) }, strategy: live },
+      }),
+    ]);
+    const stuck = stuckOrders + stuckRetries;
+    checks.push(this.result('LIVE_STUCK_BOTS', stuck ? 'ERROR' : 'HEALTHY', 'CRITICAL', stuck
+      ? `${stuck} Binance LIVE bot order(s)/action(s) have been unresolved for over 10 minutes (${stuckOrders} open order(s), ${stuckRetries} failing retr${stuckRetries === 1 ? 'y' : 'ies'}).`
+      : 'No Binance LIVE bot is stuck on an unresolved order.'));
+
+    checks.push(await this.depositScanCheck(now));
     return checks;
+  }
+
+  /** Deposits are credited only while the BSC scanner keeps advancing; alert when it stalls. */
+  private async depositScanCheck(now: Date): Promise<CheckResult> {
+    if (!process.env.DEPOSIT_XPUB?.trim()) {
+      return this.result('DEPOSIT_SCANNER', 'HEALTHY', 'WARNING', 'Deposits are not configured.');
+    }
+    const state = await this.prisma.depositScanState.findUnique({ where: { chain: 'BSC' }, select: { updatedAt: true, lastScannedBlock: true } });
+    const startedAt = new Date(this.heartbeat.snapshot().startedAt).getTime();
+    const reference = state?.updatedAt.getTime() ?? startedAt;
+    if (now.getTime() - Math.max(reference, startedAt) <= DEPOSIT_SCAN_MAX_AGE_MS) {
+      return this.result('DEPOSIT_SCANNER', 'HEALTHY', 'CRITICAL', state ? `BSC deposit scanning is current (block ${state.lastScannedBlock}).` : 'BSC deposit scanning is starting.');
+    }
+    return this.result('DEPOSIT_SCANNER', 'ERROR', 'CRITICAL',
+      'BSC deposit scanning has not advanced for over 10 minutes; user deposits are not being credited. Check BSC_RPC_URL and the backend logs.');
   }
 
   private heartbeatCheck(component: string, name: SystemHeartbeatName, value: string | null, now: Date, startupGrace: boolean, required: boolean): CheckResult {
