@@ -53,7 +53,19 @@ type FillAccountingContext = {
   deltaQuantity: number;
   deltaQuote: number;
   averageFillPrice: number;
+  /** A filled exit order sells the whole holding; any remainder is fee or step-size dust. */
+  fullExit?: boolean;
 };
+
+/** Exits always sell the whole (sub-)position, so a filled one closes it. */
+const FULL_EXIT_ACTIONS = new Set(['PARENT_EXIT', 'INDEPENDENT_EXIT']);
+const QUOTE_ASSETS = ['FDUSD', 'USDT', 'USDC', 'BUSD', 'TUSD', 'BTC', 'ETH', 'BNB'];
+const DEFAULT_ENTRY_ORDER_TIMEOUT_MS = 45_000;
+
+export function entryOrderTimeoutMs() {
+  const configured = Number(process.env.ENTRY_LIMIT_ORDER_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_ENTRY_ORDER_TIMEOUT_MS;
+}
 
 @Injectable()
 export class TestnetStrategyExecutionService {
@@ -302,21 +314,37 @@ export class TestnetStrategyExecutionService {
         )) as BinanceOrderResponse | null;
       }
       if (!exchangeOrder) {
+        const quantity = input.side === 'SELL'
+          ? await this.sellableQuantity(userId, strategy.symbol, input.quantity)
+          : input.quantity;
         exchangeOrder = orderType === 'LIMIT'
           ? (await this.testnetOrders.placeLimitOrder(userId, {
-              symbol: strategy.symbol, side: input.side, quantity: input.quantity,
+              symbol: strategy.symbol, side: input.side, quantity,
               price: Number(input.limitPrice), clientOrderId,
             })) as BinanceOrderResponse
           : (await this.testnetOrders.placeMarketOrder(userId, {
-              symbol: strategy.symbol, side: input.side, quantity: input.quantity, clientOrderId,
+              symbol: strategy.symbol, side: input.side, quantity, clientOrderId,
             })) as BinanceOrderResponse;
       }
 
-      const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
-      const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
-      const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
-      const feeQuote = this.calculateQuoteFee(exchangeOrder, strategy.symbol);
+      const grossQuantity = Number(exchangeOrder.executedQty ?? 0);
+      const grossQuote = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
+      if (!exchangeOrder.fills?.length && grossQuantity > 0 && exchangeOrder.orderId) {
+        // An order recovered by client ID comes without fills; read them so fees are still netted.
+        const trades = await this.testnetOrders.getOrderTrades(userId, strategy.symbol, String(exchangeOrder.orderId));
+        exchangeOrder = {
+          ...exchangeOrder,
+          fills: (Array.isArray(trades) ? trades : []).map((trade) => ({
+            price: trade.price, qty: trade.qty, commission: trade.commission, commissionAsset: trade.commissionAsset,
+          })),
+        };
+      }
+      const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, grossQuantity, grossQuote);
+      const feeQuote = this.calculateQuoteFee(exchangeOrder.fills ?? [], strategy.symbol);
       const status = this.mapOrderStatus(exchangeOrder.status);
+      // Positions track what the account actually holds and paid: net of Binance commissions.
+      const { quantity: executedQuantity, quote: quoteAmount } = this.netFill(exchangeOrder, strategy.symbol, input.side);
+      const fullExit = Boolean(actionType && FULL_EXIT_ACTIONS.has(actionType) && status === 'FILLED');
       const executionLatencyMs = input.signalAtMs ? Math.max(Date.now() - input.signalAtMs, 0) : null;
 
       const savedOrder = await this.prisma.$transaction(async (tx) => {
@@ -402,6 +430,7 @@ export class TestnetStrategyExecutionService {
             deltaQuantity: executedQuantity,
             deltaQuote: quoteAmount,
             averageFillPrice,
+            fullExit,
           });
         }
 
@@ -461,7 +490,11 @@ export class TestnetStrategyExecutionService {
             deltaQuantity: executedQuantity,
             deltaQuote: quoteAmount,
             averageFillPrice,
+            fullExit,
           });
+        }
+        if (input.side === 'BUY' && executedQuantity <= 0 && this.isTerminal(status)) {
+          await this.closeIfEmpty(tx, position.id);
         }
 
         const order = await tx.tradingOrder.create({
@@ -478,8 +511,8 @@ export class TestnetStrategyExecutionService {
             independent: Boolean(independentEntry || independentExit),
             quantity: input.quantity,
             price: averageFillPrice || (orderType === 'LIMIT' ? Number(input.limitPrice) : null),
-            filledQuantity: executedQuantity,
-            quoteAmount,
+            filledQuantity: grossQuantity,
+            quoteAmount: grossQuote,
             feeQuote,
             averageFillPrice: averageFillPrice || null,
             accountedFilledQuantity: executedQuantity,
@@ -496,8 +529,7 @@ export class TestnetStrategyExecutionService {
               orderId: order.id,
               positionId: position.id,
               subPositionId,
-              status: status === 'FILLED' ? 'COMPLETED' : 'SUBMITTED',
-              completedAt: status === 'FILLED' ? new Date() : null,
+              ...this.actionResolution(status, executedQuantity),
             },
           });
         }
@@ -704,13 +736,24 @@ export class TestnetStrategyExecutionService {
     const executedQuantity = Number(exchangeOrder.executedQty ?? 0);
     const quoteAmount = Number(exchangeOrder.cummulativeQuoteQty ?? 0);
     const averageFillPrice = this.calculateAverageFillPrice(exchangeOrder, executedQuantity, quoteAmount);
-    const feeQuote = this.calculateQuoteFee(exchangeOrder, order.position.symbol);
     const status = this.mapOrderStatus(exchangeOrder.status);
     const previousStatus = order.status;
     const accountedQuantity = Number(order.accountedFilledQuantity ?? 0);
     const accountedQuote = Number(order.accountedQuoteAmount ?? 0);
-    const deltaQuantity = Math.max(executedQuantity - accountedQuantity, 0);
-    const deltaQuote = Math.max(quoteAmount - accountedQuote, 0);
+    // GET /order has no commissions, so new fills are re-read from the order's trades.
+    let net = { quantity: accountedQuantity, quote: accountedQuote };
+    let feeQuote: number | null = null;
+    if (executedQuantity > Number(order.filledQuantity ?? 0) + 1e-12) {
+      const trades = await this.testnetOrders.getOrderTrades(userId, order.position.symbol, order.exchangeOrderId);
+      const fills = (Array.isArray(trades) ? trades : []).map((trade) => ({
+        price: trade.price, qty: trade.qty, commission: trade.commission, commissionAsset: trade.commissionAsset,
+      }));
+      net = this.netFill(exchangeOrder, order.position.symbol, order.side as 'BUY' | 'SELL', fills);
+      feeQuote = this.calculateQuoteFee(fills, order.position.symbol);
+    }
+    const deltaQuantity = Math.max(net.quantity - accountedQuantity, 0);
+    const deltaQuote = Math.max(net.quote - accountedQuote, 0);
+    const fullExit = FULL_EXIT_ACTIONS.has(String(order.strategyAction?.type)) && status === 'FILLED';
 
     const result = await this.prisma.$transaction(async (tx) => {
       let updatedPosition: any = order.position;
@@ -779,6 +822,7 @@ export class TestnetStrategyExecutionService {
             deltaQuantity,
             deltaQuote,
             averageFillPrice,
+            fullExit,
           });
         } else if (order.side === 'BUY') {
           const previousQuantity = Number(updatedPosition.totalQuantity);
@@ -853,6 +897,7 @@ export class TestnetStrategyExecutionService {
               deltaQuantity,
               deltaQuote,
               averageFillPrice,
+              fullExit,
             })),
             strategy: order.position.strategy,
           };
@@ -880,10 +925,12 @@ export class TestnetStrategyExecutionService {
           data: {
             positionId: updatedPosition.id,
             subPositionId: updatedSubPosition?.id ?? order.strategyAction.subPositionId,
-            status: status === 'FILLED' ? 'COMPLETED' : 'SUBMITTED',
-            completedAt: status === 'FILLED' ? new Date() : null,
+            ...this.actionResolution(status, accountedQuantity + deltaQuantity),
           },
         });
+      }
+      if (order.side === 'BUY' && accountedQuantity + deltaQuantity <= 0 && this.isTerminal(status)) {
+        await this.closeIfEmpty(tx, order.positionId);
       }
 
       return { tradingOrder: updatedOrder, exchangeOrder };
@@ -945,7 +992,7 @@ export class TestnetStrategyExecutionService {
     const { position, strategy, deltaQuantity, deltaQuote, averageFillPrice } = context;
     const previousQuantity = Number(position.totalQuantity);
     const previousCost = Number(position.totalCostQuote);
-    const soldQuantity = Math.min(deltaQuantity, previousQuantity);
+    const soldQuantity = context.fullExit ? previousQuantity : Math.min(deltaQuantity, previousQuantity);
     const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
     const proceeds = deltaQuote > 0 ? deltaQuote : soldQuantity * averageFillPrice;
     const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
@@ -989,7 +1036,7 @@ export class TestnetStrategyExecutionService {
     const { subPosition, deltaQuantity, deltaQuote, averageFillPrice } = context;
     const previousQuantity = Number(subPosition.quantity);
     const previousCost = Number(subPosition.costQuote);
-    const soldQuantity = Math.min(deltaQuantity, previousQuantity);
+    const soldQuantity = context.fullExit ? previousQuantity : Math.min(deltaQuantity, previousQuantity);
     const allocatedCost = previousQuantity > 0 ? (previousCost * soldQuantity) / previousQuantity : 0;
     const proceeds = deltaQuote > 0 ? deltaQuote : soldQuantity * averageFillPrice;
     const remainingQuantity = Math.max(previousQuantity - soldQuantity, 0);
@@ -1034,12 +1081,96 @@ export class TestnetStrategyExecutionService {
     return Number(order.price ?? 0);
   }
 
-  private calculateQuoteFee(order: BinanceOrderResponse, symbol: string): number | null {
-    const quoteAssets = ['FDUSD', 'USDT', 'USDC', 'BUSD', 'TUSD', 'BTC', 'ETH', 'BNB'];
-    const quoteAsset = quoteAssets.find((asset) => symbol.endsWith(asset));
+  /**
+   * Order totals net of commissions paid in the traded assets: a BUY whose fee
+   * is taken in the base asset leaves less coin in the account, and a SELL's
+   * quote fee reduces the proceeds. Fees paid in another asset (e.g. BNB) do
+   * not change either amount.
+   */
+  private netFill(order: BinanceOrderResponse, symbol: string, side: 'BUY' | 'SELL', fills: BinanceOrderFill[] = order.fills ?? []) {
+    const quantity = Number(order.executedQty ?? 0);
+    const quote = Number(order.cummulativeQuoteQty ?? 0);
+    const quoteAsset = QUOTE_ASSETS.find((asset) => symbol.endsWith(asset));
+    const baseAsset = quoteAsset ? symbol.slice(0, -quoteAsset.length) : null;
+    let baseFee = 0;
+    let quoteFee = 0;
+    for (const fill of fills) {
+      const commission = Number(fill.commission ?? 0);
+      if (!Number.isFinite(commission) || commission <= 0) continue;
+      if (fill.commissionAsset === baseAsset) baseFee += commission;
+      else if (fill.commissionAsset === quoteAsset) quoteFee += commission;
+    }
+    return side === 'BUY'
+      ? { quantity: Math.max(quantity - baseFee, 0), quote: quote + quoteFee }
+      : { quantity: quantity + baseFee, quote: Math.max(quote - quoteFee, 0) };
+  }
+
+  /**
+   * Never asks Binance to sell more than the account holds. Positions opened
+   * before fees were netted can be a fee's worth larger than the real balance.
+   */
+  private async sellableQuantity(userId: string, symbol: string, quantity: number) {
+    const free = await this.testnetOrders.getFreeBaseBalance(userId, symbol);
+    if (free >= quantity) return quantity;
+    if (free <= 0) throw new BadRequestException(`No free ${symbol} balance is available to sell`);
+    return free;
+  }
+
+  /** Cancels an automatic BUY limit order that has waited too long, then reconciles it. */
+  async cancelStaleEntryOrder(userId: string, tradingOrderId: string, maxAgeMs = entryOrderTimeoutMs()) {
+    const order = await this.prisma.tradingOrder.findFirst({
+      where: {
+        id: tradingOrderId, userId, side: 'BUY', type: 'LIMIT', exchangeOrderId: { not: null },
+        status: { in: ['PENDING', 'PARTIALLY_FILLED'] }, createdAt: { lt: new Date(Date.now() - maxAgeMs) },
+        position: { strategy: { environment: this.executionEnvironment, paperTrading: false } },
+        // Only the bots' own entries; a user's manual limit order is left to rest.
+        strategyAction: { actionKey: { startsWith: 'strategy:' } },
+      },
+      include: { position: { select: { symbol: true } } },
+    });
+    if (!order) return null;
+    try {
+      await this.testnetOrders.cancelOrder(userId, order.position.symbol, order.exchangeOrderId!);
+    } catch (error) {
+      // Already filled or cancelled on Binance: the sync below records the final state.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/unknown order/i.test(message)) throw error;
+    }
+    return this.syncOrder(userId, order.id);
+  }
+
+  private isTerminal(status: ReturnType<TestnetStrategyExecutionService['mapOrderStatus']>) {
+    return status === 'CANCELLED' || status === 'REJECTED';
+  }
+
+  /** A finished order resolves its action; a cancelled one with no fill frees the strategy to try again. */
+  private actionResolution(status: ReturnType<TestnetStrategyExecutionService['mapOrderStatus']>, filledQuantity: number) {
+    if (status === 'FILLED' || (this.isTerminal(status) && filledQuantity > 0)) {
+      return { status: 'COMPLETED' as const, completedAt: new Date() };
+    }
+    if (this.isTerminal(status)) return { status: 'CANCELLED' as const, completedAt: new Date() };
+    return { status: 'SUBMITTED' as const, completedAt: null };
+  }
+
+  /** Closes a position that an entry opened but never filled, so the next cycle starts cleanly. */
+  private async closeIfEmpty(tx: any, positionId: string) {
+    const position = await tx.tradingPosition.findUnique({
+      where: { id: positionId },
+      select: {
+        status: true, totalQuantity: true,
+        subPositions: { where: { status: 'OPEN' }, select: { id: true } },
+        orders: { where: { status: { in: ['PENDING', 'PARTIALLY_FILLED'] } }, select: { id: true } },
+      },
+    });
+    if (!position || position.status !== 'OPEN' || Number(position.totalQuantity) > 0) return;
+    if (position.subPositions.length || position.orders.length) return;
+    await tx.tradingPosition.update({ where: { id: positionId }, data: { status: 'CLOSED', closedAt: new Date() } });
+  }
+
+  private calculateQuoteFee(fills: BinanceOrderFill[], symbol: string): number | null {
+    const quoteAsset = QUOTE_ASSETS.find((asset) => symbol.endsWith(asset));
     if (!quoteAsset) return null;
     const baseAsset = symbol.slice(0, -quoteAsset.length);
-    const fills = order.fills ?? [];
     if (!fills.length) return null;
 
     let total = 0;

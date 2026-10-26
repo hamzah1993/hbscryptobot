@@ -113,6 +113,9 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     };
     const testnetOrders = {
       getOrder: jest.fn().mockResolvedValue(resolvedExchangeOrder),
+      getOrderTrades: jest.fn().mockResolvedValue([]),
+      getFreeBaseBalance: jest.fn().mockResolvedValue(1_000_000),
+      cancelOrder: jest.fn().mockResolvedValue({}),
       findOrderByClientOrderId: jest.fn().mockResolvedValue(null),
       placeMarketOrder: jest.fn().mockResolvedValue(resolvedExchangeOrder),
     } as any;
@@ -661,5 +664,75 @@ describe('TestnetStrategyExecutionService incremental fill accounting', () => {
     const { service } = createService({ exchangeOrderId: null });
 
     await expect(service.syncOrder(userId, 'order-1')).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  describe('Binance commissions, full exits and unfilled entries', () => {
+    it('nets base-asset commissions out of reconciled BUY fills', async () => {
+      const { service, tradingPosition, tradingOrder, testnetOrders } = createService();
+      testnetOrders.getOrderTrades.mockResolvedValue([
+        { price: '100', qty: '1', quoteQty: '100', commission: '0.001', commissionAsset: 'BTC' },
+        { price: '110', qty: '1', quoteQty: '110', commission: '0.001', commissionAsset: 'BTC' },
+      ]);
+
+      await service.syncOrder(userId, 'order-1');
+
+      expect(testnetOrders.getOrderTrades).toHaveBeenCalledWith(userId, 'BTCUSDT', '123');
+      const positionData = tradingPosition.update.mock.calls[0][0].data;
+      expect(positionData.totalQuantity).toBeCloseTo(2.998, 9);
+      expect(positionData.totalCostQuote).toBe(310);
+      expect(tradingOrder.update).toHaveBeenCalledWith({
+        where: { id: 'order-1' },
+        data: expect.objectContaining({ filledQuantity: 2, accountedFilledQuantity: 1.998 }),
+      });
+      expect(tradingOrder.update.mock.calls[0][0].data.feeQuote).toBeCloseTo(0.21, 9);
+    });
+
+    it('sells only what the account holds and closes the position on a filled exit', async () => {
+      const { service, tradingPosition, testnetOrders } = createService({}, {
+        status: 'FILLED', executedQty: '1.998', cummulativeQuoteQty: '219.78',
+        fills: [{ price: '110', qty: '1.998', commission: '0.21978', commissionAsset: 'USDT' }],
+      });
+      testnetOrders.getFreeBaseBalance.mockResolvedValue(1.998);
+
+      await service.executeMarketOrder(userId, {
+        strategyId: strategy.id, side: 'SELL', quantity: 2, actionType: 'PARENT_EXIT', actionKey: 'manual-parent-close:position-1',
+      });
+
+      expect(testnetOrders.placeMarketOrder).toHaveBeenCalledWith(userId, expect.objectContaining({ quantity: 1.998 }));
+      const data = tradingPosition.update.mock.calls[0][0].data;
+      expect(data).toMatchObject({ status: 'CLOSED', totalQuantity: 0, totalCostQuote: 0 });
+      expect(data.realizedPnlQuote).toBeCloseTo(219.78 - 0.21978 - 200, 9);
+    });
+
+    it('cancels the action and closes the empty position when an entry ends unfilled', async () => {
+      const { service, tradingPosition, strategyAction } = createService(
+        { type: 'LIMIT', filledQuantity: 0, quoteAmount: 0, accountedFilledQuantity: 0, accountedQuoteAmount: 0, status: 'PENDING' },
+        { status: 'CANCELED', executedQty: '0', cummulativeQuoteQty: '0' },
+        { totalQuantity: 0, totalCostQuote: 0 },
+      );
+
+      await service.syncOrder(userId, 'order-1');
+
+      expect(strategyAction.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ status: 'CANCELLED' }),
+      }));
+      expect(tradingPosition.update).toHaveBeenCalledWith({
+        where: { id: 'position-1' },
+        data: expect.objectContaining({ status: 'CLOSED' }),
+      });
+    });
+
+    it('cancels a stale entry limit order on Binance and reconciles it', async () => {
+      const { service, testnetOrders } = createService(
+        { type: 'LIMIT', status: 'PENDING' },
+        { status: 'CANCELED', executedQty: '1', cummulativeQuoteQty: '100' },
+      );
+      testnetOrders.cancelOrder.mockRejectedValue(new Error('Binance: Unknown order sent.'));
+
+      await service.cancelStaleEntryOrder(userId, 'order-1', 45_000);
+
+      expect(testnetOrders.cancelOrder).toHaveBeenCalledWith(userId, 'BTCUSDT', '123');
+      expect(testnetOrders.getOrder).toHaveBeenCalled();
+    });
   });
 });
