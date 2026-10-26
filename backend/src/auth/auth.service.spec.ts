@@ -12,7 +12,8 @@ describe('AuthService account security', () => {
   const jwt = { signAsync: jest.fn().mockResolvedValue('signed-token') };
   const notifications = { publish: jest.fn() };
   const channels = { sendSecurityEmail: jest.fn().mockResolvedValue(true) };
-  const service = () => new AuthService(prisma as any, jwt as any, notifications as any, channels as any);
+  const billing = { resolveReferrer: jest.fn().mockResolvedValue(null), ensureAccount: jest.fn().mockResolvedValue({}) };
+  const service = () => new AuthService(prisma as any, jwt as any, notifications as any, channels as any, billing as any);
 
   beforeEach(() => {
     jest.clearAllMocks();

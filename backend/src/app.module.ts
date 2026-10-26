@@ -18,6 +18,9 @@ import { RedisLockModule } from './redis/redis-lock.module';
 import { TradingEngineModule } from './trading/trading-engine.module';
 import { UsersModule } from './users/users.module';
 import { AdminModule } from './admin/admin.module';
+import { PackagesModule } from './packages/packages.module';
+import { BillingModule } from './billing/billing.module';
+import { ContentModule } from './content/content.module';
 
 const jwtExpiresIn = (process.env.JWT_EXPIRES_IN ?? '1d') as SignOptions['expiresIn'];
 const globalRateLimit = getGlobalRateLimitConfiguration();
@@ -48,6 +51,9 @@ const globalRateLimit = getGlobalRateLimitConfiguration();
     BinanceModule,
     MarketDataModule,
     TradingEngineModule,
+    PackagesModule,
+    BillingModule,
+    ContentModule,
   ],
   controllers: [AppController],
   providers: [

@@ -1,3 +1,4 @@
+import { EntrySignalService } from './entry-signal.service';
 import { BadRequestException } from '@nestjs/common';
 import { BacktestStrategyMode } from '@prisma/client';
 import { BacktestCandleRunnerService } from './backtest-candle-runner.service';
@@ -29,6 +30,7 @@ describe('BacktestCandleRunnerService', () => {
         candles as any,
         simulator as any,
         binanceImporter as any,
+        new EntrySignalService({} as any),
       ),
       runs,
       execution,

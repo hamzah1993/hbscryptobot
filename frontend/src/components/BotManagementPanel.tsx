@@ -255,7 +255,7 @@ export function BotManagementPanel({ token, mode, onViewPaperPosition, onViewTes
                       <Field label="Bot name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
                       <NumberField label="Risk budget" value={draft.riskBudgetQuote} onChange={(value) => setDraft({ ...draft, riskBudgetQuote: value })} />
                       <NumberField label="Base order" value={draft.baseOrderQuote} onChange={(value) => setDraft({ ...draft, baseOrderQuote: value })} />
-                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={3} max={5} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
+                      <NumberField label="Maximum DCA orders" value={draft.maxDcaOrders} min={1} max={200} step={1} onChange={(value) => setDraft({ ...draft, maxDcaOrders: value, independentFromLevel: Math.min(draft.independentFromLevel, value + 2) })} />
                       <NumberField label="DCA trigger (%)" value={draft.dcaStepPercent} min={3} max={15} onChange={(value) => setDraft({ ...draft, dcaStepPercent: value })} />
                       <Field label="DCA multipliers" value={draft.dcaMultipliers.join(', ')} onChange={(value) => setDraft({ ...draft, dcaMultipliers: value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item > 0) })} />
                       <NumberField label="Global TP (%)" value={draft.takeProfitPercent} min={0.5} max={5} onChange={(value) => setDraft({ ...draft, takeProfitPercent: value })} />

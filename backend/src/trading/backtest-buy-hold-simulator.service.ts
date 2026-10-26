@@ -3,6 +3,9 @@ import { BacktestTradeType, Prisma } from '@prisma/client';
 
 export type BacktestSimulationCandle = {
   close: Prisma.Decimal | string | number;
+  open?: Prisma.Decimal | string | number;
+  high?: Prisma.Decimal | string | number;
+  low?: Prisma.Decimal | string | number;
   openTime?: Date;
 };
 
@@ -30,6 +33,9 @@ export type BacktestSimulationResult = {
   returnPercent: string;
   maxDrawdownPercent: string;
   tradeCount: number;
+  /** Completed buy-to-sell cycles, and how many ended at the stop-loss (DCA simulator only). */
+  cycleCount?: number;
+  stopLossCount?: number;
   trades?: BacktestSimulationTrade[];
   equityPoints?: BacktestSimulationEquityPoint[];
 };

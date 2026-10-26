@@ -32,6 +32,9 @@ describe('TestnetStrategyRunnerService', () => {
       tradingStrategy: {
         findMany: jest.fn().mockResolvedValue(strategies),
       },
+      tradingPosition: {
+        count: jest.fn().mockResolvedValue(0),
+      },
       tradingOrder: {
         findFirst: jest.fn().mockResolvedValue(pendingOrder),
       },
@@ -56,6 +59,8 @@ describe('TestnetStrategyRunnerService', () => {
       release: jest.fn().mockResolvedValue(true),
     } as any;
 
+    const entrySignal = { check: jest.fn().mockResolvedValue({ ok: true, reason: 'Bounce confirmed' }) } as any;
+
     return {
       service: new TestnetStrategyRunnerService(
         prisma,
@@ -63,13 +68,80 @@ describe('TestnetStrategyRunnerService', () => {
         testnetExecution,
         redisLock,
         new RecoveryStrategyService(),
+        entrySignal,
       ),
       prisma,
       marketData,
       testnetExecution,
       redisLock,
+      entrySignal,
     };
   }
+
+  it('uses a new initial-entry key for every cycle so the bot can trade again after a take-profit', async () => {
+    const { service, prisma, testnetExecution } = createService([baseStrategy], 50);
+    prisma.tradingPosition.count.mockResolvedValue(3);
+    await service.runUserStrategies(userId);
+    expect(testnetExecution.executeMarketOrder.mock.calls[0][1].actionKey).toBe('strategy:strategy-1:initial-entry:4');
+  });
+
+  it('waits for the dip and bounce before a new cycle in DIP_CONFIRMATION mode', async () => {
+    const dipStrategy = { ...baseStrategy, entryMode: 'DIP_CONFIRMATION' };
+    const { service, testnetExecution, entrySignal } = createService([dipStrategy], 50);
+    entrySignal.check.mockResolvedValueOnce({ ok: false, reason: 'Waiting for a 3% drop (currently 1.20% below the recent high)' });
+    const [held] = await service.runUserStrategies(userId);
+    expect(held).toMatchObject({ action: 'HOLD', message: 'Waiting for a 3% drop (currently 1.20% below the recent high)' });
+    expect(entrySignal.check).toHaveBeenCalledWith(dipStrategy, 'testnet', true);
+    expect(testnetExecution.executeMarketOrder).not.toHaveBeenCalled();
+
+    const [opened] = await service.runUserStrategies(userId);
+    expect(opened.action).toBe('OPEN');
+  });
+
+  it('never consults the entry rule in IMMEDIATE mode', async () => {
+    const { service, entrySignal } = createService([baseStrategy], 50);
+    await service.runUserStrategies(userId);
+    expect(entrySignal.check).not.toHaveBeenCalled();
+  });
+
+  it('sells independent legs and then the parent when the stop-loss is hit', async () => {
+    const position = {
+      id: 'position-1', status: 'OPEN', totalQuantity: 1, totalCostQuote: 100, averageEntryPrice: 100, dcaCount: 2,
+      takeProfitPrice: 101.5, nextDcaPrice: 90,
+      subPositions: [{ id: 'sub-4', level: 4, status: 'OPEN', quantity: 1, costQuote: 92, takeProfitPrice: 93.5 }],
+    };
+    const strategy = { ...baseStrategy, stopLossPercent: 5, positions: [position] };
+    // Basket average = (100 + 92) / 2 = 96; stop = 91.2.
+    const { service, testnetExecution } = createService([strategy], 91);
+    const [first] = await service.runUserStrategies(userId);
+    expect(first).toMatchObject({ action: 'STOP_LOSS', subPositionId: 'sub-4' });
+    expect(testnetExecution.executeMarketOrder.mock.calls[0][1]).toMatchObject({
+      side: 'SELL', actionType: 'INDEPENDENT_EXIT', quantity: 1, actionKey: 'strategy:strategy-1:position:position-1:stop-loss:sub:sub-4',
+    });
+
+    const parentOnly = { ...strategy, positions: [{ ...position, subPositions: [] }] };
+    const second = createService([parentOnly], 94);
+    const [parent] = await second.service.runUserStrategies(userId);
+    expect(parent).toMatchObject({ action: 'STOP_LOSS' });
+    expect(second.testnetExecution.executeMarketOrder.mock.calls[0][1]).toMatchObject({ side: 'SELL', actionType: 'PARENT_EXIT', actionKey: 'strategy:strategy-1:position:position-1:stop-loss:parent' });
+
+    const safe = createService([strategy], 92);
+    const [held] = await safe.service.runUserStrategies(userId);
+    expect(held.action).not.toBe('STOP_LOSS');
+  });
+
+  it('holds a DCA buy until the bounce is confirmed when DCA confirmation is enabled', async () => {
+    const position = { id: 'position-1', status: 'OPEN', totalQuantity: 2, totalCostQuote: 100, averageEntryPrice: 50, dcaCount: 0, takeProfitPrice: 51, nextDcaPrice: 48, subPositions: [] };
+    const strategy = { ...baseStrategy, dcaRequiresConfirmation: true, positions: [position] };
+    const { service, testnetExecution, entrySignal } = createService([strategy], 47);
+    entrySignal.check.mockResolvedValueOnce({ ok: false, reason: 'Waiting for a green candle' });
+    const [held] = await service.runUserStrategies(userId);
+    expect(held).toMatchObject({ action: 'HOLD', message: 'DCA level reached. Waiting for a green candle' });
+    expect(entrySignal.check).toHaveBeenCalledWith(strategy, 'testnet', false);
+    expect(testnetExecution.executeMarketOrder).not.toHaveBeenCalled();
+    const [bought] = await service.runUserStrategies(userId);
+    expect(bought.action).toBe('DCA');
+  });
 
   it('opens an initial Testnet position with a stable action key', async () => {
     const { service, testnetExecution, redisLock } = createService([baseStrategy], 50);
@@ -82,7 +154,7 @@ describe('TestnetStrategyRunnerService', () => {
       side: 'BUY',
       quantity: 2,
       actionType: 'INITIAL_ENTRY',
-      actionKey: 'strategy:strategy-1:initial-entry',
+      actionKey: 'strategy:strategy-1:initial-entry:1',
       level: 1,
       triggerPrice: 50,
       plannedQuoteAmount: 100,

@@ -612,7 +612,7 @@ export class TestnetStrategyExecutionService {
   }
 
   async listPositions(userId: string, limit = 100) {
-    return this.prisma.tradingPosition.findMany({
+    const positions = await this.prisma.tradingPosition.findMany({
       where: {
         userId,
         strategy: {
@@ -648,6 +648,7 @@ export class TestnetStrategyExecutionService {
             recoveryStepPercents: true,
             recoveryMultipliers: true,
             recoveryTakeProfitPercent: true,
+            packageSubscriptionId: true,
           },
         },
         subPositions: {
@@ -660,6 +661,23 @@ export class TestnetStrategyExecutionService {
       },
       orderBy: { openedAt: 'desc' },
       take: Math.min(Math.max(limit, 1), 500),
+    });
+    // Trading package settings are admin-only. Keep the structural fields the
+    // positions UI needs and blank the tuning values for package bots.
+    return positions.map((position) => {
+      const { packageSubscriptionId, ...strategy } = position.strategy;
+      if (!packageSubscriptionId) return { ...position, strategy };
+      return {
+        ...position,
+        strategy: {
+          ...strategy,
+          baseOrderQuote: null, dcaStepPercent: null, dcaMultiplier: null, dcaMultipliers: null,
+          takeProfitPercent: null, subPositionTriggerPercent: null, subPositionTakeProfitPercent: null,
+          basePositionPercent: null, maxTotalRiskPercent: null, cooldownMinutes: null,
+          recoveryStepPercents: null, recoveryMultipliers: null, recoveryTakeProfitPercent: null,
+          managedByPackage: true,
+        },
+      };
     });
   }
 

@@ -1,8 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { ExchangeName, Prisma, TradingMode } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { RiskBudgetService } from './risk-budget.service';
+import { MAX_DCA_LEVELS, RiskBudgetService } from './risk-budget.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
+import {
+  CONFIRM_RULES, CONFIRM_TIMEFRAMES, ENTRY_MODES, MAX_SIGNAL_CANDLES, timeframeMinutes,
+  type ConfirmRule, type ConfirmTimeframe, type EntryMode,
+} from './entry-signal';
 
 export type StrategyInput = {
   name: string;
@@ -32,6 +36,15 @@ export type StrategyInput = {
   maxStrategyExposureQuote?: number | null;
   maxOrderQuote?: number | null;
   maxDailyRealizedLossQuote?: number | null;
+  entryMode?: EntryMode;
+  dipPercent?: number;
+  dipLookbackMinutes?: number;
+  confirmTimeframe?: ConfirmTimeframe;
+  confirmRule?: ConfirmRule;
+  confirmCandles?: number;
+  rsiMax?: number | null;
+  dcaRequiresConfirmation?: boolean;
+  stopLossPercent?: number | null;
 };
 
 @Injectable()
@@ -42,14 +55,31 @@ export class StrategyService {
     private readonly recoveryStrategy: RecoveryStrategyService,
   ) {}
 
-  async create(userId: string, input: StrategyInput) {
+  create(userId: string, input: StrategyInput) {
+    return this.createWithClient(this.prisma, userId, input);
+  }
+
+  /** Validates a strategy definition exactly as create() would, without persisting it. */
+  validateInput(input: StrategyInput) {
     const normalized = this.normalize(input);
     this.riskBudget.buildPlan(normalized);
+    return normalized;
+  }
+
+  /** Same as create(), using the given client so callers can create inside their own transaction. */
+  async createWithClient(
+    client: Prisma.TransactionClient,
+    userId: string,
+    input: StrategyInput,
+    options: { packageSubscriptionId?: string } = {},
+  ) {
+    const normalized = this.validateInput(input);
 
     try {
-      return await this.prisma.tradingStrategy.create({
+      return await client.tradingStrategy.create({
         data: {
           userId,
+          packageSubscriptionId: options.packageSubscriptionId ?? null,
           name: normalized.name,
           symbol: normalized.symbol,
           exchange: normalized.exchange,
@@ -78,6 +108,15 @@ export class StrategyService {
           maxStrategyExposureQuote: normalized.maxStrategyExposureQuote,
           maxOrderQuote: normalized.maxOrderQuote,
           maxDailyRealizedLossQuote: normalized.maxDailyRealizedLossQuote,
+          entryMode: normalized.entryMode,
+          dipPercent: normalized.dipPercent,
+          dipLookbackMinutes: normalized.dipLookbackMinutes,
+          confirmTimeframe: normalized.confirmTimeframe,
+          confirmRule: normalized.confirmRule,
+          confirmCandles: normalized.confirmCandles,
+          rsiMax: normalized.rsiMax,
+          dcaRequiresConfirmation: normalized.dcaRequiresConfirmation,
+          stopLossPercent: normalized.stopLossPercent,
         },
       });
     } catch (error) {
@@ -85,9 +124,10 @@ export class StrategyService {
     }
   }
 
+  /** Trading package bots are managed from the Packages page and their settings are admin-only, so they are never listed here. */
   list(userId: string) {
     return this.prisma.tradingStrategy.findMany({
-      where: { userId },
+      where: { userId, packageSubscriptionId: null },
       include: {
         positions: {
           where: { status: 'OPEN' },
@@ -101,6 +141,7 @@ export class StrategyService {
   async update(userId: string, strategyId: string, input: Partial<StrategyInput>) {
     const existing = await this.prisma.tradingStrategy.findFirst({ where: { id: strategyId, userId } });
     if (!existing) throw new NotFoundException('Strategy not found');
+    await this.assertNotPackageManaged(strategyId, 'edited');
     if (existing.status === 'RUNNING') throw new BadRequestException('Pause or stop the strategy before editing');
 
     const merged = this.normalize({
@@ -131,6 +172,15 @@ export class StrategyService {
       maxStrategyExposureQuote: input.maxStrategyExposureQuote !== undefined ? input.maxStrategyExposureQuote : existing.maxStrategyExposureQuote === null ? null : Number(existing.maxStrategyExposureQuote),
       maxOrderQuote: input.maxOrderQuote !== undefined ? input.maxOrderQuote : existing.maxOrderQuote === null ? null : Number(existing.maxOrderQuote),
       maxDailyRealizedLossQuote: input.maxDailyRealizedLossQuote !== undefined ? input.maxDailyRealizedLossQuote : existing.maxDailyRealizedLossQuote === null ? null : Number(existing.maxDailyRealizedLossQuote),
+      entryMode: input.entryMode ?? existing.entryMode,
+      dipPercent: input.dipPercent ?? Number(existing.dipPercent),
+      dipLookbackMinutes: input.dipLookbackMinutes ?? existing.dipLookbackMinutes,
+      confirmTimeframe: input.confirmTimeframe ?? (existing.confirmTimeframe as ConfirmTimeframe),
+      confirmRule: input.confirmRule ?? existing.confirmRule,
+      confirmCandles: input.confirmCandles ?? existing.confirmCandles,
+      rsiMax: input.rsiMax !== undefined ? input.rsiMax : existing.rsiMax === null ? null : Number(existing.rsiMax),
+      dcaRequiresConfirmation: input.dcaRequiresConfirmation ?? existing.dcaRequiresConfirmation,
+      stopLossPercent: input.stopLossPercent !== undefined ? input.stopLossPercent : existing.stopLossPercent === null ? null : Number(existing.stopLossPercent),
     });
     this.riskBudget.buildPlan(merged);
 
@@ -147,6 +197,7 @@ export class StrategyService {
   async setStatus(userId: string, strategyId: string, status: 'RUNNING' | 'PAUSED' | 'STOPPED') {
     const existing = await this.prisma.tradingStrategy.findFirst({ where: { id: strategyId, userId } });
     if (!existing) throw new NotFoundException('Strategy not found');
+    await this.assertNotPackageManaged(strategyId, 'started or stopped here');
     return this.prisma.tradingStrategy.update({ where: { id: strategyId }, data: { status } });
   }
 
@@ -156,8 +207,21 @@ export class StrategyService {
       include: { positions: { where: { status: 'OPEN' }, select: { id: true } } },
     });
     if (!existing) throw new NotFoundException('Strategy not found');
+    await this.assertNotPackageManaged(strategyId, 'deleted');
     if (existing.positions.length) throw new BadRequestException('Close open positions before deleting the strategy');
     return this.prisma.tradingStrategy.delete({ where: { id: strategyId } });
+  }
+
+  /** Package strategies keep the admin-defined settings for as long as the subscription is active. */
+  /** Package bots keep admin-defined settings for life, including after the subscription is cancelled. */
+  private async assertNotPackageManaged(strategyId: string, verb: 'edited' | 'deleted' | 'started or stopped here') {
+    const managed = await this.prisma.tradingStrategy.findFirst({
+      where: { id: strategyId, packageSubscriptionId: { not: null } },
+      select: { id: true },
+    });
+    if (managed) {
+      throw new BadRequestException(`This bot is managed by a trading package and cannot be ${verb}. Use the Packages page instead.`);
+    }
   }
 
   private rethrowFriendlyPrismaError(error: unknown): never {
@@ -209,8 +273,18 @@ export class StrategyService {
       maxStrategyExposureQuote: input.maxStrategyExposureQuote == null ? null : Number(input.maxStrategyExposureQuote),
       maxOrderQuote: input.maxOrderQuote == null ? null : Number(input.maxOrderQuote),
       maxDailyRealizedLossQuote: input.maxDailyRealizedLossQuote == null ? null : Number(input.maxDailyRealizedLossQuote),
+      entryMode: input.entryMode ?? 'IMMEDIATE',
+      dipPercent: Number(input.dipPercent ?? 3),
+      dipLookbackMinutes: Number(input.dipLookbackMinutes ?? 1440),
+      confirmTimeframe: input.confirmTimeframe ?? '5m',
+      confirmRule: input.confirmRule ?? 'CLOSE_ABOVE_PREV_HIGH',
+      confirmCandles: Number(input.confirmCandles ?? 2),
+      rsiMax: input.rsiMax == null ? null : Number(input.rsiMax),
+      dcaRequiresConfirmation: input.dcaRequiresConfirmation ?? false,
+      stopLossPercent: input.stopLossPercent == null ? null : Number(input.stopLossPercent),
     } as const;
     this.validateConfigRanges(normalized);
+    this.validateEntryRules(normalized);
     this.recoveryStrategy.normalizeConfig(normalized);
     return normalized;
   }
@@ -221,8 +295,8 @@ export class StrategyService {
     maxTotalRiskPercent: number; maxOpenPairs: number; cooldownMinutes: number;
     maxStrategyExposureQuote: number | null; maxOrderQuote: number | null; maxDailyRealizedLossQuote: number | null;
   }) {
-    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 3 || input.maxDcaOrders > 5) {
-      throw new BadRequestException('DCA levels must be an integer between 3 and 5');
+    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 1 || input.maxDcaOrders > MAX_DCA_LEVELS) {
+      throw new BadRequestException(`DCA levels must be a whole number between 1 and ${MAX_DCA_LEVELS}`);
     }
     if (input.dcaStepPercent < 3 || input.dcaStepPercent > 15) throw new BadRequestException('DCA trigger must be between 3% and 15%');
     if (input.takeProfitPercent < 0.5 || input.takeProfitPercent > 5) throw new BadRequestException('Global take-profit must be between 0.5% and 5%');
@@ -232,7 +306,7 @@ export class StrategyService {
     if (input.maxTotalRiskPercent < 1 || input.maxTotalRiskPercent > 10) throw new BadRequestException('Maximum total risk must be between 1% and 10% of capital');
     if (!Number.isInteger(input.maxOpenPairs) || input.maxOpenPairs < 1 || input.maxOpenPairs > 20) throw new BadRequestException('Maximum open pairs must be between 1 and 20');
     if (!Number.isInteger(input.cooldownMinutes) || input.cooldownMinutes < 0 || input.cooldownMinutes > 1440) throw new BadRequestException('Cooldown must be between 0 and 1440 minutes');
-    if (input.dcaMultipliers.length < input.maxDcaOrders) throw new BadRequestException('DCA multipliers must cover every configured DCA level');
+    // Levels beyond the per-level list use dcaMultiplier growth (1 = equal-size buys), as the runner and backtests do.
     if (input.dcaMultipliers.some((value) => !Number.isFinite(value) || value <= 0)) throw new BadRequestException('Every DCA multiplier must be a positive number');
     for (const [label, value] of [
       ['Maximum strategy exposure', input.maxStrategyExposureQuote],
@@ -242,6 +316,26 @@ export class StrategyService {
       if (value !== null && value !== undefined && (!Number.isFinite(value) || value <= 0)) {
         throw new BadRequestException(`${label} must be greater than zero when configured`);
       }
+    }
+  }
+
+  private validateEntryRules(input: {
+    entryMode: string; dipPercent: number; dipLookbackMinutes: number; confirmTimeframe: string; confirmRule: string;
+    confirmCandles: number; rsiMax: number | null; dcaRequiresConfirmation: unknown; stopLossPercent: number | null;
+  }) {
+    if (!(ENTRY_MODES as readonly string[]).includes(input.entryMode)) throw new BadRequestException(`Entry mode must be one of ${ENTRY_MODES.join(', ')}`);
+    if (!(CONFIRM_RULES as readonly string[]).includes(input.confirmRule)) throw new BadRequestException(`Confirmation rule must be one of ${CONFIRM_RULES.join(', ')}`);
+    if (!(CONFIRM_TIMEFRAMES as readonly string[]).includes(input.confirmTimeframe)) throw new BadRequestException(`Confirmation timeframe must be one of ${CONFIRM_TIMEFRAMES.join(', ')}`);
+    if (!(input.dipPercent >= 0.1 && input.dipPercent <= 50)) throw new BadRequestException('Dip size must be between 0.1% and 50%');
+    const maxLookback = timeframeMinutes(input.confirmTimeframe as ConfirmTimeframe) * (MAX_SIGNAL_CANDLES - 60);
+    if (!Number.isInteger(input.dipLookbackMinutes) || input.dipLookbackMinutes < 5 || input.dipLookbackMinutes > maxLookback) {
+      throw new BadRequestException(`Dip lookback must be a whole number of minutes between 5 and ${maxLookback} for ${input.confirmTimeframe} candles`);
+    }
+    if (!Number.isInteger(input.confirmCandles) || input.confirmCandles < 1 || input.confirmCandles > 5) throw new BadRequestException('Confirmation candles must be between 1 and 5');
+    if (input.rsiMax !== null && !(input.rsiMax >= 5 && input.rsiMax <= 60)) throw new BadRequestException('RSI threshold must be between 5 and 60 when set');
+    if (typeof input.dcaRequiresConfirmation !== 'boolean') throw new BadRequestException('DCA confirmation must be true or false');
+    if (input.stopLossPercent !== null && !(input.stopLossPercent >= 0.5 && input.stopLossPercent <= 90)) {
+      throw new BadRequestException('Stop-loss must be between 0.5% and 90% when set');
     }
   }
 }

@@ -7,6 +7,7 @@ import type {
   BacktestSimulationTrade,
 } from './backtest-buy-hold-simulator.service';
 import { RecoveryStrategyService } from './recovery-strategy.service';
+import { evaluateEntrySignal, requiredCandles, type EntrySignalConfig, type SignalCandle } from './entry-signal';
 
 export type BacktestDcaSimulationInput = {
   initialCapital: Prisma.Decimal | string | number;
@@ -29,6 +30,14 @@ export type BacktestDcaSimulationInput = {
   recoveryMultipliers?: number[];
   recoveryTakeProfitPercent?: Prisma.Decimal | string | number;
   continuousCycles?: boolean;
+  /** Dip/bounce rule settings; candles must then carry open, high and low, on the rule's timeframe. */
+  signalConfig?: EntrySignalConfig;
+  /** Open each cycle only when the dip-and-bounce rule fires (live DIP_CONFIRMATION mode). */
+  dipEntry?: boolean;
+  /** DCA and recovery buys also wait for a bounce candle. */
+  dcaRequiresConfirmation?: boolean;
+  /** Sell the whole basket once the close is this far below its average entry. */
+  stopLossPercent?: number | null;
 };
 
 type IndependentPosition = {
@@ -126,6 +135,30 @@ export class BacktestDcaSimulatorService {
       );
     }
 
+    const usesSignals = Boolean(input.dipEntry || input.dcaRequiresConfirmation);
+    if (usesSignals && !input.signalConfig) throw new BadRequestException('Entry rule settings are required for dip entries');
+    const signalCandles: SignalCandle[] | null = usesSignals
+      ? input.candles.map((candle) => {
+          if (candle.open === undefined || candle.high === undefined || candle.low === undefined) {
+            throw new BadRequestException('The dip entry rule needs full open/high/low/close candles');
+          }
+          return { open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: Number(candle.close) };
+        })
+      : null;
+    const signalWindow = input.signalConfig ? requiredCandles(input.signalConfig) + 2 : 0;
+    // Each candle is treated as just closed, exactly like the live runner, which only reads closed candles.
+    const signalAt = (index: number, requireDip: boolean) => evaluateEntrySignal(
+      signalCandles!.slice(Math.max(0, index - signalWindow + 1), index + 1), input.signalConfig!, { requireDip },
+    ).ok;
+    const stopLossPercent = input.stopLossPercent === null || input.stopLossPercent === undefined
+      ? null
+      : new Prisma.Decimal(input.stopLossPercent);
+    if (stopLossPercent !== null && (stopLossPercent.lessThanOrEqualTo(0) || stopLossPercent.greaterThanOrEqualTo(100))) {
+      throw new BadRequestException('Stop-loss percent must be between 0 and 100');
+    }
+    let cycleCount = 0;
+    let stopLossCount = 0;
+
     const feeRate = feePercent.div(100);
     const buySlippageFactor = new Prisma.Decimal(1).add(slippagePercent.div(100));
     const sellSlippageFactor = new Prisma.Decimal(1).sub(slippagePercent.div(100));
@@ -176,12 +209,17 @@ export class BacktestDcaSimulatorService {
       }
 
       while (!recoveryMode && entries < input.maxEntries) {
+        if (entries === 0 && input.dipEntry) {
+          if (!signalAt(candleIndex, true)) break;
+          cycleEntryPrice = marketPrice;
+        }
         const nextLevel = entries + 1;
         const triggerPercent = nextLevel >= independentFromLevel ? subPositionTriggerPercent : priceDeviationPercent;
         const triggerPrice = entries === 0
           ? cycleEntryPrice
           : lastEntryPrice.mul(new Prisma.Decimal(1).sub(triggerPercent.div(100)));
         if (marketPrice.greaterThan(triggerPrice)) break;
+        if (entries > 0 && input.dcaRequiresConfirmation && !signalAt(candleIndex, false)) break;
 
         const configuredMultiplier = entries > 0 ? volumeMultipliers[entries - 1] : undefined;
         const allocation = baseOrderQuote === null
@@ -246,6 +284,7 @@ export class BacktestDcaSimulatorService {
           remainingRiskBudget: Prisma.Decimal.min(riskRemaining, quoteBalance).toNumber(),
         });
         if (!leg || marketPrice.greaterThan(leg.triggerPrice) || leg.quoteAmount <= 0) break;
+        if (input.dcaRequiresConfirmation && !signalAt(candleIndex, false)) break;
 
         const spend = Prisma.Decimal.min(new Prisma.Decimal(leg.quoteAmount), quoteBalance, riskRemaining);
         if (!spend.greaterThan(0)) break;
@@ -273,7 +312,45 @@ export class BacktestDcaSimulatorService {
         });
       }
 
-      if (takeProfitPercent !== null) {
+      let stoppedOut = false;
+      if (stopLossPercent !== null) {
+        const basketQuantity = independentPositions.reduce((sum, position) => sum.add(position.quantity), parentQuantity);
+        if (basketQuantity.greaterThan(0)) {
+          const stopPrice = currentExposure().div(basketQuantity).mul(new Prisma.Decimal(1).sub(stopLossPercent.div(100)));
+          if (marketPrice.lessThanOrEqualTo(stopPrice)) {
+            const executionPrice = marketPrice.mul(sellSlippageFactor);
+            const sell = (quantity: Prisma.Decimal, costQuote: Prisma.Decimal, type: BacktestTradeType, level: number, independent: boolean) => {
+              const grossProceeds = quantity.mul(executionPrice);
+              const feeQuote = grossProceeds.mul(feeRate);
+              const netProceeds = grossProceeds.sub(feeQuote);
+              quoteBalance = quoteBalance.add(netProceeds);
+              trades.push({
+                type, level, independent, executedAt,
+                price: executionPrice.toFixed(12), quantity: quantity.toFixed(12), quoteAmount: grossProceeds.toFixed(8),
+                feeQuote: feeQuote.toFixed(8), realizedPnlQuote: netProceeds.sub(costQuote).toFixed(8),
+              });
+              exits += 1;
+            };
+            for (let index = independentPositions.length - 1; index >= 0; index -= 1) {
+              const position = independentPositions[index];
+              sell(position.quantity, position.costQuote, BacktestTradeType.INDEPENDENT_EXIT, position.level, true);
+            }
+            independentPositions.splice(0, independentPositions.length);
+            if (parentQuantity.greaterThan(0)) {
+              sell(parentQuantity, parentCostQuote, BacktestTradeType.PARENT_EXIT, Math.max(1, Math.min(entries, independentFromLevel - 1)), false);
+              parentQuantity = new Prisma.Decimal(0);
+              parentCostQuote = new Prisma.Decimal(0);
+            }
+            recoveryMode = false;
+            recoveryDcaCount = 0;
+            recoveryAnchorPrice = null;
+            stopLossCount += 1;
+            stoppedOut = true;
+          }
+        }
+      }
+
+      if (takeProfitPercent !== null && !stoppedOut) {
         if (recoveryMode) {
           const basketQuantity = independentPositions.reduce(
             (sum, position) => sum.add(position.quantity),
@@ -400,6 +477,7 @@ export class BacktestDcaSimulatorService {
         !parentQuantity.greaterThan(0) &&
         independentPositions.length === 0
       ) {
+        if (!awaitingNewCycle) cycleCount += 1;
         awaitingNewCycle = true;
       }
 
@@ -444,6 +522,8 @@ export class BacktestDcaSimulatorService {
       returnPercent: returnPercent.toFixed(6),
       maxDrawdownPercent: maxDrawdownPercent.toFixed(6),
       tradeCount: entryTrades + exits,
+      cycleCount,
+      stopLossCount,
       trades,
       equityPoints,
     };

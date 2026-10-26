@@ -25,10 +25,18 @@ describe('RiskBudgetService independent start level', () => {
     );
   });
 
-  it.each([-1, 1.5, 51])('rejects invalid maximum DCA order count %s', (maxDcaOrders) => {
+  it.each([-1, 1.5, 201])('rejects invalid maximum DCA order count %s', (maxDcaOrders) => {
     expect(() => service.buildPlan({ ...base, maxDcaOrders, independentFromLevel: 5 })).toThrow(
-      'maxDcaOrders must be an integer between 0 and 50',
+      'maxDcaOrders must be an integer between 0 and 200',
     );
+  });
+
+  it('plans many equal-size levels until the budget runs out', () => {
+    const plan = service.buildPlan({
+      ...base, riskBudgetQuote: 100, baseOrderQuote: 10, maxDcaOrders: 100, dcaMultiplier: 1, dcaMultipliers: [], independentFromLevel: 102,
+    });
+    expect(plan).toHaveLength(10);
+    expect(plan.every((level) => level.quoteAmount === 10)).toBe(true);
   });
 
   it('uses the configured multiplier for each DCA level instead of geometric sizing', () => {

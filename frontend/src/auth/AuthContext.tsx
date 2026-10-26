@@ -6,7 +6,7 @@ type AuthContextValue = {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (fullName: string, email: string, password: string) => Promise<void>;
+  register: (fullName: string, email: string, password: string, referralCode?: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -52,8 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(result.accessToken);
       setUser(result.user);
     },
-    async register(fullName, email, password) {
-      const result = await api.register({ fullName, email, password, deviceId: deviceId() });
+    async register(fullName, email, password, referralCode) {
+      const result = await api.register({ fullName, email, password, deviceId: deviceId(), referralCode: referralCode?.trim() || undefined });
       localStorage.setItem(TOKEN_KEY, result.accessToken);
       setToken(result.accessToken);
       setUser(result.user);

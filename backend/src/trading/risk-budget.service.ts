@@ -1,5 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 
+/**
+ * Upper bound on DCA levels. High enough for "keep buying lower until the
+ * budget runs out" strategies; the risk budget is the real limit.
+ */
+export const MAX_DCA_LEVELS = 200;
+
 export interface DcaPlanInput {
   riskBudgetQuote: number;
   baseOrderQuote: number;
@@ -68,8 +74,8 @@ export class RiskBudgetService {
   private validate(input: DcaPlanInput) {
     if (input.riskBudgetQuote <= 0) throw new BadRequestException('Risk budget must be positive');
     if (input.baseOrderQuote <= 0) throw new BadRequestException('Base order must be positive');
-    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 0 || input.maxDcaOrders > 50) {
-      throw new BadRequestException('maxDcaOrders must be an integer between 0 and 50');
+    if (!Number.isInteger(input.maxDcaOrders) || input.maxDcaOrders < 0 || input.maxDcaOrders > MAX_DCA_LEVELS) {
+      throw new BadRequestException(`maxDcaOrders must be an integer between 0 and ${MAX_DCA_LEVELS}`);
     }
     if (input.dcaStepPercent <= 0) throw new BadRequestException('DCA step must be positive');
     if (input.dcaMultiplier < 1) throw new BadRequestException('DCA multiplier cannot be below 1');
